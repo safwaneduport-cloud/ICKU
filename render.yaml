@@ -1,0 +1,30 @@
+# Render Blueprint — deploys ICKU as one web service (API + built React app)
+# plus a managed PostgreSQL database. Import this repo on render.com and it
+# picks this file up automatically. Secrets (JWT) are generated for you.
+services:
+  - type: web
+    name: icku
+    runtime: node
+    plan: free
+    buildCommand: npm install && npm run build
+    startCommand: npm start
+    healthCheckPath: /api/v1/health
+    envVars:
+      - key: NODE_ENV
+        value: production
+      - key: JWT_ACCESS_SECRET
+        generateValue: true
+      - key: JWT_REFRESH_SECRET
+        generateValue: true
+      - key: JWT_ACCESS_TTL
+        value: 15m
+      - key: JWT_REFRESH_TTL
+        value: 7d
+      - key: DATABASE_URL
+        fromDatabase:
+          name: icku-db
+          property: connectionString
+
+databases:
+  - name: icku-db
+    plan: free

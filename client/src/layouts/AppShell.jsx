@@ -1,0 +1,97 @@
+import { NavLink, Outlet } from 'react-router-dom';
+import { useAuth } from '../store/AuthContext.jsx';
+
+const NAV = [
+  { to: '/', label: 'Overview', end: true },
+  { to: '/events', label: 'Tasks & Events' },
+  { to: '/okrs', label: 'OKRs & Checklists' },
+  { to: '/meetings', label: 'Meetings' },
+  { to: '/workspaces', label: 'Workspaces' },
+  { to: '/approvals', label: 'Approvals' },
+  { to: '/attendance', label: 'Attendance' },
+  { to: '/leave', label: 'Leave' },
+  { to: '/payroll', label: 'Payroll' },
+  { to: '/onboarding', label: 'Onboarding' },
+  { to: '/exit', label: 'Exit' },
+  { to: '/expenses', label: 'Expenses' },
+  { to: '/assets', label: 'Assets' },
+  { to: '/helpdesk', label: 'Helpdesk' },
+  { to: '/knowledge', label: 'Knowledge Base' },
+  { to: '/announcements', label: 'Announcements' },
+  { to: '/engagement', label: 'Engagement' },
+  { to: '/org', label: 'Organization' },
+];
+
+function initials(name = '') {
+  return name.split(' ').map((w) => w[0]).slice(0, 2).join('').toUpperCase();
+}
+
+export default function AppShell() {
+  const { user, logout } = useAuth();
+  const isAdmin = user?.id === 'ceo' || user?.role === 'HR Head';
+  const isReports = isAdmin || user?.tier === 'Leadership';
+  const nav = [
+    ...NAV,
+    ...(isReports ? [{ to: '/reports', label: 'Reports' }] : []),
+    ...(isAdmin ? [{ to: '/admin', label: 'Admin Console' }] : []),
+  ];
+
+  return (
+    <div className="flex min-h-screen">
+      {/* Sidebar */}
+      <aside className="flex max-h-screen w-60 flex-col border-r border-line bg-white">
+        <div className="px-5 py-5">
+          <div className="text-[10px] font-mono uppercase tracking-widest text-ochre">
+            Company OS
+          </div>
+          <div className="font-serif text-2xl font-bold text-pine">ICKU</div>
+        </div>
+        <nav className="flex flex-1 flex-col gap-1 overflow-y-auto px-3">
+          {nav.map((n) => (
+            <NavLink
+              key={n.to}
+              to={n.to}
+              end={n.end}
+              className={({ isActive }) =>
+                `rounded-lg px-3 py-2 text-sm font-medium transition ${
+                  isActive ? 'bg-pine text-white' : 'text-ink-soft hover:bg-pine-tint hover:text-pine'
+                }`
+              }
+            >
+              {n.label}
+            </NavLink>
+          ))}
+        </nav>
+        <div className="border-t border-line p-3">
+          <div className="flex items-center gap-3">
+            <div className="flex h-9 w-9 items-center justify-center rounded-lg bg-pine text-xs font-semibold text-white">
+              {initials(user?.name)}
+            </div>
+            <div className="min-w-0">
+              <div className="truncate text-sm font-medium">{user?.name}</div>
+              <div className="truncate text-xs text-ink-soft">{user?.tier}</div>
+            </div>
+          </div>
+          <button
+            onClick={logout}
+            className="mt-3 w-full rounded-lg border border-line py-1.5 text-xs text-ink-soft hover:border-brick hover:text-brick"
+          >
+            Sign out
+          </button>
+        </div>
+      </aside>
+
+      {/* Main */}
+      <div className="flex-1">
+        <header className="border-b border-line bg-white/60 px-8 py-4">
+          <div className="text-[11px] font-mono uppercase tracking-widest text-ochre">
+            Signed in as {user?.name} · {user?.role}
+          </div>
+        </header>
+        <main className="px-8 py-8">
+          <Outlet />
+        </main>
+      </div>
+    </div>
+  );
+}

@@ -1,0 +1,588 @@
+// Prisma schema — ICKU
+// Step 1 (Foundation): people & access core. More domains are added per build phase.
+// Docs: https://www.prisma.io/docs
+
+generator client {
+  provider = "prisma-client-js"
+}
+
+datasource db {
+  provider = "postgresql"
+  url      = env("DATABASE_URL")
+}
+
+model Department {
+  id            String         @id
+  name          String
+  color         String
+  users         User[]
+  onboardings   Onboarding[]
+  knowledgeDocs KnowledgeDoc[]
+  createdAt     DateTime       @default(now())
+  updatedAt     DateTime       @updatedAt
+}
+
+model User {
+  id          String  @id
+  name        String
+  email       String? @unique
+  role        String
+  tier        String
+  designation String
+  status      String  @default("active")
+  birthday    String? // "MM-DD"
+  joinedOn    String? // "YYYY-MM-DD"
+
+  // department (nullable so users can exist before dept assignment)
+  departmentId String?
+  department   Department? @relation(fields: [departmentId], references: [id])
+
+  // reporting hierarchy — the self-referencing FK that *is* the org tree
+  reportsToId String?
+  reportsTo   User?   @relation("Reports", fields: [reportsToId], references: [id])
+  reports     User[]  @relation("Reports")
+
+  // login credentials (created in the seed; used by Step 2 Auth)
+  credential AuthCredential?
+
+  // HR — attendance (Step 3)
+  attendance      AttendanceRecord[]
+  regularizations Regularization[]
+
+  // HR — leave (Step 4)
+  leaveRequests LeaveRequest[]
+
+  // HR — payroll (Step 5)
+  salary Salary?
+
+  // Services (Step 6)
+  expenses        Expense[]
+  assetsAssigned  Asset[]  @relation("AssetAssignee")
+  ticketsRaised   Ticket[] @relation("TicketRaiser")
+  ticketsAssigned Ticket[] @relation("TicketAssignee")
+
+  // Work — events & tasks (Step 7)
+  eventsOwned     Event[]        @relation("EventOwner")
+  taskAssignments TaskAssignee[]
+  eventComments   EventComment[]
+
+  // HR — lifecycle (Step 8)
+  exits Exit[]
+
+  // Knowledge (Step 11)
+  knowledgeDocs KnowledgeDoc[] @relation("KnowledgeOwner")
+
+  // Engagement (Step 12)
+  kudosGiven    Kudos[]    @relation("KudosFrom")
+  kudosReceived Kudos[]    @relation("KudosTo")
+  pollVotes     PollVote[]
+
+  // Announcements (Step 14)
+  announcements    Announcement[]    @relation("AnnouncementAuthor")
+  announcementAcks AnnouncementAck[]
+
+  // Personal development (Step 15)
+  duties         Duty[]          @relation("DutyOwner")
+  okrs           Okr[]           @relation("OkrOwner")
+  checklistItems ChecklistItem[] @relation("ChecklistOwner")
+
+  // Meetings (Step 16)
+  meetingsOwned      Meeting[]         @relation("MeetingOwner")
+  meetingAttendances MeetingAttendee[]
+
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  @@index([departmentId])
+  @@index([reportsToId])
+}
+
+model AuthCredential {
+  id           String @id @default(uuid())
+  username     String @unique
+  passwordHash String
+
+  userId String @unique
+  user   User   @relation(fields: [userId], references: [id])
+
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+}
+
+// One row per person per day. `date` is a plain "YYYY-MM-DD" string to avoid
+// timezone drift. Weekly-offs, holidays and future days are NOT stored — they are
+// derived when the month view is built (see attendance.service.buildMonth).
+model AttendanceRecord {
+  id       String  @id @default(uuid())
+  userId   String
+  user     User    @relation(fields: [userId], references: [id])
+  date     String // "YYYY-MM-DD"
+  checkIn  String? // "HH:MM"
+  checkOut String?
+  hours    Float?
+  status   String // present | late | half | absent
+  source   String?
+
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  @@unique([userId, date])
+  @@index([userId])
+  @@index([date])
+}
+
+model Regularization {
+  id           String  @id @default(uuid())
+  userId       String
+  user         User    @relation(fields: [userId], references: [id])
+  date         String // "YYYY-MM-DD" the request is for
+  reason       String
+  status       String  @default("pending") // pending | approved | rejected
+  reviewedById String? // manager who actioned it (plain id, audit field)
+
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  @@index([userId])
+}
+
+// Leave (Step 4)
+model LeaveType {
+  id       String         @id // casual | sick | earned | comp | maternity | lop
+  name     String
+  total    Float // annual allotment (days)
+  color    String
+  sort     Int            @default(0)
+  requests LeaveRequest[]
+}
+
+model LeaveRequest {
+  id           String    @id @default(uuid())
+  userId       String
+  user         User      @relation(fields: [userId], references: [id])
+  typeId       String
+  type         LeaveType @relation(fields: [typeId], references: [id])
+  fromDate     String // "YYYY-MM-DD"
+  toDate       String
+  days         Float
+  half         Boolean   @default(false)
+  reason       String
+  status       String    @default("pending") // pending | approved | rejected | cancelled
+  reviewedById String?
+
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  @@index([userId])
+  @@index([typeId])
+}
+
+// Payroll (Step 5) — base compensation per person; payslip breakup is computed live.
+model Salary {
+  id           String @id @default(uuid())
+  userId       String @unique
+  user         User   @relation(fields: [userId], references: [id])
+  monthlyGross Float
+
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+}
+
+// One payroll run per calendar month; tracks draft → processed.
+model PayrollRun {
+  id            String    @id @default(uuid())
+  year          Int
+  month         Int
+  status        String    @default("draft") // draft | processed
+  processedById String?
+  processedAt   DateTime?
+
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  @@unique([year, month])
+}
+
+// ── Services (Step 6) ────────────────────────────────────────────
+
+// Expense claim — multi-stage: manager → finance → payment → paid.
+model Expense {
+  id           String  @id @default(uuid())
+  userId       String
+  user         User    @relation(fields: [userId], references: [id])
+  category     String
+  amount       Float
+  date         String // "YYYY-MM-DD"
+  description  String
+  receiptUrl   String? // data URL for now (TODO: move to object storage)
+  status       String  @default("manager") // manager | finance | payment | paid | rejected | cancelled
+  reviewedById String?
+
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  @@index([userId])
+}
+
+// Company asset — assignable to a user, returnable to stock.
+model Asset {
+  id           String  @id @default(uuid())
+  type         String
+  tag          String  @unique
+  assignedToId String?
+  assignedTo   User?   @relation("AssetAssignee", fields: [assignedToId], references: [id])
+  assignedDate String?
+  returnDate   String?
+  condition    String  @default("Good")
+  warranty     String  @default("—")
+
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  @@index([assignedToId])
+}
+
+// Helpdesk ticket — raise → assign → resolve → close.
+model Ticket {
+  id         String  @id @default(uuid())
+  userId     String
+  user       User    @relation("TicketRaiser", fields: [userId], references: [id])
+  category   String
+  subject    String
+  status     String  @default("open") // open | assigned | resolved | closed
+  assigneeId String?
+  assignee   User?   @relation("TicketAssignee", fields: [assigneeId], references: [id])
+  raised     String // "YYYY-MM-DD"
+
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  @@index([userId])
+  @@index([assigneeId])
+}
+
+// ── Work: events & tasks (Step 7) ────────────────────────────────
+
+// A recurring company event (result day, exam, batch launch…). Its lifecycle
+// state (undated/upcoming/current/overdue/completed) is computed, not stored.
+model Event {
+  id           String  @id @default(uuid())
+  name         String
+  ownerId      String?
+  owner        User?   @relation("EventOwner", fields: [ownerId], references: [id])
+  recurrence   String  @default("yearly")
+  status       String // confirmed (dated) | tbd | multiple (undated)
+  triggerMonth Int? // 1-12 (academic year derives the year)
+  triggerDay   Int?
+  writeup      String  @default("") // the SOP that persists each year
+  approval     String  @default("approved") // pending | approved | rejected
+  approverId   String?
+  createdById  String?
+
+  tasks       EventTask[]
+  attachments Attachment[]
+  comments    EventComment[]
+
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  @@index([ownerId])
+  @@index([approverId])
+}
+
+model EventTask {
+  id            String         @id @default(uuid())
+  eventId       String
+  event         Event          @relation(fields: [eventId], references: [id], onDelete: Cascade)
+  name          String
+  dueOffset     Int? // days after the event trigger date
+  completed     Boolean        @default(false)
+  completedLate Boolean        @default(false)
+  sort          Int            @default(0)
+  assignees     TaskAssignee[]
+
+  @@index([eventId])
+}
+
+model TaskAssignee {
+  taskId String
+  task   EventTask @relation(fields: [taskId], references: [id], onDelete: Cascade)
+  userId String
+  user   User      @relation(fields: [userId], references: [id])
+
+  @@id([taskId, userId])
+  @@index([userId])
+}
+
+model Attachment {
+  id      String  @id @default(uuid())
+  eventId String
+  event   Event   @relation(fields: [eventId], references: [id], onDelete: Cascade)
+  kind    String // pdf | link
+  label   String
+  url     String?
+}
+
+model EventComment {
+  id        String   @id @default(uuid())
+  eventId   String
+  event     Event    @relation(fields: [eventId], references: [id], onDelete: Cascade)
+  authorId  String
+  author    User     @relation(fields: [authorId], references: [id])
+  parentId  String? // for threaded replies
+  body      String
+  createdAt DateTime @default(now())
+
+  @@index([eventId])
+}
+
+// ── HR lifecycle: onboarding & exit (Step 8) ─────────────────────
+
+// A pre-hire joiner tracked through a fixed joining checklist. `done` holds the
+// completed checklist item labels.
+model Onboarding {
+  id           String      @id @default(uuid())
+  name         String
+  designation  String
+  departmentId String?
+  department   Department? @relation(fields: [departmentId], references: [id])
+  joinDate     String // "YYYY-MM-DD"
+  offer        String      @default("Sent") // Sent | Accepted
+  done         String[]    @default([])
+
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+}
+
+// A resignation with a clearance workflow. Full-&-final is computed on demand
+// from payroll + leave.
+model Exit {
+  id            String   @id @default(uuid())
+  userId        String
+  user          User     @relation(fields: [userId], references: [id])
+  submitted     String // "YYYY-MM-DD"
+  lastDay       String
+  reason        String
+  exitInterview Boolean  @default(false)
+  clearance     String[] @default([]) // completed clearance steps
+  status        String   @default("notice") // notice | withdrawn
+
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  @@index([userId])
+}
+
+// ── Admin Console (Step 9) ───────────────────────────────────────
+
+// The editable RBAC matrix (tier → capability). Presence of a row = granted.
+model TierCapability {
+  tier       String
+  capability String
+
+  @@id([tier, capability])
+}
+
+// System settings toggles: approval workflows, integrations, feature flags.
+model Setting {
+  id          String  @id @default(uuid())
+  category    String // workflow | integration | flag
+  key         String  @unique
+  label       String
+  description String  @default("")
+  chain       String? // for workflow rows
+  enabled     Boolean @default(false)
+  sort        Int     @default(0)
+}
+
+model AuditLog {
+  id        String   @id @default(uuid())
+  actorId   String?
+  action    String
+  createdAt DateTime @default(now())
+
+  @@index([createdAt])
+}
+
+// ── Meetings (Step 16) ───────────────────────────────────────────
+model Meeting {
+  id        String            @id @default(uuid())
+  title     String
+  date      String // "YYYY-MM-DD"
+  time      String // "HH:MM"
+  ownerId   String
+  owner     User              @relation("MeetingOwner", fields: [ownerId], references: [id])
+  recurring String            @default("One-off") // Daily | Weekly | Monthly | One-off
+  agenda    String[]          @default([])
+  minutes   String            @default("")
+  attendees MeetingAttendee[]
+  actions   MeetingAction[]
+  createdAt DateTime          @default(now())
+
+  @@index([date])
+}
+
+model MeetingAttendee {
+  meetingId String
+  meeting   Meeting @relation(fields: [meetingId], references: [id], onDelete: Cascade)
+  userId    String
+  user      User    @relation(fields: [userId], references: [id])
+
+  @@id([meetingId, userId])
+  @@index([userId])
+}
+
+model MeetingAction {
+  id        String  @id @default(uuid())
+  meetingId String
+  meeting   Meeting @relation(fields: [meetingId], references: [id], onDelete: Cascade)
+  text      String
+  ownerId   String?
+  done      Boolean @default(false)
+  sort      Int     @default(0)
+}
+
+// ── Personal development: duties, OKRs, checklists (Step 15) ──────
+// A responsibility set by the person's manager (read-only to the person).
+model Duty {
+  id          String   @id @default(uuid())
+  userId      String
+  user        User     @relation("DutyOwner", fields: [userId], references: [id])
+  text        String
+  createdById String?
+  sort        Int      @default(0)
+  createdAt   DateTime @default(now())
+
+  @@index([userId])
+}
+
+// An objective for a user in a given month. percent = % achieved.
+model Okr {
+  id          String   @id @default(uuid())
+  userId      String
+  user        User     @relation("OkrOwner", fields: [userId], references: [id])
+  year        Int
+  month       Int
+  objective   String
+  target      String
+  percent     Int?
+  createdById String?
+  createdAt   DateTime @default(now())
+
+  @@index([userId, year, month])
+}
+
+// Per user-month approval state for OKRs (set by the manager).
+model OkrApproval {
+  userId   String
+  year     Int
+  month    Int
+  approved Boolean @default(false)
+
+  @@id([userId, year, month])
+}
+
+// A recurring checklist item. `checkedAt` timestamps the last tick; whether it
+// counts as "done" is derived from the current period (daily/weekly/…).
+model ChecklistItem {
+  id          String    @id @default(uuid())
+  userId      String
+  user        User      @relation("ChecklistOwner", fields: [userId], references: [id])
+  frequency   String // Daily | Weekly | Monthly | Yearly
+  text        String
+  checkedAt   DateTime?
+  createdById String?
+  sort        Int       @default(0)
+  createdAt   DateTime  @default(now())
+
+  @@index([userId])
+}
+
+// ── Announcements (Step 14) ──────────────────────────────────────
+model Announcement {
+  id        String            @id @default(uuid())
+  scope     String // Organization | Academics | Growth | Technology | Operations
+  title     String
+  authorId  String
+  author    User              @relation("AnnouncementAuthor", fields: [authorId], references: [id])
+  body      String
+  acks      AnnouncementAck[]
+  createdAt DateTime          @default(now())
+
+  @@index([createdAt])
+}
+
+model AnnouncementAck {
+  announcementId String
+  announcement   Announcement @relation(fields: [announcementId], references: [id], onDelete: Cascade)
+  userId         String
+  user           User         @relation(fields: [userId], references: [id])
+  createdAt      DateTime     @default(now())
+
+  @@id([announcementId, userId])
+}
+
+// ── Engagement (Step 12) ─────────────────────────────────────────
+model Kudos {
+  id        String   @id @default(uuid())
+  fromId    String
+  from      User     @relation("KudosFrom", fields: [fromId], references: [id])
+  toId      String
+  to        User     @relation("KudosTo", fields: [toId], references: [id])
+  message   String
+  createdAt DateTime @default(now())
+
+  @@index([createdAt])
+}
+
+model Poll {
+  id        String       @id @default(uuid())
+  question  String
+  active    Boolean      @default(true)
+  options   PollOption[]
+  votes     PollVote[]
+  createdAt DateTime     @default(now())
+}
+
+model PollOption {
+  id     String     @id @default(uuid())
+  pollId String
+  poll   Poll       @relation(fields: [pollId], references: [id], onDelete: Cascade)
+  label  String
+  sort   Int        @default(0)
+  votes  PollVote[]
+}
+
+model PollVote {
+  id       String     @id @default(uuid())
+  pollId   String
+  poll     Poll       @relation(fields: [pollId], references: [id], onDelete: Cascade)
+  optionId String
+  option   PollOption @relation(fields: [optionId], references: [id], onDelete: Cascade)
+  userId   String
+  user     User       @relation(fields: [userId], references: [id])
+
+  @@unique([pollId, userId])
+}
+
+// ── Knowledge / SOP library (Step 11) ────────────────────────────
+model KnowledgeDoc {
+  id           String      @id @default(uuid())
+  title        String
+  type         String // SOP | Policy | Guide | FAQ | Manual
+  departmentId String?
+  department   Department? @relation(fields: [departmentId], references: [id])
+  ownerId      String?
+  owner        User?       @relation("KnowledgeOwner", fields: [ownerId], references: [id])
+  body         String      @default("")
+  link         String? // optional external doc URL
+  eventId      String? // optional link to an event
+  tags         String[]    @default([])
+  attachments  Json? // [{ kind, label, url }]
+
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  @@index([type])
+  @@index([departmentId])
+}
