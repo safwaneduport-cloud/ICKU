@@ -8,6 +8,8 @@ generator client {
 
 datasource db {
   provider = "postgresql"
+  // Local dev: your local Postgres. Production: Supabase Session pooler (IPv4,
+  // port 5432) — one connection string that serves both the app and migrations.
   url      = env("DATABASE_URL")
 }
 

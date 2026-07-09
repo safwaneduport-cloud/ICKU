@@ -1,6 +1,9 @@
-# Render Blueprint — deploys ICKU as one web service (API + built React app)
-# plus a managed PostgreSQL database. Import this repo on render.com and it
-# picks this file up automatically. Secrets (JWT) are generated for you.
+# Render Blueprint — deploys ICKU as one web service (API + built React app).
+# The database lives on SUPABASE (managed PostgreSQL), so there is no Render
+# database here. Import this repo on render.com and it picks this file up
+# automatically. Secrets (JWT) are generated for you; the two Supabase
+# connection strings you paste in at deploy time (they hold your DB password,
+# so they are NOT stored in this file).
 services:
   - type: web
     name: icku
@@ -20,11 +23,8 @@ services:
         value: 15m
       - key: JWT_REFRESH_TTL
         value: 7d
+      # Supabase connection string — Render prompts you to enter this when you
+      # apply the blueprint (sync:false keeps it out of the repo, since it holds
+      # your DB password). Use the Supabase "Session pooler" string (port 5432).
       - key: DATABASE_URL
-        fromDatabase:
-          name: icku-db
-          property: connectionString
-
-databases:
-  - name: icku-db
-    plan: free
+        sync: false
