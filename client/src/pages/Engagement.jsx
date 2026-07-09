@@ -1,6 +1,7 @@
 import { useState } from 'react';
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query';
 import { useAuth } from '../store/AuthContext.jsx';
+import { useProfile } from '../store/ProfileContext.jsx';
 import { getEngagement, giveKudos, votePoll } from '../api/engagement.api.js';
 import { getUsers } from '../api/users.api.js';
 
@@ -16,6 +17,7 @@ function Avatar({ name, color }) {
 
 export default function Engagement() {
   const q = useQuery({ queryKey: ['engagement'], queryFn: getEngagement, retry: false });
+  const { openProfile } = useProfile();
   const [showKudos, setShowKudos] = useState(false);
   const d = q.data;
 
@@ -35,11 +37,11 @@ export default function Engagement() {
           <div className="mt-3 space-y-2">
             {d.birthdays.length === 0 && <p className="text-sm text-ink-soft">No birthdays this month.</p>}
             {d.birthdays.map((u) => (
-              <div key={u.id} className="flex items-center gap-3">
+              <button key={u.id} onClick={() => openProfile(u.id)} className="flex w-full items-center gap-3 rounded-lg px-1 py-0.5 text-left hover:bg-pine-tint">
                 <Avatar name={u.name} color={u.color} />
                 <span className="flex-1 text-sm font-medium">{u.name}</span>
                 <span className="text-xs text-ink-soft">{d.month.slice(0, 3)} {u.day}</span>
-              </div>
+              </button>
             ))}
           </div>
         </section>
@@ -53,11 +55,11 @@ export default function Engagement() {
           <div className="mt-3 space-y-2">
             {d.anniversaries.length === 0 && <p className="text-sm text-ink-soft">No anniversaries this month.</p>}
             {d.anniversaries.map((u) => (
-              <div key={u.id} className="flex items-center gap-3">
+              <button key={u.id} onClick={() => openProfile(u.id)} className="flex w-full items-center gap-3 rounded-lg px-1 py-0.5 text-left hover:bg-pine-tint">
                 <Avatar name={u.name} color={u.color} />
                 <span className="flex-1 text-sm font-medium">{u.name}</span>
                 <span className="text-xs text-ink-soft">{u.years} yr{u.years > 1 ? 's' : ''}</span>
-              </div>
+              </button>
             ))}
           </div>
         </section>
@@ -75,7 +77,11 @@ export default function Engagement() {
         <div className="mt-4 grid gap-3 sm:grid-cols-2">
           {d.kudos.map((k) => (
             <div key={k.id} className="rounded-xl border border-line p-4">
-              <div className="text-sm"><strong>{k.from.name}</strong> <span className="text-ink-soft">→</span> <strong>{k.to.name}</strong></div>
+              <div className="text-sm">
+                <button onClick={() => openProfile(k.from.id)} className="font-semibold text-pine hover:underline">{k.from.name}</button>
+                <span className="text-ink-soft"> → </span>
+                <button onClick={() => openProfile(k.to.id)} className="font-semibold text-pine hover:underline">{k.to.name}</button>
+              </div>
               <p className="mt-1 text-sm text-ink-soft">{k.message}</p>
             </div>
           ))}

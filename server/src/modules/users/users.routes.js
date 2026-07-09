@@ -1,5 +1,5 @@
 import { Router } from 'express';
-import { getUsers, getUser, getReports } from './users.controller.js';
+import { getUsers, getUser, getReports, getProfile } from './users.controller.js';
 
 const router = Router();
 
@@ -9,5 +9,7 @@ router.get('/', getUsers);
 router.get('/:id', getUser);
 // GET /api/v1/users/:id/reports  (direct reports)
 router.get('/:id/reports', getReports);
+// GET /api/v1/users/:id/profile  (rich cross-module snapshot for the profile drawer)
+router.get('/:id/profile', getProfile);
 
 export default router;

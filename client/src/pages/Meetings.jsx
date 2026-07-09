@@ -1,6 +1,7 @@
 import { useState } from 'react';
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query';
 import { useAuth } from '../store/AuthContext.jsx';
+import { useProfile } from '../store/ProfileContext.jsx';
 import { getUsers } from '../api/users.api.js';
 import { meetingsMeta, getMeetings, getMeeting, createMeeting, updateMinutes, addMeetingAction, toggleMeetingAction } from '../api/collab.api.js';
 import AssignPicker from '../features/events/AssignPicker.jsx';
@@ -57,6 +58,7 @@ export default function Meetings() {
 
 function MeetingDrawer({ id, onClose }) {
   const { user } = useAuth();
+  const { openProfile } = useProfile();
   const qc = useQueryClient();
   const q = useQuery({ queryKey: ['meeting', id], queryFn: () => getMeeting(id), retry: false });
   const users = useQuery({ queryKey: ['users'], queryFn: getUsers, retry: false });
@@ -88,10 +90,10 @@ function MeetingDrawer({ id, onClose }) {
               <div className="text-xs font-semibold uppercase tracking-wide text-ink-soft">Attendees · {m.attendees.length}</div>
               <div className="mt-2 flex flex-wrap gap-2">
                 {m.attendees.map((a) => (
-                  <span key={a.id} className="flex items-center gap-1.5 rounded-full border border-line bg-white py-1 pl-1 pr-3 text-xs">
+                  <button key={a.id} onClick={() => openProfile(a.id)} className="flex items-center gap-1.5 rounded-full border border-line bg-white py-1 pl-1 pr-3 text-xs transition hover:border-pine">
                     <span className="flex h-6 w-6 items-center justify-center rounded-full bg-pine text-[10px] font-semibold text-white">{initials(a.name)}</span>
                     {a.name}
-                  </span>
+                  </button>
                 ))}
               </div>
             </section>

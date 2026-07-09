@@ -1,5 +1,7 @@
 import { NavLink, Outlet } from 'react-router-dom';
 import { useAuth } from '../store/AuthContext.jsx';
+import { ProfileProvider, useProfile } from '../store/ProfileContext.jsx';
+import NotificationBell from '../features/notifications/NotificationBell.jsx';
 
 const NAV = [
   { to: '/', label: 'Overview', end: true },
@@ -26,8 +28,9 @@ function initials(name = '') {
   return name.split(' ').map((w) => w[0]).slice(0, 2).join('').toUpperCase();
 }
 
-export default function AppShell() {
+function Shell() {
   const { user, logout } = useAuth();
+  const { openProfile } = useProfile();
   const isAdmin = user?.id === 'ceo' || user?.role === 'HR Head';
   const isReports = isAdmin || user?.tier === 'Leadership';
   const nav = [
@@ -63,7 +66,11 @@ export default function AppShell() {
           ))}
         </nav>
         <div className="border-t border-line p-3">
-          <div className="flex items-center gap-3">
+          <button
+            onClick={() => user?.id && openProfile(user.id)}
+            className="flex w-full items-center gap-3 rounded-lg p-1 text-left transition hover:bg-pine-tint"
+            title="View my profile"
+          >
             <div className="flex h-9 w-9 items-center justify-center rounded-lg bg-pine text-xs font-semibold text-white">
               {initials(user?.name)}
             </div>
@@ -71,7 +78,7 @@ export default function AppShell() {
               <div className="truncate text-sm font-medium">{user?.name}</div>
               <div className="truncate text-xs text-ink-soft">{user?.tier}</div>
             </div>
-          </div>
+          </button>
           <button
             onClick={logout}
             className="mt-3 w-full rounded-lg border border-line py-1.5 text-xs text-ink-soft hover:border-brick hover:text-brick"
@@ -83,15 +90,24 @@ export default function AppShell() {
 
       {/* Main */}
       <div className="flex-1">
-        <header className="border-b border-line bg-white/60 px-8 py-4">
+        <header className="flex items-center justify-between border-b border-line bg-white/60 px-8 py-4">
           <div className="text-[11px] font-mono uppercase tracking-widest text-ochre">
             Signed in as {user?.name} · {user?.role}
           </div>
+          <NotificationBell />
         </header>
         <main className="px-8 py-8">
           <Outlet />
         </main>
       </div>
     </div>
+  );
+}
+
+export default function AppShell() {
+  return (
+    <ProfileProvider>
+      <Shell />
+    </ProfileProvider>
   );
 }

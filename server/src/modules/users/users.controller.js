@@ -23,3 +23,11 @@ export async function getReports(req, res, next) {
     next(err);
   }
 }
+
+export async function getProfile(req, res, next) {
+  try {
+    res.json({ data: await service.getProfile(req.params.id), error: null });
+  } catch (err) {
+    next(err);
+  }
+}

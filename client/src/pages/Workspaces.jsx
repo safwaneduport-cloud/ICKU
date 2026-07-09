@@ -1,6 +1,7 @@
 import { useState } from 'react';
 import { useQuery } from '@tanstack/react-query';
 import { getWorkspaces, getWorkspace } from '../api/collab.api.js';
+import { useProfile } from '../store/ProfileContext.jsx';
 
 const MONTHS = ['Jan', 'Feb', 'Mar', 'Apr', 'May', 'Jun', 'Jul', 'Aug', 'Sep', 'Oct', 'Nov', 'Dec'];
 const STATE = {
@@ -44,6 +45,7 @@ function Grid({ onOpen }) {
 
 function Hub({ deptId, onBack }) {
   const q = useQuery({ queryKey: ['workspace', deptId], queryFn: () => getWorkspace(deptId), retry: false });
+  const { openProfile } = useProfile();
   const w = q.data;
   if (!w) return <p className="text-ink-soft">Loading…</p>;
   return (
@@ -59,11 +61,11 @@ function Hub({ deptId, onBack }) {
           <div className="text-xs font-semibold uppercase tracking-wide text-ink-soft">People · {w.members.length}</div>
           <div className="mt-3 space-y-2">
             {w.members.map((m) => (
-              <div key={m.id} className="flex items-center gap-2 text-sm">
+              <button key={m.id} onClick={() => openProfile(m.id)} className="flex w-full items-center gap-2 rounded-lg px-1 py-0.5 text-left text-sm hover:bg-pine-tint">
                 <span className="flex h-7 w-7 items-center justify-center rounded-lg text-[10px] font-semibold text-white" style={{ background: w.department.color }}>{initials(m.name)}</span>
                 <span className="flex-1">{m.name}</span>
                 <span className="rounded bg-paper px-1.5 py-0.5 font-mono text-[10px]">{m.tier}</span>
-              </div>
+              </button>
             ))}
           </div>
         </section>
