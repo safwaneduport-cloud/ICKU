@@ -3,25 +3,47 @@ import { useAuth } from '../store/AuthContext.jsx';
 import { ProfileProvider, useProfile } from '../store/ProfileContext.jsx';
 import NotificationBell from '../features/notifications/NotificationBell.jsx';
 
-const NAV = [
-  { to: '/', label: 'Overview', end: true },
-  { to: '/events', label: 'Tasks & Events' },
-  { to: '/okrs', label: 'OKRs & Checklists' },
-  { to: '/meetings', label: 'Meetings' },
-  { to: '/workspaces', label: 'Workspaces' },
-  { to: '/approvals', label: 'Approvals' },
-  { to: '/attendance', label: 'Attendance' },
-  { to: '/leave', label: 'Leave' },
-  { to: '/payroll', label: 'Payroll' },
-  { to: '/onboarding', label: 'Onboarding' },
-  { to: '/exit', label: 'Exit' },
-  { to: '/expenses', label: 'Expenses' },
-  { to: '/assets', label: 'Assets' },
-  { to: '/helpdesk', label: 'Helpdesk' },
-  { to: '/knowledge', label: 'Knowledge Base' },
-  { to: '/announcements', label: 'Announcements' },
-  { to: '/engagement', label: 'Engagement' },
-  { to: '/org', label: 'Organization' },
+// Sidebar navigation, grouped into labeled sections. A group with no `title`
+// renders its items without a header (used for the standalone Overview link).
+const NAV_GROUPS = [
+  { items: [{ to: '/', label: 'Overview', end: true }] },
+  {
+    title: 'Work',
+    items: [
+      { to: '/events', label: 'Tasks & Events' },
+      { to: '/okrs', label: 'OKRs & Checklists' },
+      { to: '/meetings', label: 'Meetings' },
+      { to: '/approvals', label: 'Approvals' },
+      { to: '/workspaces', label: 'Workspaces' },
+    ],
+  },
+  {
+    title: 'HR',
+    items: [
+      { to: '/attendance', label: 'Attendance' },
+      { to: '/leave', label: 'Leave' },
+      { to: '/payroll', label: 'Payroll' },
+      { to: '/onboarding', label: 'Onboarding' },
+      { to: '/exit', label: 'Exit' },
+    ],
+  },
+  {
+    title: 'Services',
+    items: [
+      { to: '/expenses', label: 'Expenses' },
+      { to: '/assets', label: 'Assets' },
+      { to: '/helpdesk', label: 'Helpdesk' },
+    ],
+  },
+  {
+    title: 'Company',
+    items: [
+      { to: '/org', label: 'Organization' },
+      { to: '/knowledge', label: 'Knowledge Base' },
+      { to: '/announcements', label: 'Announcements' },
+      { to: '/engagement', label: 'Engagement' },
+    ],
+  },
 ];
 
 function initials(name = '') {
@@ -33,10 +55,13 @@ function Shell() {
   const { openProfile } = useProfile();
   const isAdmin = user?.id === 'ceo' || user?.role === 'HR Head';
   const isReports = isAdmin || user?.tier === 'Leadership';
-  const nav = [
-    ...NAV,
+  const adminItems = [
     ...(isReports ? [{ to: '/reports', label: 'Reports' }] : []),
     ...(isAdmin ? [{ to: '/admin', label: 'Admin Console' }] : []),
+  ];
+  const groups = [
+    ...NAV_GROUPS,
+    ...(adminItems.length ? [{ title: 'Admin', items: adminItems }] : []),
   ];
 
   return (
@@ -49,20 +74,31 @@ function Shell() {
           </div>
           <div className="font-serif text-2xl font-bold text-pine">ICKU</div>
         </div>
-        <nav className="flex flex-1 flex-col gap-1 overflow-y-auto px-3">
-          {nav.map((n) => (
-            <NavLink
-              key={n.to}
-              to={n.to}
-              end={n.end}
-              className={({ isActive }) =>
-                `rounded-lg px-3 py-2 text-sm font-medium transition ${
-                  isActive ? 'bg-pine text-white' : 'text-ink-soft hover:bg-pine-tint hover:text-pine'
-                }`
-              }
-            >
-              {n.label}
-            </NavLink>
+        <nav className="flex flex-1 flex-col overflow-y-auto px-3 pb-4">
+          {groups.map((group, gi) => (
+            <div key={group.title || 'top'} className={group.title ? 'mt-5' : ''}>
+              {group.title && (
+                <div className="px-3 pb-1 text-[10px] font-mono font-semibold uppercase tracking-widest text-ink-soft/60">
+                  {group.title}
+                </div>
+              )}
+              <div className="flex flex-col gap-0.5">
+                {group.items.map((n) => (
+                  <NavLink
+                    key={n.to}
+                    to={n.to}
+                    end={n.end}
+                    className={({ isActive }) =>
+                      `rounded-lg px-3 py-2 text-sm font-medium transition ${
+                        isActive ? 'bg-pine text-white' : 'text-ink-soft hover:bg-pine-tint hover:text-pine'
+                      }`
+                    }
+                  >
+                    {n.label}
+                  </NavLink>
+                ))}
+              </div>
+            </div>
           ))}
         </nav>
         <div className="border-t border-line p-3">
