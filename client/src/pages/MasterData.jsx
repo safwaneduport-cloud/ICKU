@@ -59,6 +59,25 @@ export default function MasterData() {
   );
 }
 
+const WD = ['S', 'M', 'T', 'W', 'T', 'F', 'S'];
+function WeekdayChips({ offDays, onChange }) {
+  const toggle = (i) => onChange(offDays.includes(i) ? offDays.filter((x) => x !== i).sort() : [...offDays, i].sort());
+  return (
+    <div className="flex gap-0.5">
+      {WD.map((d, i) => (
+        <button
+          key={i}
+          onClick={() => toggle(i)}
+          title={['Sun', 'Mon', 'Tue', 'Wed', 'Thu', 'Fri', 'Sat'][i]}
+          className={`h-6 w-6 rounded text-[10px] font-semibold ${offDays.includes(i) ? 'bg-pine text-white' : 'bg-paper text-ink-soft hover:bg-pine-tint'}`}
+        >
+          {d}
+        </button>
+      ))}
+    </div>
+  );
+}
+
 function OptionsPanel({ type, label }) {
   const qc = useQueryClient();
   const [q, setQ] = useState('');
@@ -75,8 +94,10 @@ function OptionsPanel({ type, label }) {
   };
   const onErr = (e) => setErr(e.response?.data?.error?.message || 'Something went wrong');
 
+  const isWeeklyOff = type === 'weeklyOffPolicy';
   const create = useMutation({ mutationFn: () => createMasterOption(type, adding.trim()), onSuccess: () => { setAdding(''); setErr(''); refresh(); }, onError: onErr });
   const toggle = useMutation({ mutationFn: ({ id, active }) => updateMasterOption(id, { active }), onSuccess: refresh, onError: onErr });
+  const setOffDays = useMutation({ mutationFn: ({ id, offDays }) => updateMasterOption(id, { meta: { offDays } }), onSuccess: refresh, onError: onErr });
   const rename = useMutation({ mutationFn: () => updateMasterOption(editId, { value: editVal.trim() }), onSuccess: () => { setEditId(null); setErr(''); refresh(); }, onError: onErr });
   const del = useMutation({ mutationFn: (id) => deleteMasterOption(id), onSuccess: () => { setErr(''); refresh(); }, onError: onErr });
 
@@ -108,14 +129,15 @@ function OptionsPanel({ type, label }) {
           <thead className="sticky top-0 border-b border-line bg-white text-xs uppercase tracking-wide text-ink-soft">
             <tr>
               <th className="px-4 py-2">Value</th>
+              {isWeeklyOff && <th className="px-4 py-2">Off days</th>}
               <th className="px-4 py-2">Assigned</th>
               <th className="px-4 py-2">Status</th>
               <th className="px-4 py-2 text-right">Actions</th>
             </tr>
           </thead>
           <tbody>
-            {options.isLoading && <tr><td colSpan={4} className="px-4 py-4 text-ink-soft">Loading…</td></tr>}
-            {options.data?.length === 0 && <tr><td colSpan={4} className="px-4 py-6 text-center text-ink-soft">No options{q ? ' match your search' : ''}.</td></tr>}
+            {options.isLoading && <tr><td colSpan={5} className="px-4 py-4 text-ink-soft">Loading…</td></tr>}
+            {options.data?.length === 0 && <tr><td colSpan={5} className="px-4 py-6 text-center text-ink-soft">No options{q ? ' match your search' : ''}.</td></tr>}
             {options.data?.map((o) => (
               <tr key={o.id} className="border-b border-line/60 last:border-0">
                 <td className="px-4 py-2">
@@ -127,6 +149,14 @@ function OptionsPanel({ type, label }) {
                     <span className={o.active ? '' : 'text-ink-soft line-through'}>{o.value}</span>
                   )}
                 </td>
+                {isWeeklyOff && (
+                  <td className="px-4 py-2">
+                    <WeekdayChips
+                      offDays={o.meta?.offDays || []}
+                      onChange={(offDays) => setOffDays.mutate({ id: o.id, offDays })}
+                    />
+                  </td>
+                )}
                 <td className="px-4 py-2 text-ink-soft">{o.inUse}</td>
                 <td className="px-4 py-2">
                   <span className={`rounded px-2 py-0.5 text-xs font-medium ${o.active ? 'bg-sage-tint text-sage' : 'bg-paper text-ink-soft'}`}>

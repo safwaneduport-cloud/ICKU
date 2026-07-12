@@ -8,6 +8,7 @@ import path from 'path';
 import { fileURLToPath } from 'url';
 import { PrismaClient } from '@prisma/client';
 import bcrypt from 'bcryptjs';
+import { WEEKLYOFF_DEFAULTS } from '../src/modules/attendance/policies.lib.js';
 
 const prisma = new PrismaClient();
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
@@ -46,10 +47,12 @@ async function seedMasters(rows) {
     const ordered = [...counts.entries()].sort((a, b) => b[1] - a[1]);
     let sort = 0;
     for (const [value] of ordered) {
+      // Weekly-off policies carry an off-days definition (HR-editable later).
+      const meta = type === 'weeklyOffPolicy' && WEEKLYOFF_DEFAULTS[value] ? { offDays: WEEKLYOFF_DEFAULTS[value] } : undefined;
       await prisma.masterOption.upsert({
         where: { type_value: { type, value } },
         update: {},
-        create: { type, value, sort: sort++ },
+        create: { type, value, sort: sort++, ...(meta ? { meta } : {}) },
       });
       total++;
     }

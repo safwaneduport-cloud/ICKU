@@ -52,7 +52,7 @@ export async function adminOptions(type, q) {
   if (!TYPE[type]) throw new ApiError(404, `Unknown master type: ${type}`);
   const where = { type, ...(q ? { value: { contains: q, mode: 'insensitive' } } : {}) };
   const opts = await prisma.masterOption.findMany({ where, orderBy: [{ sort: 'asc' }, { value: 'asc' }] });
-  return Promise.all(opts.map(async (o) => ({ id: o.id, value: o.value, active: o.active, inUse: await usageOf(type, o.value) })));
+  return Promise.all(opts.map(async (o) => ({ id: o.id, value: o.value, active: o.active, meta: o.meta || null, inUse: await usageOf(type, o.value) })));
 }
 
 export async function createOption(type, value) {
@@ -65,10 +65,11 @@ export async function createOption(type, value) {
   return prisma.masterOption.create({ data: { type, value: v, sort: (max._max.sort ?? 0) + 1 } });
 }
 
-export async function updateOption(id, { value, active }) {
+export async function updateOption(id, { value, active, meta }) {
   const o = await prisma.masterOption.findUnique({ where: { id } });
   if (!o) throw new ApiError(404, 'Option not found');
   const data = {};
+  if (meta !== undefined) data.meta = meta;
   if (value !== undefined) {
     const v = value.trim();
     if (!v) throw new ApiError(400, 'Value cannot be empty');

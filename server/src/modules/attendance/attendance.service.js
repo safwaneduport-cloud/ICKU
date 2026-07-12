@@ -1,6 +1,7 @@
 import { prisma } from '../../config/prisma.js';
 import { ApiError } from '../../middleware/errorHandler.js';
 import { holidayOf, ymd, fmtTime, WORK_START_GRACE } from './attendance.lib.js';
+import { offDaysForPolicy } from './policies.lib.js';
 
 const uniq = (userId, date) => ({ userId_date: { userId, date } });
 
@@ -23,14 +24,17 @@ function summarize(days) {
 }
 
 // Build the full month grid from stored rows + derived off/holiday/upcoming days.
+// Weekly-off days come from the employee's Weekly Off Policy (HR-configurable).
 export async function getMonth(userId, year, month) {
   const m0 = month - 1;
   const daysInMonth = new Date(year, m0 + 1, 0).getDate();
   const prefix = `${year}-${String(month).padStart(2, '0')}`;
-  const rows = await prisma.attendanceRecord.findMany({
-    where: { userId, date: { startsWith: prefix } },
-  });
+  const [rows, user] = await Promise.all([
+    prisma.attendanceRecord.findMany({ where: { userId, date: { startsWith: prefix } } }),
+    prisma.user.findUnique({ where: { id: userId }, select: { weeklyOffPolicy: true, shiftPolicy: true, holidayList: true, leavePlan: true, attendanceCaptureScheme: true } }),
+  ]);
   const byDay = new Map(rows.map((r) => [Number(r.date.slice(8, 10)), r]));
+  const offDays = await offDaysForPolicy(user?.weeklyOffPolicy);
 
   const today = new Date();
   today.setHours(0, 0, 0, 0);
@@ -41,7 +45,7 @@ export async function getMonth(userId, year, month) {
     const rec = byDay.get(d);
     const hol = holidayOf(month, d);
     let status;
-    if (date.getDay() === 0) status = 'off';
+    if (offDays.includes(date.getDay())) status = 'off';
     else if (hol) status = 'holiday';
     else if (date > today) status = 'upcoming';
     else if (rec) status = rec.status;
@@ -59,7 +63,18 @@ export async function getMonth(userId, year, month) {
       holiday: hol?.name ?? null,
     });
   }
-  return { days, summary: summarize(days) };
+  return {
+    days,
+    summary: summarize(days),
+    policies: {
+      weeklyOffPolicy: user?.weeklyOffPolicy || null,
+      shiftPolicy: user?.shiftPolicy || null,
+      holidayList: user?.holidayList || null,
+      leavePlan: user?.leavePlan || null,
+      attendanceCaptureScheme: user?.attendanceCaptureScheme || null,
+      offDays,
+    },
+  };
 }
 
 export async function getToday(userId) {

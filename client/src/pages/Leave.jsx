@@ -1,6 +1,7 @@
 import { useState } from 'react';
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query';
 import { getBalances, getMyRequests, cancelRequest, getTeam, reviewRequest } from '../api/leave.api.js';
+import { getMyProfile } from '../api/employees.api.js';
 import ApplyLeaveModal from '../features/leave/ApplyLeaveModal.jsx';
 
 const STATUS = {
@@ -53,10 +54,22 @@ function MeView() {
   const qc = useQueryClient();
   const balances = useQuery({ queryKey: ['leave-balances'], queryFn: () => getBalances(), retry: false });
   const requests = useQuery({ queryKey: ['leave-requests'], queryFn: getMyRequests, retry: false });
+  const profile = useQuery({ queryKey: ['profile-edit', 'me'], queryFn: getMyProfile, retry: false });
   const cancel = useMutation({ mutationFn: cancelRequest, onSuccess: () => qc.invalidateQueries() });
 
+  const pol = profile.data?.user;
   return (
     <div className="space-y-6">
+      {pol && (
+        <div className="flex flex-wrap gap-2 rounded-xl border border-line bg-white px-3 py-2">
+          {[['Leave Plan', pol.leavePlan], ['Holiday List', pol.holidayList], ['Notice Period', pol.noticePeriod]]
+            .filter(([, v]) => v).map(([label, v]) => (
+              <span key={label} className="rounded-lg bg-paper px-2.5 py-1 text-xs">
+                <span className="text-ink-soft">{label}: </span><span className="font-medium text-ink">{v}</span>
+              </span>
+            ))}
+        </div>
+      )}
       <div className="grid grid-cols-2 gap-3 sm:grid-cols-3 lg:grid-cols-6">
         {(balances.data || []).map((b) => (
           <div key={b.id} className="rounded-2xl border border-line bg-white p-4">

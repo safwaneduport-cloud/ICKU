@@ -48,6 +48,21 @@ export default function MonthLogs({ userId }) {
         <Stat v={s?.absent ?? '—'} l="Absent" />
       </div>
 
+      {q.data?.policies && (
+        <div className="flex flex-wrap gap-2 rounded-xl border border-line bg-white px-3 py-2">
+          {[
+            ['Weekly Off', q.data.policies.weeklyOffPolicy],
+            ['Shift', q.data.policies.shiftPolicy],
+            ['Holiday List', q.data.policies.holidayList],
+            ['Capture', q.data.policies.attendanceCaptureScheme],
+          ].filter(([, v]) => v).map(([label, v]) => (
+            <span key={label} className="rounded-lg bg-paper px-2.5 py-1 text-xs">
+              <span className="text-ink-soft">{label}: </span><span className="font-medium text-ink">{v}</span>
+            </span>
+          ))}
+        </div>
+      )}
+
       <div className="flex w-fit flex-wrap gap-1 rounded-xl border border-line bg-paper p-1">
         {opts.map((o, i) => (
           <button
