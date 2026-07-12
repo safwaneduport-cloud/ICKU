@@ -34,6 +34,7 @@ import meetingRoutes from './modules/meetings/meetings.routes.js';
 import workspaceRoutes from './modules/workspaces/workspaces.routes.js';
 import notificationRoutes from './modules/notifications/notifications.routes.js';
 import messageRoutes from './modules/messages/messages.routes.js';
+import masterRoutes from './modules/masters/masters.routes.js';
 
 export const app = express();
 
@@ -72,6 +73,7 @@ api.use('/meetings', authenticate, meetingRoutes);        // protected
 api.use('/workspaces', authenticate, workspaceRoutes);    // protected
 api.use('/notifications', authenticate, notificationRoutes); // protected
 api.use('/messages', authenticate, messageRoutes);        // protected
+api.use('/masters', authenticate, masterRoutes);          // protected (HR-gated inside)
 app.use('/api/v1', api);
 
 // Unknown /api routes → JSON 404 (never fall through to the SPA).

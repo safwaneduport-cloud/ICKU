@@ -19,3 +19,6 @@ npm-debug.log*
 
 # prisma local
 server/prisma/*.db
+
+# HR employee master data (real PII — never commit)
+server/prisma/.data/

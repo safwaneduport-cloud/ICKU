@@ -97,17 +97,96 @@ model User {
   conversationMembers  ConversationMember[] @relation("ConvMember")
   messagesSent         Message[]            @relation("MessageAuthor")
 
+  // ── Employee master (imported from the HR sheet; all optional) ──────
+  // Canonical fields already above: name(=Full Name), email(=Work Email),
+  // designation(=Job Title), tier, departmentId, reportsToId, birthday, joinedOn.
+  employeeNumber String? @unique
+  firstName      String?
+  middleName     String?
+  lastName       String?
+  displayName    String?
+  // job / org
+  jobTitle              String?
+  secondaryJobTitle     String?
+  subDepartment         String?
+  location              String?
+  country               String?
+  reportingManagerEmpNo String?
+  dottedLineManager     String?
+  // policies (dropdowns → MasterOption values)
+  leavePlan                String?
+  band                     String?
+  payGrade                 String?
+  timeType                 String?
+  workerType               String?
+  shiftPolicy              String?
+  weeklyOffPolicy          String?
+  attendanceTrackingPolicy String?
+  attendanceCaptureScheme  String?
+  holidayList              String?
+  expensePolicy            String?
+  noticePeriod             String?
+  attendanceNumber         String?
+  // personal (self-service editable)
+  dateOfBirth           String?
+  gender                String?
+  maritalStatus         String?
+  marriageDate          String?
+  bloodGroup            String?
+  physicallyHandicapped String?
+  nationality           String?
+  mobilePhone           String?
+  workPhone             String?
+  homePhone             String?
+  personalEmail         String?
+  currentAddrLine1      String?
+  currentAddrLine2      String?
+  currentAddrCity       String?
+  currentAddrState      String?
+  currentAddrZip        String?
+  currentAddrCountry    String?
+  permanentAddrLine1    String?
+  permanentAddrLine2    String?
+  permanentAddrCity     String?
+  permanentAddrState    String?
+  permanentAddrZip      String?
+  permanentAddrCountry  String?
+  fatherName            String?
+  motherName            String?
+  spouseName            String?
+  childrenNames         String?
+  panNumber             String?
+  aadhaarNumber         String?
+  pfNumber              String?
+  uanNumber             String?
+  // lifecycle (excluded from onboarding — Part 6)
+  employmentStatus  String? @default("Working")
+  exitDate          String?
+  exitStatus        String?
+  terminationType   String?
+  terminationReason String?
+  resignationNote   String?
+  costCenter        String?
+  profileComments   String?
+
   createdAt DateTime @default(now())
   updatedAt DateTime @updatedAt
 
   @@index([departmentId])
   @@index([reportsToId])
+  @@index([employeeNumber])
 }
 
 model AuthCredential {
   id           String @id @default(uuid())
   username     String @unique
   passwordHash String
+
+  // Temp-credential visibility for HR: the initial/reset password is kept in
+  // plaintext so HR can see & export it, and is cleared once the employee sets
+  // their own password (passwordChanged=true → HR can no longer see it).
+  tempPassword    String?
+  passwordChanged Boolean @default(false)
 
   userId String @unique
   user   User   @relation(fields: [userId], references: [id])
@@ -643,4 +722,22 @@ model Message {
 
   @@index([conversationId])
   @@index([parentId])
+}
+
+// ─── Master data (Part 7/8) ──────────────────────────────────────────
+// Configurable dropdown values, one row per option. `type` is the property
+// (e.g. "jobTitle", "shiftPolicy"); `value` is the label shown in dropdowns.
+// `meta` holds an optional definition (e.g. a weekly-off rule) for policies.
+model MasterOption {
+  id        String   @id @default(uuid())
+  type      String
+  value     String
+  active    Boolean  @default(true)
+  meta      Json?
+  sort      Int      @default(0)
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  @@unique([type, value])
+  @@index([type])
 }
