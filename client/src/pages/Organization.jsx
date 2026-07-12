@@ -1,17 +1,30 @@
 import { useQuery } from '@tanstack/react-query';
+import { useNavigate } from 'react-router-dom';
 import { getUsers } from '../api/users.api.js';
 import { useProfile } from '../store/ProfileContext.jsx';
+import { useAuth } from '../store/AuthContext.jsx';
 
 export default function Organization() {
   const users = useQuery({ queryKey: ['users'], queryFn: getUsers, retry: false });
   const { openProfile } = useProfile();
+  const { user } = useAuth();
+  const navigate = useNavigate();
+  const isHr = user?.id === 'ceo' || user?.id === 'EP002' || user?.role === 'HR Head';
 
   const nameById = new Map((users.data ?? []).map((u) => [u.id, u.name]));
 
   return (
     <div className="space-y-4">
-      <div className="flex items-baseline justify-between">
+      <div className="flex items-center justify-between gap-2">
         <h1 className="font-serif text-3xl font-bold text-pine">Organization</h1>
+        {isHr && (
+          <button onClick={() => navigate('/onboard-employee')}
+            className="rounded-lg bg-pine px-4 py-2 text-sm font-medium text-white hover:opacity-90">
+            + New Employee
+          </button>
+        )}
+      </div>
+      <div className="flex items-baseline justify-between">
         <span className="font-mono text-xs text-ink-soft">{users.data?.length ?? '—'} people from DB</span>
       </div>
 

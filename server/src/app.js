@@ -36,6 +36,7 @@ import notificationRoutes from './modules/notifications/notifications.routes.js'
 import messageRoutes from './modules/messages/messages.routes.js';
 import masterRoutes from './modules/masters/masters.routes.js';
 import credentialRoutes from './modules/credentials/credentials.routes.js';
+import employeeRoutes from './modules/employees/employees.routes.js';
 
 export const app = express();
 
@@ -76,6 +77,7 @@ api.use('/notifications', authenticate, notificationRoutes); // protected
 api.use('/messages', authenticate, messageRoutes);        // protected
 api.use('/masters', authenticate, masterRoutes);          // protected (HR-gated inside)
 api.use('/credentials', authenticate, credentialRoutes);  // protected (HR-gated + self change-password)
+api.use('/employees', authenticate, employeeRoutes);      // protected (HR-gated onboarding)
 app.use('/api/v1', api);
 
 // Unknown /api routes → JSON 404 (never fall through to the SPA).
