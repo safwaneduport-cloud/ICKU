@@ -1,8 +1,8 @@
 // Employee-master importer (reads the gitignored .data/employees.json produced
 // from the HR sheet). Run stages independently:
 //   node prisma/import.js masters      → seed MasterOption dropdown values
-//   node prisma/import.js employees     → replace the org with the 670 real staff
-//   node prisma/import.js all           → both
+//   node prisma/import.js reset         → WIPE everything, then masters + 670 real staff
+//   node prisma/import.js employees     → import staff into the current DB (no wipe)
 import fs from 'fs';
 import path from 'path';
 import { fileURLToPath } from 'url';
@@ -58,11 +58,23 @@ async function seedMasters(rows) {
   console.log(`Master options seeded: ${total}`);
 }
 
-const stage = process.argv[2] || 'all';
+// Truncate every table (except the migrations ledger) so we can rebuild the org
+// from scratch. CASCADE handles all FKs; non-interactive.
+async function wipe() {
+  console.log('Wiping existing data…');
+  const tables = await prisma.$queryRawUnsafe(
+    `SELECT tablename FROM pg_tables WHERE schemaname='public' AND tablename <> '_prisma_migrations'`
+  );
+  const list = tables.map((t) => `"${t.tablename}"`).join(', ');
+  if (list) await prisma.$executeRawUnsafe(`TRUNCATE TABLE ${list} RESTART IDENTITY CASCADE;`);
+}
+
+const stage = process.argv[2] || 'masters';
 const rows = load();
 (async () => {
-  if (stage === 'masters' || stage === 'all') await seedMasters(rows);
-  if (stage === 'employees' || stage === 'all') {
+  if (stage === 'reset') await wipe();
+  if (stage === 'masters' || stage === 'reset') await seedMasters(rows);
+  if (stage === 'employees' || stage === 'reset') {
     const mod = await import('./import-employees.js');
     await mod.seedEmployees(prisma, rows, bcrypt);
   }

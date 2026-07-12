@@ -3,11 +3,8 @@ import { useNavigate } from 'react-router-dom';
 import { useAuth } from '../store/AuthContext.jsx';
 
 const DEMO = [
-  { u: 'ceo', p: 'ceo@123', label: 'CEO', sub: 'Full admin' },
-  { u: 'cos', p: 'cos@123', label: 'Chief of Staff', sub: 'Ops & media' },
-  { u: 'coursemgr', p: 'cm@123', label: 'Course Manager', sub: 'Class 7,8' },
-  { u: 'hod78', p: 'hod@123', label: 'Academic HOD', sub: 'Class 7,8' },
-  { u: 'hrhead', p: 'hr@123', label: 'HR Head', sub: 'Admin access' },
+  { u: 'keerthanaprakash.eduport', p: 'Eduport@123', label: 'HR Head', sub: 'Keerthana Prakash' },
+  { u: 'ajas', p: 'Eduport@123', label: 'Founder / CEO', sub: 'Ajas Mohammed Jansher' },
 ];
 
 export default function Login() {
@@ -56,7 +53,7 @@ export default function Login() {
               className="mt-1 w-full rounded-lg border border-line px-3 py-2 outline-none focus:border-pine"
               value={username}
               onChange={(e) => setUsername(e.target.value)}
-              placeholder="e.g. ceo"
+              placeholder="e.g. ajas"
               autoFocus
             />
           </label>
@@ -87,7 +84,7 @@ export default function Login() {
 
         <div className="mt-5">
           <div className="mb-2 text-center text-xs uppercase tracking-wide text-ink-soft">
-            Demo accounts — click to fill
+            Quick sign-in · temp password Eduport@123
           </div>
           <div className="flex flex-wrap justify-center gap-2">
             {DEMO.map((d) => (
