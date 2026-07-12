@@ -14,6 +14,21 @@ async function loadMembership(userId, conversationId) {
   return conv;
 }
 
+// Read access: members always; anyone may read an EVENT conversation (event
+// chats are open to whoever can see the event — joining happens on posting).
+async function loadForRead(userId, conversationId) {
+  const conv = await prisma.conversation.findUnique({
+    where: { id: conversationId },
+    include: { members: true },
+  });
+  if (!conv) throw new ApiError(404, 'Conversation not found');
+  const isMember = conv.members.some((m) => m.userId === userId);
+  if (!isMember && conv.type !== 'event') {
+    throw new ApiError(403, 'You are not a member of this conversation');
+  }
+  return conv;
+}
+
 function shapeMessage(m) {
   return {
     id: m.id,
@@ -65,7 +80,8 @@ export async function listConversations(userId) {
       return {
         id: c.id,
         type: c.type,
-        name: c.type === 'group' ? c.name : other?.name || 'Direct message',
+        eventId: c.eventId,
+        name: c.type === 'dm' ? other?.name || 'Direct message' : c.name,
         memberCount: c.members.length,
         lastMessage: last
           ? {
@@ -90,12 +106,14 @@ export async function getConversation(userId, conversationId) {
     include: { members: { include: { user: { select: { id: true, name: true, designation: true } } } } },
   });
   if (!conv) throw new ApiError(404, 'Conversation not found');
-  if (!conv.members.some((m) => m.userId === userId)) throw new ApiError(403, 'Not a member');
+  const isMember = conv.members.some((m) => m.userId === userId);
+  if (!isMember && conv.type !== 'event') throw new ApiError(403, 'Not a member');
   const other = conv.type === 'dm' ? conv.members.find((m) => m.userId !== userId)?.user : null;
   return {
     id: conv.id,
     type: conv.type,
-    name: conv.type === 'group' ? conv.name : other?.name || 'Direct message',
+    eventId: conv.eventId,
+    name: conv.type === 'dm' ? other?.name || 'Direct message' : conv.name,
     createdById: conv.createdById,
     members: conv.members.map((m) => ({
       id: m.userId,
@@ -165,7 +183,7 @@ export async function openDm(userId, otherId) {
 
 // Top-level messages of a conversation (with reply counts for threads).
 export async function listMessages(userId, conversationId) {
-  await loadMembership(userId, conversationId);
+  await loadForRead(userId, conversationId);
   const msgs = await prisma.message.findMany({
     where: { conversationId, parentId: null },
     orderBy: { createdAt: 'asc' },
@@ -185,7 +203,7 @@ export async function listThread(userId, messageId) {
     include: { author: { select: { id: true, name: true } } },
   });
   if (!parent) throw new ApiError(404, 'Message not found');
-  await loadMembership(userId, parent.conversationId);
+  await loadForRead(userId, parent.conversationId);
   const replies = await prisma.message.findMany({
     where: { parentId: messageId },
     orderBy: { createdAt: 'asc' },
@@ -195,7 +213,19 @@ export async function listThread(userId, messageId) {
 }
 
 export async function postMessage(userId, conversationId, { body = '', parentId = null, attachments = null, mentions = [] } = {}) {
-  await loadMembership(userId, conversationId);
+  const conv = await prisma.conversation.findUnique({ where: { id: conversationId }, include: { members: true } });
+  if (!conv) throw new ApiError(404, 'Conversation not found');
+  const isMember = conv.members.some((m) => m.userId === userId);
+  if (!isMember) {
+    // Posting to an event chat joins you (so it lands in your Event Messages);
+    // for groups/DMs, non-members are rejected.
+    if (conv.type === 'event') {
+      await prisma.conversationMember.create({ data: { conversationId, userId, role: 'member' } }).catch(() => {});
+    } else {
+      throw new ApiError(403, 'You are not a member of this conversation');
+    }
+  }
+
   const text = (body || '').trim();
   const atts = Array.isArray(attachments) ? attachments.filter((a) => a && a.url) : [];
   if (!text && atts.length === 0) throw new ApiError(400, 'Message cannot be empty');
@@ -203,6 +233,8 @@ export async function postMessage(userId, conversationId, { body = '', parentId 
     const parent = await prisma.message.findUnique({ where: { id: parentId }, select: { conversationId: true } });
     if (!parent || parent.conversationId !== conversationId) throw new ApiError(400, 'Invalid thread parent');
   }
+
+  const cleanMentions = Array.isArray(mentions) ? mentions.filter(Boolean) : [];
   const msg = await prisma.message.create({
     data: {
       conversationId,
@@ -210,12 +242,55 @@ export async function postMessage(userId, conversationId, { body = '', parentId 
       body: text,
       parentId: parentId || null,
       attachments: atts.length ? atts : undefined,
-      mentions: Array.isArray(mentions) ? mentions.filter(Boolean) : [],
+      mentions: cleanMentions,
     },
     include: { author: { select: { id: true, name: true } } },
   });
   await prisma.conversation.update({ where: { id: conversationId }, data: { updatedAt: new Date() } });
+
+  // @-mention routing: in an event chat, mentioned people become members so the
+  // conversation surfaces in their Event Messages inbox.
+  if (conv.type === 'event' && cleanMentions.length) {
+    const already = new Set(conv.members.map((m) => m.userId).concat(userId));
+    const toAdd = cleanMentions.filter((id) => !already.has(id));
+    if (toAdd.length) {
+      await prisma.conversationMember.createMany({
+        data: toAdd.map((id) => ({ conversationId, userId: id, role: 'member' })),
+        skipDuplicates: true,
+      });
+    }
+  }
+
   return shapeMessage(msg);
+}
+
+// Find (or create) the chat conversation for an event. Members start as the
+// event owner + all task assignees; more people join by posting or being @-ed.
+export async function openEventConversation(userId, eventId) {
+  const event = await prisma.event.findUnique({
+    where: { id: eventId },
+    include: { tasks: { include: { assignees: { select: { userId: true } } } } },
+  });
+  if (!event) throw new ApiError(404, 'Event not found');
+
+  const existing = await prisma.conversation.findUnique({ where: { eventId }, select: { id: true } });
+  if (existing) return existing;
+
+  const creator = event.ownerId || userId;
+  const memberIds = new Set([creator]);
+  if (event.ownerId) memberIds.add(event.ownerId);
+  event.tasks.forEach((t) => t.assignees.forEach((a) => memberIds.add(a.userId)));
+
+  return prisma.conversation.create({
+    data: {
+      type: 'event',
+      name: event.name,
+      eventId,
+      createdById: creator,
+      members: { create: Array.from(memberIds).map((id) => ({ userId: id, role: id === creator ? 'owner' : 'member' })) },
+    },
+    select: { id: true },
+  });
 }
 
 export async function markRead(userId, conversationId) {

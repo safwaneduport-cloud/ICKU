@@ -10,6 +10,7 @@ router.get('/conversations', ctrl.listConversations);
 router.post('/groups', ctrl.createGroup);
 router.post('/groups/:id/members', ctrl.addMembers);
 router.post('/dm/:userId', ctrl.openDm);
+router.post('/event/:eventId', ctrl.openEventConversation);
 
 // A single conversation + its messages
 router.get('/conversations/:id', ctrl.getConversation);

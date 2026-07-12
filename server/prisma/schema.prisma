@@ -286,9 +286,10 @@ model Event {
   approverId   String?
   createdById  String?
 
-  tasks       EventTask[]
-  attachments Attachment[]
-  comments    EventComment[]
+  tasks        EventTask[]
+  attachments  Attachment[]
+  comments     EventComment[]
+  conversation Conversation? // Stage 2: the event's chat thread (Messages)
 
   createdAt DateTime @default(now())
   updatedAt DateTime @updatedAt
@@ -599,10 +600,12 @@ model KnowledgeDoc {
 // ("dm"). Membership is explicit so a group is only visible to its members.
 model Conversation {
   id          String               @id @default(uuid())
-  type        String // "group" | "dm"
-  name        String? // group name; null for DMs (name derived from the other member)
+  type        String // "group" | "dm" | "event"
+  name        String? // group/event name; null for DMs (name derived from the other member)
   createdById String
   createdBy   User                 @relation("ConvCreator", fields: [createdById], references: [id])
+  eventId     String?              @unique // set for type "event" — links to the Event
+  event       Event?               @relation(fields: [eventId], references: [id])
   members     ConversationMember[]
   messages    Message[]
   createdAt   DateTime             @default(now())

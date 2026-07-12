@@ -25,6 +25,10 @@ export async function openDm(req, res, next) {
   try { ok(res, await service.openDm(req.user.id, req.params.userId)); } catch (e) { next(e); }
 }
 
+export async function openEventConversation(req, res, next) {
+  try { ok(res, await service.openEventConversation(req.user.id, req.params.eventId)); } catch (e) { next(e); }
+}
+
 export async function listMessages(req, res, next) {
   try { ok(res, await service.listMessages(req.user.id, req.params.id)); } catch (e) { next(e); }
 }

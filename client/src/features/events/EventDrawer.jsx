@@ -1,8 +1,8 @@
-import { useState } from 'react';
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query';
 import { useAuth } from '../../store/AuthContext.jsx';
-import { getEvent, toggleTask, addEventComment } from '../../api/events.api.js';
+import { getEvent, toggleTask } from '../../api/events.api.js';
 import { STATE, triggerLabel } from './meta.js';
+import EventChat from '../messages/EventChat.jsx';
 
 function Badge({ state }) {
   const m = STATE[state] || STATE.upcoming;
@@ -14,11 +14,6 @@ export default function EventDrawer({ id, onClose }) {
   const qc = useQueryClient();
   const q = useQuery({ queryKey: ['event', id], queryFn: () => getEvent(id), retry: false });
   const toggle = useMutation({ mutationFn: toggleTask, onSuccess: () => qc.invalidateQueries() });
-  const [comment, setComment] = useState('');
-  const addC = useMutation({
-    mutationFn: () => addEventComment(id, comment.trim()),
-    onSuccess: () => { setComment(''); qc.invalidateQueries({ queryKey: ['event', id] }); },
-  });
 
   const e = q.data;
 
@@ -83,27 +78,7 @@ export default function EventDrawer({ id, onClose }) {
               </div>
             </section>
 
-            <section className="mt-4 rounded-2xl border border-line bg-white p-4">
-              <div className="text-xs font-semibold uppercase tracking-wide text-ink-soft">Comments</div>
-              <div className="mt-3 space-y-3">
-                {(e.comments || []).length === 0 && <p className="text-sm text-ink-soft">No comments yet.</p>}
-                {(e.comments || []).map((c) => (
-                  <div key={c.id} className="text-sm">
-                    <span className="font-medium">{c.author.name}</span>
-                    <span className="ml-2 text-xs text-ink-soft">{new Date(c.createdAt).toLocaleString()}</span>
-                    <p className="text-ink">{c.body}</p>
-                  </div>
-                ))}
-              </div>
-              <div className="mt-3 flex gap-2">
-                <input value={comment} onChange={(ev) => setComment(ev.target.value)}
-                  onKeyDown={(ev) => { if (ev.key === 'Enter' && comment.trim()) addC.mutate(); }}
-                  placeholder="Write a comment…"
-                  className="flex-1 rounded-lg border border-line px-3 py-2 text-sm outline-none focus:border-pine" />
-                <button onClick={() => addC.mutate()} disabled={!comment.trim() || addC.isPending}
-                  className="rounded-lg bg-pine px-3 py-2 text-sm font-medium text-white disabled:opacity-60">Send</button>
-              </div>
-            </section>
+            <EventChat eventId={id} />
           </>
         )}
       </div>

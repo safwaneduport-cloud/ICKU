@@ -25,6 +25,7 @@ export default function Messages() {
 
   const groups = (conversations.data || []).filter((c) => c.type === 'group');
   const dms = (conversations.data || []).filter((c) => c.type === 'dm');
+  const events = (conversations.data || []).filter((c) => c.type === 'event');
 
   // Mark a conversation read when it's opened (clears the unread badge).
   useEffect(() => {
@@ -61,11 +62,14 @@ export default function Messages() {
             )}
             empty="No direct messages yet"
           />
-          {/* Event Messages — arrives in the next update (Stage 2) */}
-          <div className="mt-4 px-2">
-            <div className="text-[10px] font-mono font-semibold uppercase tracking-widest text-ink-soft/60">Event Messages</div>
-            <p className="mt-1 px-1 text-xs italic text-ink-soft/70">Coming next — reply to events right from here.</p>
-          </div>
+          <RailSection
+            title="Event Messages"
+            items={events}
+            selectedId={selectedId}
+            onSelect={setSelectedId}
+            renderIcon={() => <span className="text-ink-soft">🗓</span>}
+            empty="No event chats yet — join one from any event."
+          />
         </div>
       </aside>
 
@@ -120,7 +124,7 @@ function RailSection({ title, onAdd, items, selectedId, onSelect, renderIcon, em
     <div className="mt-3">
       <div className="flex items-center justify-between px-2">
         <span className="text-[10px] font-mono font-semibold uppercase tracking-widest text-ink-soft/60">{title}</span>
-        <button onClick={onAdd} title={`New ${title}`} className="text-ink-soft hover:text-pine">＋</button>
+        {onAdd && <button onClick={onAdd} title={`New ${title}`} className="text-ink-soft hover:text-pine">＋</button>}
       </div>
       <div className="mt-1 space-y-0.5">
         {items.length === 0 && <p className="px-2 py-1 text-xs text-ink-soft/70">{empty}</p>}
@@ -170,11 +174,11 @@ function ChatPane({ conversationId, users, onOpenThread, onOpenProfile }) {
       <div className="flex items-center justify-between border-b border-line px-4 py-3">
         <div className="min-w-0">
           <div className="truncate font-serif text-lg font-semibold text-pine">
-            {c?.type === 'group' ? '# ' : ''}{c?.name || '…'}
+            {c?.type === 'group' ? '# ' : c?.type === 'event' ? '🗓 ' : ''}{c?.name || '…'}
           </div>
           {c && (
             <div className="truncate text-xs text-ink-soft">
-              {c.type === 'group' ? `${c.members.length} members` : 'Direct message'}
+              {c.type === 'dm' ? 'Direct message' : c.type === 'event' ? `Event chat · ${c.members.length} people` : `${c.members.length} members`}
             </div>
           )}
         </div>

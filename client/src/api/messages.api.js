@@ -24,5 +24,8 @@ export const addMembers = (id, memberIds) =>
 export const openDm = (userId) =>
   api.post(`/messages/dm/${userId}`).then((r) => r.data.data);
 
+export const openEventConversation = (eventId) =>
+  api.post(`/messages/event/${eventId}`).then((r) => r.data.data);
+
 export const markRead = (id) =>
   api.post(`/messages/conversations/${id}/read`).then((r) => r.data.data);
