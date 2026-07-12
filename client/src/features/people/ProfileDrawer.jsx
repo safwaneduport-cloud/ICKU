@@ -1,5 +1,7 @@
 import { useQuery } from '@tanstack/react-query';
+import { useNavigate } from 'react-router-dom';
 import { getProfile } from '../../api/users.api.js';
+import { useAuth } from '../../store/AuthContext.jsx';
 
 function initials(name = '') {
   return name.split(' ').map((w) => w[0]).slice(0, 2).join('').toUpperCase();
@@ -45,6 +47,9 @@ function PersonRow({ person, onClick }) {
 
 export default function ProfileDrawer({ userId, onClose, onNavigate }) {
   const open = !!userId;
+  const { user } = useAuth();
+  const navigate = useNavigate();
+  const isHr = user?.id === 'ceo' || user?.id === 'EP002' || user?.role === 'HR Head';
   const q = useQuery({
     queryKey: ['profile', userId],
     queryFn: () => getProfile(userId),
@@ -53,6 +58,8 @@ export default function ProfileDrawer({ userId, onClose, onNavigate }) {
   });
   const p = q.data;
   const att = p?.attendance;
+
+  const editProfile = () => { navigate(`/profile?id=${userId}`); onClose(); };
 
   return (
     <>
@@ -71,9 +78,16 @@ export default function ProfileDrawer({ userId, onClose, onNavigate }) {
       >
         {open && (
           <>
-            <div className="flex items-start justify-between border-b border-line px-5 py-4">
+            <div className="flex items-center justify-between border-b border-line px-5 py-4">
               <div className="text-[11px] font-mono uppercase tracking-widest text-ochre">Profile</div>
-              <button onClick={onClose} className="text-ink-soft hover:text-brick" aria-label="Close">✕</button>
+              <div className="flex items-center gap-3">
+                {isHr && userId && (
+                  <button onClick={editProfile} className="rounded-lg border border-line px-2.5 py-1 text-xs font-medium text-pine hover:border-pine">
+                    Edit profile →
+                  </button>
+                )}
+                <button onClick={onClose} className="text-ink-soft hover:text-brick" aria-label="Close">✕</button>
+              </div>
             </div>
 
             <div className="flex-1 overflow-y-auto px-5 py-5">
