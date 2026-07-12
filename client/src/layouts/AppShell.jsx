@@ -62,7 +62,7 @@ function Shell() {
   const groups = [
     ...NAV_GROUPS.map((g) =>
       g.title === 'HR' && isAdmin
-        ? { ...g, items: [...g.items, { to: '/master-data', label: 'Master Data' }] }
+        ? { ...g, items: [...g.items, { to: '/master-data', label: 'Master Data' }, { to: '/credentials', label: 'Credentials' }] }
         : g
     ),
     ...(adminItems.length ? [{ title: 'Admin', items: adminItems }] : []),
