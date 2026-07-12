@@ -6,7 +6,7 @@ import NotificationBell from '../features/notifications/NotificationBell.jsx';
 // Sidebar navigation, grouped into labeled sections. A group with no `title`
 // renders its items without a header (used for the standalone Overview link).
 const NAV_GROUPS = [
-  { items: [{ to: '/', label: 'Overview', end: true }] },
+  { items: [{ to: '/', label: 'Overview', end: true }, { to: '/messages', label: 'Messages' }] },
   {
     title: 'Work',
     items: [

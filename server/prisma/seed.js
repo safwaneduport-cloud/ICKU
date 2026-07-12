@@ -163,6 +163,7 @@ async function main() {
   await seedEngagement();
   await seedAnnouncements();
   await seedMeetings();
+  await seedMessages();
 
   const [userCount, eventCount, onbCount, exitCount, knowCount] = await Promise.all([
     prisma.user.count(), prisma.event.count(), prisma.onboarding.count(), prisma.exit.count(), prisma.knowledgeDoc.count(),
@@ -505,6 +506,59 @@ async function seedAttendance() {
   const CHUNK = 500;
   for (let i = 0; i < rows.length; i += CHUNK) {
     await prisma.attendanceRecord.createMany({ data: rows.slice(i, i + CHUNK), skipDuplicates: true });
+  }
+}
+
+// Messages (Stage 1) — a couple of demo groups + one DM so the screen isn't empty.
+// Robust to missing users: only seeds members that actually exist. Idempotent
+// via a conversation-count guard.
+async function seedMessages() {
+  const existing = await prisma.conversation.count();
+  if (existing > 0) { console.log('Conversations already present — skipping message seed.'); return; }
+  console.log('Seeding messages (groups + DM)…');
+
+  const pick = async (ids) => {
+    const found = await prisma.user.findMany({ where: { id: { in: ids } }, select: { id: true } });
+    const order = new Map(ids.map((id, i) => [id, i]));
+    return found.map((u) => u.id).sort((a, b) => order.get(a) - order.get(b));
+  };
+
+  // "General" — everyone-ish
+  const generalIds = await pick(['ceo', 'cos', 'avanya', 'mentor', 'hr', 'de78']);
+  if (generalIds.length >= 2) {
+    const owner = generalIds[0];
+    const general = await prisma.conversation.create({
+      data: {
+        type: 'group', name: 'General', createdById: owner,
+        members: { create: generalIds.map((id) => ({ userId: id, role: id === owner ? 'owner' : 'member' })) },
+      },
+    });
+    const m1 = await prisma.message.create({ data: { conversationId: general.id, authorId: owner, body: 'Welcome to ICKU Messages, everyone! 👋' } });
+    await prisma.message.create({ data: { conversationId: general.id, authorId: generalIds[1], body: 'Great to have this — no more scattered chats.' } });
+    if (generalIds[2]) await prisma.message.create({ data: { conversationId: general.id, authorId: generalIds[2], parentId: m1.id, body: 'Love it. Can we pin announcements here too?' } });
+  }
+
+  // Academics · Class 7-8
+  const acadIds = await pick(['avanya', 'mentor', 'cmm78', 'fac78', 'de78']);
+  if (acadIds.length >= 2) {
+    const owner = acadIds[0];
+    const acad = await prisma.conversation.create({
+      data: {
+        type: 'group', name: 'Academics · Class 7-8', createdById: owner,
+        members: { create: acadIds.map((id) => ({ userId: id, role: id === owner ? 'owner' : 'member' })) },
+      },
+    });
+    await prisma.message.create({ data: { conversationId: acad.id, authorId: owner, body: 'Mid-term prep review is due next week — let’s align on the plan.' } });
+  }
+
+  // A 1:1 DM
+  const dmIds = await pick(['ceo', 'mentor']);
+  if (dmIds.length === 2) {
+    const dm = await prisma.conversation.create({
+      data: { type: 'dm', createdById: dmIds[0], members: { create: dmIds.map((id) => ({ userId: id })) } },
+    });
+    await prisma.message.create({ data: { conversationId: dm.id, authorId: dmIds[0], body: 'Hi — can you share the results-day summary?' } });
+    await prisma.message.create({ data: { conversationId: dm.id, authorId: dmIds[1], body: 'Sure, sending it over shortly.' } });
   }
 }
 

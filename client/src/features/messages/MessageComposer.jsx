@@ -1,0 +1,158 @@
+import { useRef, useState } from 'react';
+
+const initials = (n = '') => n.split(' ').map((w) => w[0]).slice(0, 2).join('').toUpperCase();
+const MAX_BYTES = 4 * 1024 * 1024; // ~4MB soft cap per attachment (stored as data URL)
+
+// Slack-style composer: multi-line text, @-mention autocomplete, and
+// file/image attachments. Enter sends; Shift+Enter makes a new line.
+export default function MessageComposer({ onSend, users = [], placeholder = 'Write a message…', autoFocus = false }) {
+  const taRef = useRef(null);
+  const fileRef = useRef(null);
+  const [text, setText] = useState('');
+  const [atts, setAtts] = useState([]);       // { kind, name, url }
+  const [mentionIds, setMentionIds] = useState([]);
+  const [sending, setSending] = useState(false);
+  // mention dropdown state
+  const [mq, setMq] = useState(null);          // { query, start } or null
+  const [hi, setHi] = useState(0);
+
+  const matches = mq === null
+    ? []
+    : users
+        .filter((u) => u.name.toLowerCase().includes(mq.query.toLowerCase()))
+        .slice(0, 6);
+
+  function onChange(e) {
+    const val = e.target.value;
+    setText(val);
+    // detect an active @mention token ending at the caret
+    const caret = e.target.selectionStart;
+    const upto = val.slice(0, caret);
+    const at = upto.lastIndexOf('@');
+    if (at >= 0) {
+      const before = at === 0 ? ' ' : upto[at - 1];
+      const token = upto.slice(at + 1);
+      if (/\s/.test(before) === false && at !== 0) {
+        // '@' must be at start or preceded by whitespace
+        setMq(null);
+      } else if (/\s/.test(token)) {
+        setMq(null);
+      } else {
+        setMq({ query: token, start: at });
+        setHi(0);
+      }
+    } else {
+      setMq(null);
+    }
+  }
+
+  function pickMention(u) {
+    const caret = taRef.current.selectionStart;
+    const next = text.slice(0, mq.start) + '@' + u.name + ' ' + text.slice(caret);
+    setText(next);
+    setMentionIds((ids) => (ids.includes(u.id) ? ids : [...ids, u.id]));
+    setMq(null);
+    requestAnimationFrame(() => taRef.current?.focus());
+  }
+
+  function onKeyDown(e) {
+    if (mq !== null && matches.length) {
+      if (e.key === 'ArrowDown') { e.preventDefault(); setHi((h) => (h + 1) % matches.length); return; }
+      if (e.key === 'ArrowUp') { e.preventDefault(); setHi((h) => (h - 1 + matches.length) % matches.length); return; }
+      if (e.key === 'Enter' || e.key === 'Tab') { e.preventDefault(); pickMention(matches[hi]); return; }
+      if (e.key === 'Escape') { setMq(null); return; }
+    }
+    if (e.key === 'Enter' && !e.shiftKey) { e.preventDefault(); send(); }
+  }
+
+  function onFiles(e) {
+    const files = Array.from(e.target.files || []);
+    files.forEach((f) => {
+      if (f.size > MAX_BYTES) { alert(`"${f.name}" is larger than 4MB and was skipped.`); return; }
+      const reader = new FileReader();
+      reader.onload = () => setAtts((a) => [...a, { kind: f.type.startsWith('image/') ? 'image' : 'file', name: f.name, url: reader.result }]);
+      reader.readAsDataURL(f);
+    });
+    e.target.value = ''; // allow re-selecting the same file
+  }
+
+  async function send() {
+    const body = text.trim();
+    if (!body && atts.length === 0) return;
+    setSending(true);
+    try {
+      await onSend({ body, attachments: atts, mentions: mentionIds });
+      setText(''); setAtts([]); setMentionIds([]); setMq(null);
+    } finally {
+      setSending(false);
+    }
+  }
+
+  return (
+    <div className="relative rounded-xl border border-line bg-white p-2">
+      {/* @mention autocomplete */}
+      {mq !== null && matches.length > 0 && (
+        <div className="absolute bottom-full left-2 z-20 mb-1 w-64 overflow-hidden rounded-lg border border-line bg-white shadow-lg">
+          {matches.map((u, i) => (
+            <button
+              key={u.id}
+              type="button"
+              onMouseDown={(e) => { e.preventDefault(); pickMention(u); }}
+              className={`flex w-full items-center gap-2 px-3 py-1.5 text-left text-sm ${i === hi ? 'bg-pine-tint' : ''}`}
+            >
+              <span className="flex h-6 w-6 items-center justify-center rounded bg-steel/15 text-[9px] font-semibold text-steel">{initials(u.name)}</span>
+              <span className="truncate">{u.name}</span>
+              <span className="ml-auto truncate text-xs text-ink-soft">{u.role}</span>
+            </button>
+          ))}
+        </div>
+      )}
+
+      {/* attachment chips */}
+      {atts.length > 0 && (
+        <div className="mb-2 flex flex-wrap gap-2">
+          {atts.map((a, i) => (
+            <div key={i} className="flex items-center gap-1.5 rounded-lg border border-line bg-paper px-2 py-1 text-xs">
+              {a.kind === 'image'
+                ? <img src={a.url} alt={a.name} className="h-8 w-8 rounded object-cover" />
+                : <span>📎</span>}
+              <span className="max-w-[120px] truncate">{a.name}</span>
+              <button type="button" onClick={() => setAtts((x) => x.filter((_, j) => j !== i))} className="text-ink-soft hover:text-brick">✕</button>
+            </div>
+          ))}
+        </div>
+      )}
+
+      <div className="flex items-end gap-2">
+        <button
+          type="button"
+          onClick={() => fileRef.current?.click()}
+          title="Attach a file or image"
+          className="flex h-9 w-9 shrink-0 items-center justify-center rounded-lg border border-line text-ink-soft hover:border-pine hover:text-pine"
+        >
+          📎
+        </button>
+        <input ref={fileRef} type="file" multiple onChange={onFiles} className="hidden" />
+        <textarea
+          ref={taRef}
+          rows={1}
+          value={text}
+          onChange={onChange}
+          onKeyDown={onKeyDown}
+          autoFocus={autoFocus}
+          placeholder={placeholder}
+          className="max-h-32 min-h-[38px] flex-1 resize-none rounded-lg border border-line px-3 py-2 text-sm outline-none focus:border-pine"
+        />
+        <button
+          type="button"
+          onClick={send}
+          disabled={sending || (!text.trim() && atts.length === 0)}
+          className="h-9 shrink-0 rounded-lg bg-pine px-4 text-sm font-medium text-white disabled:opacity-50"
+        >
+          Send
+        </button>
+      </div>
+      <div className="px-1 pt-1 text-[10px] text-ink-soft">Type <span className="font-mono">@</span> to mention · Enter to send · Shift+Enter for a new line</div>
+    </div>
+  );
+}

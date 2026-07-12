@@ -22,6 +22,7 @@ import Announcements from './pages/Announcements.jsx';
 import Okrs from './pages/Okrs.jsx';
 import Meetings from './pages/Meetings.jsx';
 import Workspaces from './pages/Workspaces.jsx';
+import Messages from './pages/Messages.jsx';
 
 export default function App() {
   return (
@@ -38,6 +39,7 @@ export default function App() {
         }
       >
         <Route index element={<Overview />} />
+        <Route path="messages" element={<Messages />} />
         <Route path="events" element={<Events />} />
         <Route path="okrs" element={<Okrs />} />
         <Route path="meetings" element={<Meetings />} />

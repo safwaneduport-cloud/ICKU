@@ -92,6 +92,11 @@ model User {
   meetingsOwned      Meeting[]         @relation("MeetingOwner")
   meetingAttendances MeetingAttendee[]
 
+  // Messages (Stage 1: Groups + DMs)
+  conversationsCreated Conversation[]       @relation("ConvCreator")
+  conversationMembers  ConversationMember[] @relation("ConvMember")
+  messagesSent         Message[]            @relation("MessageAuthor")
+
   createdAt DateTime @default(now())
   updatedAt DateTime @updatedAt
 
@@ -587,4 +592,52 @@ model KnowledgeDoc {
 
   @@index([type])
   @@index([departmentId])
+}
+
+// ─── Messages (Stage 1: Groups + Direct Messages) ────────────────────
+// A Conversation is either a named group ("group") or a 1:1 direct thread
+// ("dm"). Membership is explicit so a group is only visible to its members.
+model Conversation {
+  id          String               @id @default(uuid())
+  type        String // "group" | "dm"
+  name        String? // group name; null for DMs (name derived from the other member)
+  createdById String
+  createdBy   User                 @relation("ConvCreator", fields: [createdById], references: [id])
+  members     ConversationMember[]
+  messages    Message[]
+  createdAt   DateTime             @default(now())
+  updatedAt   DateTime             @updatedAt
+
+  @@index([type])
+}
+
+model ConversationMember {
+  conversationId String
+  conversation   Conversation @relation(fields: [conversationId], references: [id], onDelete: Cascade)
+  userId         String
+  user           User         @relation("ConvMember", fields: [userId], references: [id])
+  role           String       @default("member") // "owner" | "member"
+  lastReadAt     DateTime? // for unread badges
+  joinedAt       DateTime     @default(now())
+
+  @@id([conversationId, userId])
+  @@index([userId])
+}
+
+model Message {
+  id             String       @id @default(uuid())
+  conversationId String
+  conversation   Conversation @relation(fields: [conversationId], references: [id], onDelete: Cascade)
+  authorId       String
+  author         User         @relation("MessageAuthor", fields: [authorId], references: [id])
+  body           String       @default("")
+  parentId       String? // thread parent (null = top-level message)
+  parent         Message?     @relation("MessageThread", fields: [parentId], references: [id], onDelete: Cascade)
+  replies        Message[]    @relation("MessageThread")
+  attachments    Json? // [{ kind: "image" | "file", name, url }]
+  mentions       String[]     @default([]) // userIds mentioned via @
+  createdAt      DateTime     @default(now())
+
+  @@index([conversationId])
+  @@index([parentId])
 }
