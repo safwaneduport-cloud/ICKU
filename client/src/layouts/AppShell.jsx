@@ -20,6 +20,7 @@ const NAV_GROUPS = [
   {
     title: 'HR',
     items: [
+      { to: '/profile', label: 'Profile' },
       { to: '/attendance', label: 'Attendance' },
       { to: '/leave', label: 'Leave' },
       { to: '/payroll', label: 'Payroll' },

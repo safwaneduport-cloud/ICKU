@@ -2,6 +2,79 @@ import bcrypt from 'bcryptjs';
 import { prisma } from '../../config/prisma.js';
 import { ApiError } from '../../middleware/errorHandler.js';
 import { DEFAULT_TEMP } from '../credentials/credentials.service.js';
+import { canAdmin } from '../../lib/access.js';
+
+// Fields an employee may edit themselves (Part 5/9). HR-controlled fields
+// (Employee Number, Department, Job Title, Tier, Reporting Manager, policies)
+// are deliberately excluded.
+export const SELF_EDITABLE = [
+  'mobilePhone', 'workPhone', 'homePhone', 'personalEmail', 'dateOfBirth', 'gender', 'maritalStatus',
+  'marriageDate', 'bloodGroup', 'physicallyHandicapped', 'nationality',
+  'currentAddrLine1', 'currentAddrLine2', 'currentAddrCity', 'currentAddrState', 'currentAddrZip', 'currentAddrCountry',
+  'permanentAddrLine1', 'permanentAddrLine2', 'permanentAddrCity', 'permanentAddrState', 'permanentAddrZip', 'permanentAddrCountry',
+  'fatherName', 'motherName', 'spouseName', 'childrenNames', 'panNumber', 'aadhaarNumber', 'pfNumber', 'uanNumber',
+];
+// Extra fields only HR may change (plain columns; department/reportsTo handled separately).
+const HR_EDITABLE = [
+  'firstName', 'middleName', 'lastName', 'displayName', 'secondaryJobTitle', 'subDepartment',
+  'location', 'country', 'dottedLineManager', 'leavePlan', 'band', 'payGrade', 'timeType', 'workerType',
+  'shiftPolicy', 'weeklyOffPolicy', 'attendanceTrackingPolicy', 'attendanceCaptureScheme', 'holidayList',
+  'expensePolicy', 'noticePeriod', 'employmentStatus',
+];
+// The set a "complete" profile should have (drives the completion %).
+const COMPLETION_FIELDS = [
+  ['mobilePhone', 'Mobile Phone'], ['personalEmail', 'Personal Email'], ['dateOfBirth', 'Date of Birth'],
+  ['gender', 'Gender'], ['maritalStatus', 'Marital Status'], ['bloodGroup', 'Blood Group'], ['nationality', 'Nationality'],
+  ['currentAddrLine1', 'Current Address'], ['currentAddrCity', 'City'], ['currentAddrState', 'State'], ['currentAddrZip', 'PIN Code'],
+  ['fatherName', "Father's Name"], ['motherName', "Mother's Name"], ['panNumber', 'PAN Number'], ['aadhaarNumber', 'Aadhaar Number'],
+];
+
+export async function getProfile(id) {
+  const user = await prisma.user.findUnique({
+    where: { id },
+    include: { department: { select: { id: true, name: true } }, reportsTo: { select: { id: true, name: true } } },
+  });
+  if (!user) throw new ApiError(404, 'Employee not found');
+  const pending = COMPLETION_FIELDS.filter(([k]) => !user[k]);
+  const filled = COMPLETION_FIELDS.length - pending.length;
+  return {
+    user,
+    completion: {
+      pct: Math.round((filled / COMPLETION_FIELDS.length) * 100),
+      filled, total: COMPLETION_FIELDS.length,
+      pending: pending.map(([, label]) => label),
+    },
+  };
+}
+
+// Permission-aware update. Self → only SELF_EDITABLE. HR → everything.
+export async function updateProfile(viewer, id, patch) {
+  const isHr = canAdmin(viewer);
+  const isSelf = viewer.id === id;
+  if (!isHr && !isSelf) throw new ApiError(403, 'You can only edit your own profile');
+
+  const allowed = isHr ? [...SELF_EDITABLE, ...HR_EDITABLE] : SELF_EDITABLE;
+  const data = {};
+  for (const k of allowed) if (patch[k] !== undefined) data[k] = patch[k] === '' ? null : patch[k];
+
+  if (isHr) {
+    if (patch.department !== undefined) {
+      const d = patch.department ? await prisma.department.findFirst({ where: { name: patch.department } }) : null;
+      data.departmentId = d?.id || null;
+    }
+    if (patch.reportsToId !== undefined) {
+      const mgr = patch.reportsToId ? await prisma.user.findUnique({ where: { id: patch.reportsToId }, select: { id: true, employeeNumber: true } }) : null;
+      data.reportsToId = mgr?.id || null;
+      data.reportingManagerEmpNo = mgr?.employeeNumber || null;
+    }
+    if (patch.tier !== undefined) data.tier = patch.tier;
+    if (patch.jobTitle !== undefined) { data.jobTitle = patch.jobTitle; data.designation = patch.jobTitle; data.role = patch.jobTitle; }
+    if (patch.fullName !== undefined) { data.name = patch.fullName; }
+  }
+
+  await prisma.user.update({ where: { id }, data });
+  return getProfile(id);
+}
 
 // Fields HR may set during onboarding (Part 3). `department` + `reportsToId`
 // map to relations; the rest are plain columns.
