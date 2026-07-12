@@ -4,6 +4,8 @@ import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query';
 import { useAuth } from '../store/AuthContext.jsx';
 import { getMyProfile, getEmployeeProfile, updateEmployeeProfile } from '../api/employees.api.js';
 import { getActiveOptions } from '../api/masters.api.js';
+import { getDepartments } from '../api/departments.api.js';
+import { getUsers } from '../api/users.api.js';
 import { changeOwnPassword } from '../api/credentials.api.js';
 
 const COMPLETION_KEYS = new Set([
@@ -51,9 +53,34 @@ const LOCKED = [
   ['leavePlan', 'Leave Plan'], ['expensePolicy', 'Expense Policy'], ['noticePeriod', 'Notice Period'],
 ];
 
+// Editable for HR only. `dept`/`person` are special sources; rest are masters.
+const HR_GROUPS = [
+  { title: 'Role & Organisation', fields: [
+    { k: 'department', label: 'Department', dept: true }, { k: 'subDepartment', label: 'Sub Department', master: 'subDepartment' },
+    { k: 'jobTitle', label: 'Job Title', master: 'jobTitle' }, { k: 'secondaryJobTitle', label: 'Secondary Job Title', master: 'jobTitle' },
+    { k: 'tier', label: 'Tier', master: 'tier' }, { k: 'reportsToId', label: 'Reporting To', person: true },
+    { k: 'dottedLineManager', label: 'Dotted Line Manager' }, { k: 'location', label: 'Location', master: 'location' },
+    { k: 'country', label: 'Country', master: 'country' },
+  ] },
+  { title: 'Policies', fields: [
+    { k: 'shiftPolicy', label: 'Shift Policy', master: 'shiftPolicy' }, { k: 'weeklyOffPolicy', label: 'Weekly Off Policy', master: 'weeklyOffPolicy' },
+    { k: 'attendanceTrackingPolicy', label: 'Attendance Time Tracking Policy', master: 'attendanceTrackingPolicy' },
+    { k: 'attendanceCaptureScheme', label: 'Attendance Capture Scheme', master: 'attendanceCaptureScheme' },
+    { k: 'holidayList', label: 'Holiday List', master: 'holidayList' }, { k: 'leavePlan', label: 'Leave Plan', master: 'leavePlan' },
+    { k: 'expensePolicy', label: 'Expense Policy', master: 'expensePolicy' }, { k: 'noticePeriod', label: 'Notice Period', master: 'noticePeriod' },
+    { k: 'workerType', label: 'Worker Type', master: 'workerType' }, { k: 'timeType', label: 'Time Type', master: 'timeType' },
+    { k: 'band', label: 'Band', master: 'band' }, { k: 'payGrade', label: 'Pay Grade', master: 'payGrade' },
+  ] },
+];
+const HR_KEYS = HR_GROUPS.flatMap((g) => g.fields.map((f) => f.k));
+
 function MiniSelect({ field, value, onChange, invalid }) {
-  const opts = useQuery({ queryKey: ['activeOptions', field.master], queryFn: () => getActiveOptions(field.master), staleTime: 60_000, enabled: !!field.master });
-  const values = field.options || opts.data || [];
+  const opts = useQuery({
+    queryKey: field.dept ? ['departments'] : ['activeOptions', field.master],
+    queryFn: field.dept ? getDepartments : () => getActiveOptions(field.master),
+    staleTime: 60_000, enabled: !!(field.master || field.dept),
+  });
+  const values = field.options || (field.dept ? (opts.data || []).map((d) => d.name) : opts.data || []);
   return (
     <select value={value || ''} onChange={(e) => onChange(e.target.value)}
       className={`w-full rounded-lg border px-3 py-2 text-sm outline-none focus:border-pine ${invalid ? 'border-brick bg-brick/5' : 'border-line'}`}>
@@ -78,15 +105,23 @@ export default function Profile() {
   });
   const p = profile.data;
   const targetKey = targetId || user?.id;
+  const users = useQuery({ queryKey: ['users'], queryFn: getUsers, retry: false, enabled: isHr });
 
   const [form, setForm] = useState({});
   useEffect(() => {
     if (p?.user) {
       const init = {};
       for (const k of SELF_KEYS) init[k] = p.user[k] || '';
+      if (isHr) {
+        for (const k of HR_KEYS) {
+          if (k === 'department') init[k] = p.user.department?.name || '';
+          else if (k === 'reportsToId') init[k] = p.user.reportsTo?.id || '';
+          else init[k] = p.user[k] || '';
+        }
+      }
       setForm(init);
     }
-  }, [p?.user?.id]); // eslint-disable-line
+  }, [p?.user?.id, isHr]); // eslint-disable-line
 
   const save = useMutation({
     mutationFn: () => updateEmployeeProfile(targetKey, form),
@@ -153,26 +188,57 @@ export default function Profile() {
         </section>
       ))}
 
-      {/* locked job & policy fields */}
-      <section className="rounded-2xl border border-line bg-white p-5">
-        <div className="mb-3 flex items-center gap-2">
-          <h2 className="font-serif text-lg font-semibold text-pine">Job & Policies</h2>
-          <span className="rounded bg-paper px-2 py-0.5 text-[11px] text-ink-soft">🔒 HR-managed</span>
-        </div>
-        <div className="grid gap-x-4 gap-y-2 text-sm sm:grid-cols-2 lg:grid-cols-3">
-          {LOCKED.map(([k, label]) => (
-            <div key={k}>
-              <dt className="text-[11px] uppercase tracking-wide text-ink-soft">{label}</dt>
-              <dd className="text-ink">{p.user[k] || '—'}</dd>
+      {/* job & policy fields — editable for HR, read-only for the employee */}
+      {isHr ? (
+        HR_GROUPS.map((g) => (
+          <section key={g.title} className="rounded-2xl border border-line bg-white p-5">
+            <div className="mb-3 flex items-center gap-2">
+              <h2 className="font-serif text-lg font-semibold text-pine">{g.title}</h2>
+              <span className="rounded bg-ochre-tint px-2 py-0.5 text-[11px] text-ochre">HR-editable</span>
             </div>
-          ))}
-          <div>
-            <dt className="text-[11px] uppercase tracking-wide text-ink-soft">Reporting To</dt>
-            <dd className="text-ink">{p.user.reportsTo?.name || '—'}</dd>
+            <div className="grid gap-3 sm:grid-cols-2 lg:grid-cols-3">
+              {g.fields.map((f) => (
+                <label key={f.k} className="block text-sm">
+                  <span className="text-ink-soft">{f.label}</span>
+                  <div className="mt-1">
+                    {f.person ? (
+                      <select value={form[f.k] || ''} onChange={(e) => set(f.k, e.target.value)}
+                        className="w-full rounded-lg border border-line px-3 py-2 text-sm outline-none focus:border-pine">
+                        <option value="">Select manager…</option>
+                        {(users.data || []).map((u) => <option key={u.id} value={u.id}>{u.name} ({u.employeeNumber || u.id})</option>)}
+                      </select>
+                    ) : f.master || f.dept ? (
+                      <MiniSelect field={f} value={form[f.k]} onChange={(v) => set(f.k, v)} />
+                    ) : (
+                      <input value={form[f.k] || ''} onChange={(e) => set(f.k, e.target.value)}
+                        className="w-full rounded-lg border border-line px-3 py-2 text-sm outline-none focus:border-pine" />
+                    )}
+                  </div>
+                </label>
+              ))}
+            </div>
+          </section>
+        ))
+      ) : (
+        <section className="rounded-2xl border border-line bg-white p-5">
+          <div className="mb-3 flex items-center gap-2">
+            <h2 className="font-serif text-lg font-semibold text-pine">Job & Policies</h2>
+            <span className="rounded bg-paper px-2 py-0.5 text-[11px] text-ink-soft">🔒 HR-managed</span>
           </div>
-        </div>
-        {!viewingSelf && <p className="mt-3 text-xs text-ink-soft">As HR, editing these here isn’t enabled yet — use the onboarding fields or master data. Personal fields above are fully editable.</p>}
-      </section>
+          <div className="grid gap-x-4 gap-y-2 text-sm sm:grid-cols-2 lg:grid-cols-3">
+            {LOCKED.map(([k, label]) => (
+              <div key={k}>
+                <dt className="text-[11px] uppercase tracking-wide text-ink-soft">{label}</dt>
+                <dd className="text-ink">{p.user[k] || '—'}</dd>
+              </div>
+            ))}
+            <div>
+              <dt className="text-[11px] uppercase tracking-wide text-ink-soft">Reporting To</dt>
+              <dd className="text-ink">{p.user.reportsTo?.name || '—'}</dd>
+            </div>
+          </div>
+        </section>
+      )}
 
       {save.error && <p className="rounded-lg bg-brick/5 px-4 py-2 text-sm text-brick">{save.error.response?.data?.error?.message || 'Failed to save'}</p>}
 
