@@ -2,6 +2,7 @@ import { useState } from 'react';
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query';
 import { knowledgeMeta, getDocs, getDoc, createDoc } from '../api/knowledge.api.js';
 import { getDepartments } from '../api/departments.api.js';
+import { uploadFile } from '../api/files.api.js';
 
 const TYPE_COLOR = { SOP: '#134535', Policy: '#9C3A2A', Guide: '#3F6075', FAQ: '#9A6312', Manual: '#2C7A57' };
 const fmtDate = (iso) => new Date(iso).toLocaleDateString(undefined, { month: 'short', day: 'numeric', year: 'numeric' });
@@ -97,7 +98,9 @@ function DocDrawer({ id, onClose }) {
                 <div className="text-xs font-semibold uppercase tracking-wide text-ink-soft">Attachments</div>
                 <div className="mt-2 flex flex-wrap gap-2">
                   {d.attachments.map((a, i) => (
-                    <span key={i} className="rounded-lg border border-line bg-white px-3 py-1.5 text-xs">{a.kind === 'pdf' ? '📄' : '🔗'} {a.label}</span>
+                    a.url
+                      ? <a key={i} href={a.url} target="_blank" rel="noreferrer" download={a.label} className="rounded-lg border border-line bg-white px-3 py-1.5 text-xs hover:border-pine">{a.kind === 'pdf' ? '📄' : '🔗'} {a.label}</a>
+                      : <span key={i} className="rounded-lg border border-line bg-white px-3 py-1.5 text-xs">{a.kind === 'pdf' ? '📄' : '🔗'} {a.label}</span>
                   ))}
                 </div>
               </div>
@@ -118,11 +121,31 @@ function NewDocModal({ types, onClose }) {
   const qc = useQueryClient();
   const depts = useQuery({ queryKey: ['departments'], queryFn: getDepartments, retry: false });
   const [f, setF] = useState({ title: '', type: types[0] || 'SOP', departmentId: '', body: '', tags: '', link: '' });
+  const [attachments, setAttachments] = useState([]); // { kind:'pdf', label, url }
+  const [uploading, setUploading] = useState(0);
   const set = (k, v) => setF((s) => ({ ...s, [k]: v }));
   const mut = useMutation({
-    mutationFn: () => createDoc({ ...f, tags: f.tags.split(',').map((t) => t.trim()).filter(Boolean) }),
+    mutationFn: () => createDoc({ ...f, tags: f.tags.split(',').map((t) => t.trim()).filter(Boolean), attachments }),
     onSuccess: () => { qc.invalidateQueries(); onClose(); },
   });
+
+  async function onFiles(e) {
+    const files = Array.from(e.target.files || []);
+    e.target.value = '';
+    for (const file of files) {
+      if (file.size > 10 * 1024 * 1024) { alert(`"${file.name}" is larger than 10MB and was skipped.`); continue; }
+      const dataUrl = await new Promise((res, rej) => { const r = new FileReader(); r.onload = () => res(r.result); r.onerror = rej; r.readAsDataURL(file); });
+      setUploading((n) => n + 1);
+      try {
+        const up = await uploadFile(dataUrl, file.name);
+        setAttachments((a) => [...a, { kind: 'pdf', label: up.name, url: up.url }]);
+      } catch (err) {
+        alert(`Couldn't upload "${file.name}": ${err.response?.data?.error?.message || err.message}`);
+      } finally {
+        setUploading((n) => n - 1);
+      }
+    }
+  }
 
   return (
     <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/30 p-4" onClick={onClose}>
@@ -142,12 +165,28 @@ function NewDocModal({ types, onClose }) {
           <textarea rows={4} value={f.body} onChange={(e) => set('body', e.target.value)} className="inp mt-1" placeholder="The knowledge that persists…" /></label>
         <label className="mt-3 block text-sm"><span className="text-ink-soft">Link <span className="text-xs">(optional)</span></span>
           <input value={f.link} onChange={(e) => set('link', e.target.value)} className="inp mt-1" placeholder="https://docs.google.com/…" /></label>
+        <div className="mt-3 text-sm">
+          <span className="text-ink-soft">Files <span className="text-xs">(PDF, images — optional)</span></span>
+          <div className="mt-1 flex flex-wrap items-center gap-2">
+            <label className="cursor-pointer rounded-lg border border-line px-3 py-1.5 text-xs hover:border-pine">
+              📎 Attach file
+              <input type="file" multiple accept=".pdf,image/*" onChange={onFiles} className="hidden" />
+            </label>
+            {uploading > 0 && <span className="text-xs text-ink-soft">Uploading {uploading}…</span>}
+            {attachments.map((a, i) => (
+              <span key={i} className="flex items-center gap-1 rounded-lg bg-paper px-2 py-1 text-xs">
+                📄 <span className="max-w-[140px] truncate">{a.label}</span>
+                <button onClick={() => setAttachments((x) => x.filter((_, j) => j !== i))} className="text-ink-soft hover:text-brick">✕</button>
+              </span>
+            ))}
+          </div>
+        </div>
         <label className="mt-3 block text-sm"><span className="text-ink-soft">Tags <span className="text-xs">(comma-separated)</span></span>
           <input value={f.tags} onChange={(e) => set('tags', e.target.value)} className="inp mt-1" placeholder="results, academics" /></label>
         {mut.error && <p className="mt-2 text-sm text-brick">{mut.error.response?.data?.error?.message || 'Failed'}</p>}
         <div className="mt-4 flex justify-end gap-2">
           <button onClick={onClose} className="rounded-lg border border-line px-4 py-2 text-sm">Cancel</button>
-          <button onClick={() => mut.mutate()} disabled={!f.title.trim() || mut.isPending} className="rounded-lg bg-pine px-4 py-2 text-sm font-medium text-white disabled:opacity-60">Publish</button>
+          <button onClick={() => mut.mutate()} disabled={!f.title.trim() || mut.isPending || uploading > 0} className="rounded-lg bg-pine px-4 py-2 text-sm font-medium text-white disabled:opacity-60">Publish</button>
         </div>
       </div>
     </div>

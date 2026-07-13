@@ -1,7 +1,9 @@
 import { useRef, useState } from 'react';
+import { uploadFile } from '../../api/files.api.js';
 
 const initials = (n = '') => n.split(' ').map((w) => w[0]).slice(0, 2).join('').toUpperCase();
-const MAX_BYTES = 4 * 1024 * 1024; // ~4MB soft cap per attachment (stored as data URL)
+const MAX_MB = 10;
+const MAX_BYTES = MAX_MB * 1024 * 1024; // per-attachment cap
 
 // Slack-style composer: multi-line text, @-mention autocomplete, and
 // file/image attachments. Enter sends; Shift+Enter makes a new line.
@@ -12,6 +14,7 @@ export default function MessageComposer({ onSend, users = [], placeholder = 'Wri
   const [atts, setAtts] = useState([]);       // { kind, name, url }
   const [mentionIds, setMentionIds] = useState([]);
   const [sending, setSending] = useState(false);
+  const [uploading, setUploading] = useState(0);
   // mention dropdown state
   const [mq, setMq] = useState(null);          // { query, start } or null
   const [hi, setHi] = useState(0);
@@ -65,15 +68,27 @@ export default function MessageComposer({ onSend, users = [], placeholder = 'Wri
     if (e.key === 'Enter' && !e.shiftKey) { e.preventDefault(); send(); }
   }
 
-  function onFiles(e) {
+  async function onFiles(e) {
     const files = Array.from(e.target.files || []);
-    files.forEach((f) => {
-      if (f.size > MAX_BYTES) { alert(`"${f.name}" is larger than 4MB and was skipped.`); return; }
-      const reader = new FileReader();
-      reader.onload = () => setAtts((a) => [...a, { kind: f.type.startsWith('image/') ? 'image' : 'file', name: f.name, url: reader.result }]);
-      reader.readAsDataURL(f);
-    });
     e.target.value = ''; // allow re-selecting the same file
+    for (const f of files) {
+      if (f.size > MAX_BYTES) { alert(`"${f.name}" is larger than ${MAX_MB}MB and was skipped.`); continue; }
+      const dataUrl = await new Promise((res, rej) => {
+        const r = new FileReader();
+        r.onload = () => res(r.result);
+        r.onerror = rej;
+        r.readAsDataURL(f);
+      });
+      setUploading((n) => n + 1);
+      try {
+        const att = await uploadFile(dataUrl, f.name); // → { kind, name, url }
+        setAtts((a) => [...a, att]);
+      } catch (err) {
+        alert(`Couldn't upload "${f.name}": ${err.response?.data?.error?.message || err.message}`);
+      } finally {
+        setUploading((n) => n - 1);
+      }
+    }
   }
 
   async function send() {
@@ -109,8 +124,11 @@ export default function MessageComposer({ onSend, users = [], placeholder = 'Wri
       )}
 
       {/* attachment chips */}
-      {atts.length > 0 && (
-        <div className="mb-2 flex flex-wrap gap-2">
+      {(atts.length > 0 || uploading > 0) && (
+        <div className="mb-2 flex flex-wrap items-center gap-2">
+          {uploading > 0 && (
+            <span className="rounded-lg border border-line bg-paper px-2 py-1 text-xs text-ink-soft">Uploading {uploading}…</span>
+          )}
           {atts.map((a, i) => (
             <div key={i} className="flex items-center gap-1.5 rounded-lg border border-line bg-paper px-2 py-1 text-xs">
               {a.kind === 'image'
@@ -146,7 +164,7 @@ export default function MessageComposer({ onSend, users = [], placeholder = 'Wri
         <button
           type="button"
           onClick={send}
-          disabled={sending || (!text.trim() && atts.length === 0)}
+          disabled={sending || uploading > 0 || (!text.trim() && atts.length === 0)}
           className="h-9 shrink-0 rounded-lg bg-pine px-4 text-sm font-medium text-white disabled:opacity-50"
         >
           Send

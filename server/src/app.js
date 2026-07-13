@@ -37,6 +37,7 @@ import messageRoutes from './modules/messages/messages.routes.js';
 import masterRoutes from './modules/masters/masters.routes.js';
 import credentialRoutes from './modules/credentials/credentials.routes.js';
 import employeeRoutes from './modules/employees/employees.routes.js';
+import fileRoutes from './modules/files/files.routes.js';
 
 export const app = express();
 
@@ -61,7 +62,7 @@ if (env.siteAccessUser && env.siteAccessPass) {
 
 // core middleware
 app.use(cors({ origin: env.corsOrigin || true, credentials: true }));
-app.use(express.json());
+app.use(express.json({ limit: '15mb' })); // headroom for file/image uploads (data URLs)
 app.use(cookieParser());
 if (env.nodeEnv !== 'test') app.use(morgan('dev'));
 
@@ -94,6 +95,7 @@ api.use('/messages', authenticate, messageRoutes);        // protected
 api.use('/masters', authenticate, masterRoutes);          // protected (HR-gated inside)
 api.use('/credentials', authenticate, credentialRoutes);  // protected (HR-gated + self change-password)
 api.use('/employees', authenticate, employeeRoutes);      // protected (HR-gated onboarding)
+api.use('/files', authenticate, fileRoutes);              // protected (Supabase Storage upload)
 app.use('/api/v1', api);
 
 // Unknown /api routes → JSON 404 (never fall through to the SPA).

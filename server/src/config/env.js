@@ -17,4 +17,12 @@ export const env = {
   // the public URL from being openly browsable when it holds real employee data.
   siteAccessUser: process.env.SITE_ACCESS_USER || '',
   siteAccessPass: process.env.SITE_ACCESS_PASS || '',
+  // Supabase Storage for file/image uploads. When set, uploads go to the bucket
+  // and only the URL is stored in the DB; otherwise the app falls back to
+  // embedding the file (data URL) so local dev works without any config.
+  supabase: {
+    url: process.env.SUPABASE_URL || '',
+    serviceKey: process.env.SUPABASE_SERVICE_KEY || '',
+    bucket: process.env.SUPABASE_BUCKET || 'uploads',
+  },
 };
