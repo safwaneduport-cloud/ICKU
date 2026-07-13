@@ -2,16 +2,6 @@ import { useState } from 'react';
 import { useNavigate } from 'react-router-dom';
 import { useAuth } from '../store/AuthContext.jsx';
 
-// Neutral demo accounts (kept out of the public repo's real-name space).
-// Local dev with the imported org uses its own logins instead.
-const DEMO = [
-  { u: 'ceo', p: 'ceo@123', label: 'CEO', sub: 'Full admin' },
-  { u: 'cos', p: 'cos@123', label: 'Chief of Staff', sub: 'Ops & media' },
-  { u: 'coursemgr', p: 'cm@123', label: 'Course Manager', sub: 'Class 7,8' },
-  { u: 'hod78', p: 'hod@123', label: 'Academic HOD', sub: 'Class 7,8' },
-  { u: 'hrhead', p: 'hr@123', label: 'HR Head', sub: 'Admin access' },
-];
-
 export default function Login() {
   const { login } = useAuth();
   const navigate = useNavigate();
@@ -34,11 +24,6 @@ export default function Login() {
     }
   };
 
-  const fillDemo = (d) => {
-    setUsername(d.u);
-    setPassword(d.p);
-  };
-
   return (
     <div className="flex min-h-screen items-center justify-center px-4">
       <div className="w-full max-w-md">
@@ -58,7 +43,7 @@ export default function Login() {
               className="mt-1 w-full rounded-lg border border-line px-3 py-2 outline-none focus:border-pine"
               value={username}
               onChange={(e) => setUsername(e.target.value)}
-              placeholder="e.g. ceo"
+              placeholder="your work username"
               autoFocus
             />
           </label>
@@ -85,25 +70,12 @@ export default function Login() {
           >
             {busy ? 'Signing in…' : 'Sign in'}
           </button>
-        </form>
 
-        <div className="mt-5">
-          <div className="mb-2 text-center text-xs uppercase tracking-wide text-ink-soft">
-            Demo accounts — click to fill
-          </div>
-          <div className="flex flex-wrap justify-center gap-2">
-            {DEMO.map((d) => (
-              <button
-                key={d.u}
-                onClick={() => fillDemo(d)}
-                className="rounded-lg border border-line bg-white px-3 py-1.5 text-left text-xs hover:border-pine"
-              >
-                <div className="font-medium text-ink">{d.label}</div>
-                <div className="font-mono text-[10px] text-ink-soft">{d.u} · {d.sub}</div>
-              </button>
-            ))}
-          </div>
-        </div>
+          <p className="mt-4 text-center text-xs text-ink-soft">
+            Use the credentials shared with you by HR. First time in? Change your
+            password under <span className="font-medium">Profile</span> after signing in.
+          </p>
+        </form>
       </div>
     </div>
   );
