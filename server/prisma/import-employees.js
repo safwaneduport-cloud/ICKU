@@ -3,8 +3,8 @@
 // Called by import.js (the `reset`/`employees` stages).
 import { LEAVE_TYPES } from '../src/modules/leave/leave.lib.js';
 import { monthlyGrossFor } from '../src/modules/payroll/payroll.lib.js';
+import { randomPassword } from '../src/lib/password.js';
 
-const TEMP_PASSWORD = 'Eduport@123';
 const TIER_RANK = { Leadership: 4, 'Dept Head': 3, Manager: 2, Employee: 1 };
 const PALETTE = ['#134535', '#2C7A57', '#3F6075', '#9A6312', '#9C3A2A', '#5E635B', '#1B7A6B', '#6B4D8A', '#B5651D', '#3A7D44', '#7A3F5E', '#2C5F7A'];
 
@@ -35,7 +35,6 @@ export async function seedEmployees(prisma, rows, bcrypt) {
   console.log(`Creating ${rows.length} employees…`);
   const validId = new Set(rows.map((r) => r.employeeNumber));
   const usernameUsed = new Set();
-  const passwordHash = bcrypt.hashSync(TEMP_PASSWORD, 8); // one hash, reused (temp pw)
 
   const mkUsername = (r) => {
     let base = (r.workEmail || '').split('@')[0].toLowerCase().replace(/[^a-z0-9._-]/g, '');
@@ -112,11 +111,12 @@ export async function seedEmployees(prisma, rows, bcrypt) {
     await prisma.salary.create({ data: { userId: r.employeeNumber, monthlyGross: monthlyGrossFor(r.tier, r.employeeNumber) } });
   }
 
-  // ── credentials (username + temp password for everyone) ──
-  console.log('Creating login credentials…');
+  // ── credentials (username + a UNIQUE random temp password for everyone) ──
+  console.log('Creating login credentials (unique passwords)…');
   for (const r of rows) {
+    const pw = randomPassword();
     await prisma.authCredential.create({
-      data: { userId: r.employeeNumber, username: mkUsername(r), passwordHash, tempPassword: TEMP_PASSWORD, passwordChanged: false },
+      data: { userId: r.employeeNumber, username: mkUsername(r), passwordHash: bcrypt.hashSync(pw, 8), tempPassword: pw, passwordChanged: false },
     });
   }
 
@@ -126,6 +126,6 @@ export async function seedEmployees(prisma, rows, bcrypt) {
   const hrCred = hrId ? await prisma.authCredential.findUnique({ where: { userId: hrId }, include: { user: true } }) : null;
   console.log(`\n✓ Imported ${rows.length} employees, ${deptNames.length} departments.`);
   console.log(`  Founder/CEO: ${founder}`);
-  if (hrCred) console.log(`  HR HEAD LOGIN → username: ${hrCred.username}  ·  password: ${TEMP_PASSWORD}  (${hrCred.user.name})`);
-  console.log(`  Every employee's temp password: ${TEMP_PASSWORD}`);
+  if (hrCred) console.log(`  HR HEAD LOGIN → username: ${hrCred.username}  ·  password: ${hrCred.tempPassword}  (${hrCred.user.name})`);
+  console.log('  Every employee has a UNIQUE password — export the full list from HR → Credentials (CSV/PDF).');
 }

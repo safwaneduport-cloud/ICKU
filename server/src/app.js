@@ -43,6 +43,22 @@ export const app = express();
 // Behind Render's proxy — required so Secure cookies are set over the proxied HTTPS.
 if (env.nodeEnv === 'production') app.set('trust proxy', 1);
 
+// Optional site-wide access gate (HTTP Basic Auth). When SITE_ACCESS_USER +
+// SITE_ACCESS_PASS are set, every request must carry these credentials — a hard
+// barrier in front of the whole app so the public URL isn't openly browsable.
+// The health endpoint is exempt so the platform's health check still works.
+if (env.siteAccessUser && env.siteAccessPass) {
+  app.use((req, res, next) => {
+    if (req.path === '/api/v1/health') return next();
+    const [scheme, encoded] = (req.headers.authorization || '').split(' ');
+    if (scheme === 'Basic' && encoded) {
+      const [u, p] = Buffer.from(encoded, 'base64').toString().split(':');
+      if (u === env.siteAccessUser && p === env.siteAccessPass) return next();
+    }
+    res.set('WWW-Authenticate', 'Basic realm="ICKU"').status(401).send('Authentication required.');
+  });
+}
+
 // core middleware
 app.use(cors({ origin: env.corsOrigin || true, credentials: true }));
 app.use(express.json());

@@ -1,7 +1,7 @@
 import bcrypt from 'bcryptjs';
 import { prisma } from '../../config/prisma.js';
 import { ApiError } from '../../middleware/errorHandler.js';
-import { DEFAULT_TEMP } from '../credentials/credentials.service.js';
+import { randomPassword } from '../../lib/password.js';
 import { canAdmin } from '../../lib/access.js';
 
 // Fields an employee may edit themselves (Part 5/9). HR-controlled fields
@@ -147,9 +147,10 @@ export async function onboard(input) {
 
   const user = await prisma.user.create({ data: userData });
   const username = await makeUsername(d.workEmail, d.employeeNumber);
+  const tempPassword = randomPassword();
   await prisma.authCredential.create({
-    data: { userId: user.id, username, passwordHash: bcrypt.hashSync(DEFAULT_TEMP, 8), tempPassword: DEFAULT_TEMP, passwordChanged: false },
+    data: { userId: user.id, username, passwordHash: bcrypt.hashSync(tempPassword, 8), tempPassword, passwordChanged: false },
   });
 
-  return { id: user.id, name: user.name, username, tempPassword: DEFAULT_TEMP };
+  return { id: user.id, name: user.name, username, tempPassword };
 }

@@ -12,4 +12,9 @@ export const env = {
     accessTtl: process.env.JWT_ACCESS_TTL || '15m',
     refreshTtl: process.env.JWT_REFRESH_TTL || '7d',
   },
+  // Optional site-wide access gate (HTTP Basic Auth). When both are set, the
+  // whole app requires these credentials before anything loads — used to keep
+  // the public URL from being openly browsable when it holds real employee data.
+  siteAccessUser: process.env.SITE_ACCESS_USER || '',
+  siteAccessPass: process.env.SITE_ACCESS_PASS || '',
 };

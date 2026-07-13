@@ -1,8 +1,7 @@
 import bcrypt from 'bcryptjs';
 import { prisma } from '../../config/prisma.js';
 import { ApiError } from '../../middleware/errorHandler.js';
-
-export const DEFAULT_TEMP = 'Eduport@123';
+import { randomPassword } from '../../lib/password.js';
 
 // Every employee's login row (HR view). The temp password is shown only while
 // the employee hasn't set their own — once they do, HR sees "changed" instead.
@@ -28,9 +27,10 @@ export async function list() {
   }));
 }
 
-// HR resets a login → new temp password (defaults to the shared temp), visible again.
+// HR resets a login → a fresh UNIQUE random temp password (or a chosen one),
+// visible to HR again until the employee changes it.
 export async function resetPassword(userId, newPw) {
-  const pw = ((newPw || '').trim()) || DEFAULT_TEMP;
+  const pw = ((newPw || '').trim()) || randomPassword();
   const passwordHash = bcrypt.hashSync(pw, 8);
   await prisma.authCredential
     .update({ where: { userId }, data: { passwordHash, tempPassword: pw, passwordChanged: false } })
