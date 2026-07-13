@@ -12,7 +12,7 @@ export const SELF_EDITABLE = [
   'marriageDate', 'bloodGroup', 'physicallyHandicapped', 'nationality',
   'currentAddrLine1', 'currentAddrLine2', 'currentAddrCity', 'currentAddrState', 'currentAddrZip', 'currentAddrCountry',
   'permanentAddrLine1', 'permanentAddrLine2', 'permanentAddrCity', 'permanentAddrState', 'permanentAddrZip', 'permanentAddrCountry',
-  'fatherName', 'motherName', 'spouseName', 'childrenNames', 'panNumber', 'aadhaarNumber', 'pfNumber', 'uanNumber',
+  'fatherName', 'motherName', 'spouseName', 'childrenNames', 'pfNumber', 'uanNumber',
 ];
 // Extra fields only HR may change (plain columns; department/reportsTo handled separately).
 const HR_EDITABLE = [
@@ -26,7 +26,7 @@ const COMPLETION_FIELDS = [
   ['mobilePhone', 'Mobile Phone'], ['personalEmail', 'Personal Email'], ['dateOfBirth', 'Date of Birth'],
   ['gender', 'Gender'], ['maritalStatus', 'Marital Status'], ['bloodGroup', 'Blood Group'], ['nationality', 'Nationality'],
   ['currentAddrLine1', 'Current Address'], ['currentAddrCity', 'City'], ['currentAddrState', 'State'], ['currentAddrZip', 'PIN Code'],
-  ['fatherName', "Father's Name"], ['motherName', "Mother's Name"], ['panNumber', 'PAN Number'], ['aadhaarNumber', 'Aadhaar Number'],
+  ['fatherName', "Father's Name"], ['motherName', "Mother's Name"],
 ];
 
 export async function getProfile(id) {

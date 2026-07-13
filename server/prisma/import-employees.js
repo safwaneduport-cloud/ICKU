@@ -56,7 +56,7 @@ export async function seedEmployees(prisma, rows, bcrypt) {
     'personalEmail', 'currentAddrLine1', 'currentAddrLine2', 'currentAddrCity', 'currentAddrState',
     'currentAddrZip', 'currentAddrCountry', 'permanentAddrLine1', 'permanentAddrLine2',
     'permanentAddrCity', 'permanentAddrState', 'permanentAddrZip', 'permanentAddrCountry',
-    'fatherName', 'motherName', 'spouseName', 'childrenNames', 'panNumber', 'aadhaarNumber',
+    'fatherName', 'motherName', 'spouseName', 'childrenNames',
     'pfNumber', 'uanNumber', 'employmentStatus', 'exitDate', 'exitStatus', 'terminationType',
     'terminationReason', 'resignationNote', 'costCenter', 'birthday',
   ];

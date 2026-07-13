@@ -10,7 +10,7 @@ import { changeOwnPassword } from '../api/credentials.api.js';
 
 const COMPLETION_KEYS = new Set([
   'mobilePhone', 'personalEmail', 'dateOfBirth', 'gender', 'maritalStatus', 'bloodGroup', 'nationality',
-  'currentAddrLine1', 'currentAddrCity', 'currentAddrState', 'currentAddrZip', 'fatherName', 'motherName', 'panNumber', 'aadhaarNumber',
+  'currentAddrLine1', 'currentAddrCity', 'currentAddrState', 'currentAddrZip', 'fatherName', 'motherName',
 ]);
 
 const GROUPS = [
@@ -39,7 +39,6 @@ const GROUPS = [
     { k: 'spouseName', label: 'Spouse Name' }, { k: 'childrenNames', label: "Children's Names" },
   ] },
   { title: 'Statutory', fields: [
-    { k: 'panNumber', label: 'PAN Number' }, { k: 'aadhaarNumber', label: 'Aadhaar Number' },
     { k: 'pfNumber', label: 'PF Number' }, { k: 'uanNumber', label: 'UAN Number' },
   ] },
 ];
