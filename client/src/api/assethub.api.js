@@ -47,3 +47,12 @@ export const raiseAssetEvent = (id, payload) => api.post(`/assethub/assets/${id}
 export const approveAssetEvent = (eventId, note) => api.post(`/assethub/events/${eventId}/approve`, { note }).then(d);
 export const rejectAssetEvent = (eventId, reason) => api.post(`/assethub/events/${eventId}/reject`, { reason }).then(d);
 export const repairAssetRecord = (id, note) => api.post(`/assethub/assets/${id}/repair`, { note }).then(d);
+
+// phase 5 — physical verification
+export const listVerifications = () => api.get('/assethub/verifications').then(d);
+export const getVerification = (id) => api.get(`/assethub/verifications/${id}`).then(d);
+export const createVerification = (payload) => api.post('/assethub/verifications', payload).then(d);
+export const markVerifyLine = (id, lineId, payload) => api.post(`/assethub/verifications/${id}/lines/${lineId}`, payload).then(d);
+export const resolveVerifyLine = (id, lineId) => api.post(`/assethub/verifications/${id}/lines/${lineId}/resolve`).then(d);
+export const setVerifyCount = (id, countId, actual) => api.post(`/assethub/verifications/${id}/counts/${countId}`, { actual }).then(d);
+export const closeVerification = (id) => api.post(`/assethub/verifications/${id}/close`).then(d);

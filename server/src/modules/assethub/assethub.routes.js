@@ -49,4 +49,13 @@ router.post('/assets/:id/repair', ctrl.repairAsset);
 router.post('/events/:eventId/approve', ctrl.approveEvent);
 router.post('/events/:eventId/reject', ctrl.rejectEvent);
 
+// phase 5 — physical verification
+router.get('/verifications', ctrl.listVerifications);
+router.post('/verifications', ctrl.createVerification);
+router.get('/verifications/:id', ctrl.getVerification);
+router.post('/verifications/:id/close', ctrl.closeVerification);
+router.post('/verifications/:id/lines/:lineId', ctrl.markVerifyLine);
+router.post('/verifications/:id/lines/:lineId/resolve', ctrl.resolveVerifyLine);
+router.post('/verifications/:id/counts/:countId', ctrl.setVerifyCount);
+
 export default router;

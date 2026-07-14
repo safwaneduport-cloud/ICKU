@@ -1,5 +1,6 @@
 import * as service from './assethub.service.js';
 import * as assets from './assets.service.js';
+import * as verify from './verification.service.js';
 
 const ok = (res, data) => res.json({ data, error: null });
 
@@ -57,3 +58,12 @@ export const raiseEvent = read((req) => assets.raiseEvent(req.user, req.params.i
 export const approveEvent = read((req) => assets.approveEvent(req.user, req.params.eventId, req.body?.note));
 export const rejectEvent = read((req) => assets.rejectEvent(req.user, req.params.eventId, req.body?.reason));
 export const repairAsset = read((req) => assets.repairAsset(req.user, req.params.id, req.body?.note));
+
+// phase 5 — physical verification
+export const listVerifications = read((req) => verify.listSessions(req.user));
+export const getVerification = read((req) => verify.getSession(req.user, req.params.id));
+export const createVerification = read((req) => verify.createSession(req.user, req.body || {}));
+export const markVerifyLine = read((req) => verify.markLine(req.user, req.params.id, req.params.lineId, req.body || {}));
+export const setVerifyCount = read((req) => verify.setCount(req.user, req.params.id, req.params.countId, req.body?.actual));
+export const resolveVerifyLine = read((req) => verify.resolveLine(req.user, req.params.id, req.params.lineId));
+export const closeVerification = read((req) => verify.closeSession(req.user, req.params.id));

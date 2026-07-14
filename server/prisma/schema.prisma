@@ -103,6 +103,7 @@ model User {
   assetsCreated        AssetRecord[]         @relation("AssetCreator")
   assetHistoryActions  AssetHistory[]        @relation("AssetHistoryBy")
   assetEventsRequested AssetEvent[]          @relation("AssetEventRequester")
+  verificationsRun     VerificationSession[] @relation("VerificationConductor")
 
   // ── Employee master (imported from the HR sheet; all optional) ──────
   // Canonical fields already above: name(=Full Name), email(=Work Email),
@@ -778,6 +779,7 @@ model AssetSubCategory {
   itcBlockReason     String? // shown only when ITC = No
   active             Boolean       @default(true)
   records            AssetRecord[]
+  verifyCounts       VerificationCount[]
   createdAt          DateTime      @default(now())
   updatedAt          DateTime      @updatedAt
 
@@ -929,9 +931,10 @@ model AssetRecord {
   bulkBatchId    String? // groups records made in one bulk lot (Phase 3)
 
   createdById String
-  createdBy   User           @relation("AssetCreator", fields: [createdById], references: [id])
+  createdBy   User               @relation("AssetCreator", fields: [createdById], references: [id])
   history     AssetHistory[]
   events      AssetEvent[]
+  verifyLines VerificationLine[]
 
   createdAt DateTime @default(now())
   updatedAt DateTime @updatedAt
@@ -966,6 +969,54 @@ model AssetEvent {
 
   @@index([assetId])
   @@index([status])
+}
+
+// Physical verification (PRD §10): an audit of a location against the register.
+// item mode → one line per expected asset; count mode → expected vs actual per sub-category.
+model VerificationSession {
+  id            String    @id @default(uuid())
+  title         String
+  mode          String // item | count
+  siteId        String
+  buildingId    String
+  roomId        String?
+  categoryId    String?
+  status        String    @default("open") // open | closed
+  expectedCount Int       @default(0) // snapshot of register count at creation
+  conductedById String
+  conductedBy   User      @relation("VerificationConductor", fields: [conductedById], references: [id])
+  createdAt     DateTime  @default(now())
+  closedAt      DateTime?
+
+  lines  VerificationLine[]
+  counts VerificationCount[]
+
+  @@index([status])
+}
+
+model VerificationLine {
+  id        String              @id @default(uuid())
+  sessionId String
+  session   VerificationSession @relation(fields: [sessionId], references: [id], onDelete: Cascade)
+  assetId   String
+  asset     AssetRecord         @relation(fields: [assetId], references: [id])
+  result    String              @default("pending") // pending | found | missing | damaged | wrong_location
+  note      String?
+  resolved  Boolean             @default(false) // a follow-up event (write-off/damage) was raised
+
+  @@index([sessionId])
+}
+
+model VerificationCount {
+  id            String              @id @default(uuid())
+  sessionId     String
+  session       VerificationSession @relation(fields: [sessionId], references: [id], onDelete: Cascade)
+  subCategoryId String
+  subCategory   AssetSubCategory    @relation(fields: [subCategoryId], references: [id])
+  expected      Int                 @default(0)
+  actual        Int?
+
+  @@index([sessionId])
 }
 
 // The asset's history timeline + audit entries (who did what, why).
