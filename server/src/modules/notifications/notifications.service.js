@@ -1,6 +1,7 @@
 import { prisma } from '../../config/prisma.js';
 import { triggerDate, isTaskPastDue } from '../events/events.lib.js';
 import { listConversations } from '../messages/messages.service.js';
+import { approvalQueue } from '../assethub/assets.service.js';
 
 const rupee = (n) => `₹${Math.round(n).toLocaleString('en-IN')}`;
 
@@ -90,6 +91,23 @@ export async function list(user) {
     items.push({ id: `kudos-${k.id}`, kind: 'kudos', actionable: false, at: k.createdAt,
       title: `${k.from.name} gave you kudos`, sub: k.message, link: '/engagement' });
   });
+
+  // AssetHub — entries awaiting my approval / acknowledgement.
+  const assetQueue = await approvalQueue(user);
+  if (assetQueue.toApprove.length) {
+    items.push({
+      id: 'assets-approve', kind: 'approval', actionable: true, at: assetQueue.toApprove[0].submittedAt,
+      title: `${assetQueue.toApprove.length} asset${assetQueue.toApprove.length === 1 ? '' : 's'} awaiting your approval`,
+      sub: assetQueue.toApprove.slice(0, 2).map((a) => a.assetTag).join(', '), link: '/assethub',
+    });
+  }
+  if (assetQueue.toAcknowledge.length) {
+    items.push({
+      id: 'assets-ack', kind: 'approval', actionable: true, at: assetQueue.toAcknowledge[0].ackRequestedAt,
+      title: `${assetQueue.toAcknowledge.length} asset${assetQueue.toAcknowledge.length === 1 ? '' : 's'} to acknowledge`,
+      sub: 'Confirm receipt as custodian', link: '/assethub',
+    });
+  }
 
   // Unread chat messages (Groups / DMs / Event chats).
   const conversations = await listConversations(me);

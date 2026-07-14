@@ -2,12 +2,15 @@ import { useState } from 'react';
 import { useQuery } from '@tanstack/react-query';
 import { getAssetAccess } from '../api/assethub.api.js';
 import Setup from '../features/assethub/Setup.jsx';
+import RegisterTab from '../features/assethub/RegisterTab.jsx';
+import CreateTab from '../features/assethub/CreateTab.jsx';
+import ApprovalsTab from '../features/assethub/ApprovalsTab.jsx';
 
 // Sub-screens land phase by phase; placeholders name what's coming.
 const TABS = [
-  ['register', 'Register', 'Phase 2 — the full fixed-asset register with filters'],
-  ['create', 'Create', 'Phase 2/3 — individual create, bulk create & room assignment'],
-  ['approvals', 'Approvals', 'Phase 2 — the multi-stage approval queue'],
+  ['register', 'Register', null],
+  ['create', 'Create', 'Bulk create & room assignment land in Phase 3'],
+  ['approvals', 'Approvals', null],
   ['verification', 'Verification', 'Phase 5 — count-based & item-based physical verification'],
   ['reports', 'Reports', 'Phase 6 — register, movement, disposal, audit-trail reports'],
   ['setup', 'Setup', null],
@@ -34,11 +37,11 @@ export default function AssetHub() {
         ))}
       </div>
 
-      {tab === 'setup' && isAdmin ? (
-        <Setup />
-      ) : (
-        <ComingSoon tab={TABS.find(([id]) => id === tab)} isAdmin={isAdmin} onSetup={() => setTab('setup')} />
-      )}
+      {tab === 'setup' && isAdmin ? <Setup />
+        : tab === 'register' ? <RegisterTab />
+        : tab === 'create' ? <CreateTab onCreated={() => setTab('register')} />
+        : tab === 'approvals' ? <ApprovalsTab />
+        : <ComingSoon tab={TABS.find(([id]) => id === tab)} isAdmin={isAdmin} onSetup={() => setTab('setup')} />}
     </div>
   );
 }

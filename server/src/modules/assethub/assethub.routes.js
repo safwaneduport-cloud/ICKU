@@ -27,4 +27,16 @@ router.get('/roles', ctrl.listRoles);
 router.post('/roles', ctrl.addRole);
 router.delete('/roles/:id', ctrl.removeRole);
 
+// asset records + workflow
+router.get('/approvals', ctrl.approvalQueue);
+router.get('/assets', ctrl.listAssets);
+router.post('/assets', ctrl.createAsset);
+router.get('/assets/:id', ctrl.getAsset);
+router.patch('/assets/:id', ctrl.updateAsset);
+router.post('/assets/:id/submit', ctrl.submitAsset);
+router.post('/assets/:id/approve', ctrl.approveAsset);
+router.post('/assets/:id/sendback', ctrl.sendBackAsset);
+router.post('/assets/:id/acknowledge', ctrl.acknowledgeAsset);
+router.post('/assets/:id/void', ctrl.voidAsset);
+
 export default router;

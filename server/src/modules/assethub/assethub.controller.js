@@ -1,4 +1,5 @@
 import * as service from './assethub.service.js';
+import * as assets from './assets.service.js';
 
 const ok = (res, data) => res.json({ data, error: null });
 
@@ -32,3 +33,15 @@ export const replaceBands = write((req) => service.replaceBands(req.body?.bands)
 export const listRoles = write(() => service.listRoles());
 export const addRole = write((req) => service.addRole(req.body || {}));
 export const removeRole = write((req) => service.removeRole(req.params.id));
+
+// ── asset records + workflow (role checks live in the service) ──────
+export const listAssets = read((req) => assets.listAssets(req.user, req.query));
+export const getAsset = read((req) => assets.getAsset(req.user, req.params.id));
+export const createAsset = read((req) => assets.createAsset(req.user, req.body || {}));
+export const updateAsset = read((req) => assets.updateAsset(req.user, req.params.id, req.body || {}));
+export const submitAsset = read((req) => assets.submitAsset(req.user, req.params.id));
+export const approveAsset = read((req) => assets.approveAsset(req.user, req.params.id, req.body?.note));
+export const sendBackAsset = read((req) => assets.sendBack(req.user, req.params.id, req.body?.reason));
+export const acknowledgeAsset = read((req) => assets.acknowledgeAsset(req.user, req.params.id));
+export const voidAsset = read((req) => assets.voidAsset(req.user, req.params.id, req.body?.reason));
+export const approvalQueue = read((req) => assets.approvalQueue(req.user));

@@ -23,3 +23,15 @@ export const replaceBands = (bands) => api.put('/assethub/bands', { bands }).the
 export const getAssetRoles = () => api.get('/assethub/roles').then(d);
 export const addAssetRole = (p) => api.post('/assethub/roles', p).then(d);
 export const removeAssetRole = (id) => api.delete(`/assethub/roles/${id}`).then(d);
+
+// asset records + workflow
+export const listAssetRecords = (params) => api.get('/assethub/assets', { params }).then(d);
+export const getAssetRecord = (id) => api.get(`/assethub/assets/${id}`).then(d);
+export const createAssetRecord = (p) => api.post('/assethub/assets', p).then(d);
+export const updateAssetRecord = (id, p) => api.patch(`/assethub/assets/${id}`, p).then(d);
+export const submitAssetRecord = (id) => api.post(`/assethub/assets/${id}/submit`).then(d);
+export const approveAssetRecord = (id, note) => api.post(`/assethub/assets/${id}/approve`, { note }).then(d);
+export const sendBackAssetRecord = (id, reason) => api.post(`/assethub/assets/${id}/sendback`, { reason }).then(d);
+export const acknowledgeAssetRecord = (id) => api.post(`/assethub/assets/${id}/acknowledge`).then(d);
+export const voidAssetRecord = (id, reason) => api.post(`/assethub/assets/${id}/void`, { reason }).then(d);
+export const getApprovalQueue = () => api.get('/assethub/approvals').then(d);

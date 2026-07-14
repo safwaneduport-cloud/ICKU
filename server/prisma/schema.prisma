@@ -98,7 +98,10 @@ model User {
   messagesSent         Message[]            @relation("MessageAuthor")
 
   // AssetHub (V1)
-  assetRoles AssetRoleAssignment[] @relation("AssetRoles")
+  assetRoles          AssetRoleAssignment[] @relation("AssetRoles")
+  assetsCustodian     AssetRecord[]         @relation("AssetCustodian")
+  assetsCreated       AssetRecord[]         @relation("AssetCreator")
+  assetHistoryActions AssetHistory[]        @relation("AssetHistoryBy")
 
   // ── Employee master (imported from the HR sheet; all optional) ──────
   // Canonical fields already above: name(=Full Name), email(=Work Email),
@@ -758,6 +761,7 @@ model AssetCategory {
   defaultGlCode   GlCode?            @relation(fields: [defaultGlCodeId], references: [id])
   active          Boolean            @default(true)
   subCategories   AssetSubCategory[]
+  records         AssetRecord[]
   createdAt       DateTime           @default(now())
   updatedAt       DateTime           @updatedAt
 }
@@ -772,6 +776,7 @@ model AssetSubCategory {
   defaultItcEligible Boolean       @default(true)
   itcBlockReason     String? // shown only when ITC = No
   active             Boolean       @default(true)
+  records            AssetRecord[]
   createdAt          DateTime      @default(now())
   updatedAt          DateTime      @updatedAt
 
@@ -784,6 +789,7 @@ model AssetSite {
   name      String // Single Campus
   active    Boolean         @default(true)
   buildings AssetBuilding[]
+  records   AssetRecord[]
   createdAt DateTime        @default(now())
 }
 
@@ -795,6 +801,7 @@ model AssetBuilding {
   site      AssetSite   @relation(fields: [siteId], references: [id])
   active    Boolean     @default(true)
   rooms     AssetRoom[]
+  records   AssetRecord[]
   createdAt DateTime    @default(now())
 
   @@unique([siteId, code])
@@ -806,6 +813,7 @@ model AssetRoom {
   buildingId String
   building   AssetBuilding @relation(fields: [buildingId], references: [id])
   active     Boolean       @default(true)
+  records    AssetRecord[]
 
   @@unique([buildingId, number])
 }
@@ -818,6 +826,7 @@ model AssetVendor {
   pan       String?
   contact   String?
   active    Boolean  @default(true)
+  records   AssetRecord[]
   createdAt DateTime @default(now())
 }
 
@@ -827,6 +836,7 @@ model GlCode {
   name       String // Furniture & Fixtures
   active     Boolean         @default(true)
   categories AssetCategory[]
+  records    AssetRecord[]
   createdAt  DateTime        @default(now())
 }
 
@@ -853,4 +863,94 @@ model AssetRoleAssignment {
 
   @@index([userId])
   @@index([role])
+}
+
+// One row per physical asset. Bulk create makes N of these. Status runs the
+// PRD workflow; approvalChain is the band-derived approver sequence snapshot.
+model AssetRecord {
+  id       String @id @default(uuid())
+  assetTag String @unique // e.g. SC-HSLA-BED-0001
+
+  categoryId    String
+  category      AssetCategory    @relation(fields: [categoryId], references: [id])
+  subCategoryId String
+  subCategory   AssetSubCategory @relation(fields: [subCategoryId], references: [id])
+  description   String
+  make          String?
+  model         String?
+  serialNumber  String?
+  quantity      Int              @default(1)
+
+  siteId     String
+  site       AssetSite     @relation(fields: [siteId], references: [id])
+  buildingId String
+  building   AssetBuilding @relation(fields: [buildingId], references: [id])
+  roomId     String?
+  room       AssetRoom?    @relation(fields: [roomId], references: [id])
+
+  custodianId String
+  custodian   User   @relation("AssetCustodian", fields: [custodianId], references: [id])
+
+  dateOfPurchase String? // "YYYY-MM-DD"
+  vendorId       String?
+  vendor         AssetVendor? @relation(fields: [vendorId], references: [id])
+  invoiceNumber  String?
+  taxableValue   Float?
+  gstAmount      Float?
+  totalValue     Float? // auto: taxable + GST
+
+  photoUrl   String?
+  invoiceUrl String?
+
+  warrantyMonths    Int?
+  insured           Boolean @default(false)
+  insurancePolicyNo String?
+  insuranceExpiry   String? // "YYYY-MM-DD"
+
+  // Finance-stage fields
+  glCodeId             String?
+  glCode               GlCode? @relation(fields: [glCodeId], references: [id])
+  itcEligible          Boolean?
+  itcBlockReason       String?
+  datePutToUse         String? // "YYYY-MM-DD"
+  capitalisationMethod String? // Invoice | Vendor Confirmation | Deemed Cost | Nominal
+  deemedCostBasis      String?
+  legacy               Boolean @default(false)
+
+  // Workflow
+  status         String    @default("draft") // draft|pending_branch|pending_finance_review|pending_finance_approval|pending_ack|active|under_repair|in_transfer|disposed|written_off|void
+  approvalChain  String[]  @default([]) // role keys, snapshot from the matching band at submit
+  chainIndex     Int       @default(0) // next approver position in approvalChain
+  submittedAt    DateTime?
+  ackRequestedAt DateTime? // for the 48h escalation
+  acknowledgedAt DateTime?
+  remarks        String?
+  bulkBatchId    String? // groups records made in one bulk lot (Phase 3)
+
+  createdById String
+  createdBy   User           @relation("AssetCreator", fields: [createdById], references: [id])
+  history     AssetHistory[]
+
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  @@index([status])
+  @@index([siteId, buildingId])
+  @@index([custodianId])
+  @@index([bulkBatchId])
+}
+
+// The asset's history timeline + audit entries (who did what, why).
+model AssetHistory {
+  id      String      @id @default(uuid())
+  assetId String
+  asset   AssetRecord @relation(fields: [assetId], references: [id], onDelete: Cascade)
+  action  String // created|submitted|approved|sent_back|finance_edited|acknowledged|voided|...
+  byId    String?
+  by      User?       @relation("AssetHistoryBy", fields: [byId], references: [id])
+  note    String?
+  meta    Json? // e.g. field changes { field: [old, new] }
+  createdAt DateTime  @default(now())
+
+  @@index([assetId])
 }
