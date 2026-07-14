@@ -43,4 +43,10 @@ router.post('/assets/:id/acknowledge', ctrl.acknowledgeAsset);
 router.post('/assets/:id/void', ctrl.voidAsset);
 router.post('/assets/:id/assign-room', ctrl.assignRoom);
 
+// phase 4 — lifecycle events
+router.post('/assets/:id/events', ctrl.raiseEvent);
+router.post('/assets/:id/repair', ctrl.repairAsset);
+router.post('/events/:eventId/approve', ctrl.approveEvent);
+router.post('/events/:eventId/reject', ctrl.rejectEvent);
+
 export default router;

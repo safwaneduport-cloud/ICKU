@@ -99,9 +99,10 @@ model User {
 
   // AssetHub (V1)
   assetRoles          AssetRoleAssignment[] @relation("AssetRoles")
-  assetsCustodian     AssetRecord[]         @relation("AssetCustodian")
-  assetsCreated       AssetRecord[]         @relation("AssetCreator")
-  assetHistoryActions AssetHistory[]        @relation("AssetHistoryBy")
+  assetsCustodian      AssetRecord[]         @relation("AssetCustodian")
+  assetsCreated        AssetRecord[]         @relation("AssetCreator")
+  assetHistoryActions  AssetHistory[]        @relation("AssetHistoryBy")
+  assetEventsRequested AssetEvent[]          @relation("AssetEventRequester")
 
   // ── Employee master (imported from the HR sheet; all optional) ──────
   // Canonical fields already above: name(=Full Name), email(=Work Email),
@@ -930,6 +931,7 @@ model AssetRecord {
   createdById String
   createdBy   User           @relation("AssetCreator", fields: [createdById], references: [id])
   history     AssetHistory[]
+  events      AssetEvent[]
 
   createdAt DateTime @default(now())
   updatedAt DateTime @updatedAt
@@ -938,6 +940,32 @@ model AssetRecord {
   @@index([siteId, buildingId])
   @@index([custodianId])
   @@index([bulkBatchId])
+}
+
+// Lifecycle requests on an active asset (PRD §9): transfer / capex / damage /
+// disposal / write-off. Each carries its own fixed approval chain by type.
+model AssetEvent {
+  id            String      @id @default(uuid())
+  assetId       String
+  asset         AssetRecord @relation(fields: [assetId], references: [id], onDelete: Cascade)
+  type          String // transfer|capex|damage|disposal|write_off
+  status        String      @default("pending") // pending|approved|rejected
+  reason        String
+  amount        Float? // capex addition / disposal proceeds / write-off value
+  toSiteId      String? // transfer destination (plain ids; names resolved in service)
+  toBuildingId  String?
+  toRoomId      String?
+  toCustodianId String?
+  docUrl        String?
+  approvalChain String[]    @default([]) // role keys for this event type
+  chainIndex    Int         @default(0)
+  requestedById String
+  requestedBy   User        @relation("AssetEventRequester", fields: [requestedById], references: [id])
+  createdAt     DateTime    @default(now())
+  decidedAt     DateTime?
+
+  @@index([assetId])
+  @@index([status])
 }
 
 // The asset's history timeline + audit entries (who did what, why).

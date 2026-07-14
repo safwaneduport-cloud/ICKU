@@ -108,6 +108,13 @@ export async function list(user) {
       sub: 'Confirm receipt as custodian', link: '/assethub',
     });
   }
+  if (assetQueue.toApproveEvents?.length) {
+    items.push({
+      id: 'assets-events', kind: 'approval', actionable: true, at: assetQueue.toApproveEvents[0].createdAt,
+      title: `${assetQueue.toApproveEvents.length} asset lifecycle request${assetQueue.toApproveEvents.length === 1 ? '' : 's'}`,
+      sub: assetQueue.toApproveEvents.slice(0, 2).map((e) => `${e.asset.assetTag} · ${e.type.replace('_', ' ')}`).join(', '), link: '/assethub',
+    });
+  }
 
   // Unread chat messages (Groups / DMs / Event chats).
   const conversations = await listConversations(me);

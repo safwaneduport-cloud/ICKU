@@ -51,3 +51,9 @@ export const bulkCreateAssets = read((req) => assets.bulkCreateAssets(req.user, 
 export const bulkImportLegacy = read((req) => assets.bulkImportLegacy(req.user, req.body || {}));
 export const assignRoom = read((req) => assets.assignRoom(req.user, req.params.id, req.body?.roomId || null));
 export const bulkAssignRoom = read((req) => assets.bulkAssignRoom(req.user, req.body || {}));
+
+// phase 4 — lifecycle events
+export const raiseEvent = read((req) => assets.raiseEvent(req.user, req.params.id, req.body || {}));
+export const approveEvent = read((req) => assets.approveEvent(req.user, req.params.eventId, req.body?.note));
+export const rejectEvent = read((req) => assets.rejectEvent(req.user, req.params.eventId, req.body?.reason));
+export const repairAsset = read((req) => assets.repairAsset(req.user, req.params.id, req.body?.note));

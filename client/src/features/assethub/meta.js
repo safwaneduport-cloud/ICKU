@@ -24,4 +24,17 @@ export const ACTION_LABEL = {
   created: 'Created', submitted: 'Submitted for approval', approved: 'Approved',
   sent_back: 'Sent back', finance_edited: 'Finance edit', acknowledged: 'Acknowledged',
   voided: 'Voided', room_assigned: 'Room assigned',
+  event_raised: 'Lifecycle request raised', event_approved: 'Lifecycle step approved',
+  event_rejected: 'Lifecycle request rejected', transferred: 'Transferred',
+  capex_added: 'Capex capitalised', damaged: 'Marked under repair', repaired: 'Repaired',
+  disposed: 'Disposed', written_off: 'Written off',
+};
+
+// Lifecycle event types (PRD §9) — label, emoji, approval chain (for display).
+export const EVENT_TYPES = {
+  transfer: { label: 'Transfer', icon: '🔀', chain: 'Branch Manager → Finance Manager' },
+  capex: { label: 'Capex addition', icon: '➕', chain: 'Finance Manager' },
+  damage: { label: 'Report damage', icon: '🛠', chain: 'Branch Manager' },
+  disposal: { label: 'Dispose', icon: '📤', chain: 'CFO' },
+  write_off: { label: 'Write off', icon: '🗑', chain: 'CFO' },
 };

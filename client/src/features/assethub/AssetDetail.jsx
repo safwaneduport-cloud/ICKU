@@ -3,9 +3,12 @@ import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query';
 import {
   getAssetRecord, getAssetMasters, getAssetAccess, submitAssetRecord, approveAssetRecord,
   sendBackAssetRecord, acknowledgeAssetRecord, voidAssetRecord, updateAssetRecord,
+  raiseAssetEvent, approveAssetEvent, rejectAssetEvent, repairAssetRecord,
 } from '../../api/assethub.api.js';
+import { getUsers } from '../../api/users.api.js';
 import { useAuth } from '../../store/AuthContext.jsx';
-import { STATUS, ROLE_LABEL, ACTION_LABEL, inr } from './meta.js';
+import { groupByDept } from '../../lib/orgGroups.js';
+import { STATUS, ROLE_LABEL, ACTION_LABEL, EVENT_TYPES, inr } from './meta.js';
 
 const FINANCE_ROLES = ['FINANCE_EXECUTIVE', 'FINANCE_MANAGER', 'CFO'];
 const fmt = (d) => (d ? new Date(d).toLocaleDateString('en-IN', { day: '2-digit', month: 'short', year: 'numeric' }) : '—');
@@ -24,8 +27,10 @@ export default function AssetDetail({ assetId, queueMode, onClose }) {
   const access = useQuery({ queryKey: ['assetAccess'], queryFn: getAssetAccess, retry: false });
   const q = useQuery({ queryKey: ['assetRecord', assetId], queryFn: () => getAssetRecord(assetId), enabled: !!assetId, retry: false });
   const masters = useQuery({ queryKey: ['assetMasters'], queryFn: getAssetMasters, retry: false, enabled: !!assetId });
+  const usersQ = useQuery({ queryKey: ['users'], queryFn: getUsers, retry: false, enabled: !!assetId });
   const [err, setErr] = useState('');
   const [fin, setFin] = useState(null); // finance-review draft { glCodeId, itcEligible, datePutToUse, reason }
+  const [evForm, setEvForm] = useState(null); // lifecycle event form { type, ...fields }
 
   const a = q.data;
   const me = user?.id;
@@ -51,6 +56,10 @@ export default function AssetDetail({ assetId, queueMode, onClose }) {
   const ack = act((id) => acknowledgeAssetRecord(id));
   const voidIt = act(({ id, reason }) => voidAssetRecord(id, reason), onClose);
   const saveFin = act(({ id, patch }) => updateAssetRecord(id, patch), () => setFin(null));
+  const raiseEv = act(({ id, payload }) => raiseAssetEvent(id, payload), () => setEvForm(null));
+  const approveEv = act(({ eventId, note }) => approveAssetEvent(eventId, note), onClose);
+  const rejectEv = act(({ eventId, reason }) => rejectAssetEvent(eventId, reason), onClose);
+  const repair = act((id) => repairAssetRecord(id));
 
   if (!assetId) return null;
 
@@ -62,6 +71,31 @@ export default function AssetDetail({ assetId, queueMode, onClose }) {
   const canApprove = queueMode === 'approve' && a && ['pending_branch', 'pending_finance_review', 'pending_finance_approval'].includes(a.status);
   const financeGate = isFinanceStage && (!a.glCodeId || a.itcEligible == null || !a.datePutToUse);
   const glCodes = (masters.data?.glCodes || []).filter((g) => g.active);
+
+  // ── lifecycle ──
+  const pendingEvent = a?.events?.find((e) => e.status === 'pending');
+  const canRaise = a && ['active', 'under_repair'].includes(a.status) && !pendingEvent
+    && (isAdmin || roles.length > 0 || a.custodian?.id === me);
+  const availableEvents = a && (a.status === 'under_repair'
+    ? ['disposal', 'write_off']
+    : a.status === 'active' ? ['transfer', 'capex', 'damage', 'disposal', 'write_off'] : []);
+  const canRepair = a && a.status === 'under_repair' && (isAdmin || roles.length > 0);
+  const canActOnEvent = queueMode === 'event' && pendingEvent;
+  const sites = (masters.data?.sites || []).filter((s) => s.active);
+  const evSite = sites.find((s) => s.id === evForm?.toSiteId);
+  const evBldgs = (evSite?.buildings || []).filter((x) => x.active);
+  const evBldg = evBldgs.find((x) => x.id === evForm?.toBuildingId);
+  const evRooms = (evBldg?.rooms || []).filter((r) => r.active);
+
+  const submitEvent = () => {
+    const p = { type: evForm.type, reason: evForm.reason };
+    if (evForm.type === 'transfer') Object.assign(p, { toBuildingId: evForm.toBuildingId, toRoomId: evForm.toRoomId || undefined, toCustodianId: evForm.toCustodianId });
+    if (['capex', 'disposal', 'write_off'].includes(evForm.type)) p.amount = evForm.amount;
+    raiseEv.mutate({ id: a.id, payload: p });
+  };
+  const evValid = evForm && evForm.reason?.trim()
+    && (evForm.type !== 'transfer' || (evForm.toBuildingId && evForm.toCustodianId))
+    && (evForm.type !== 'capex' || Number(evForm.amount) > 0);
 
   return (
     <div className="fixed inset-0 z-40 flex justify-end bg-ink/30" onClick={onClose}>
@@ -148,6 +182,89 @@ export default function AssetDetail({ assetId, queueMode, onClose }) {
 
               {a.remarks && <p className="rounded-xl border border-line bg-white p-3 text-sm text-ink-soft"><span className="font-medium text-ink">Remarks: </span>{a.remarks}</p>}
 
+              {/* pending lifecycle request */}
+              {pendingEvent && (
+                <div className="rounded-xl border border-ochre/40 bg-ochre-tint/30 p-3">
+                  <div className="flex items-center gap-2">
+                    <span>{EVENT_TYPES[pendingEvent.type]?.icon}</span>
+                    <span className="text-sm font-semibold text-ochre">{EVENT_TYPES[pendingEvent.type]?.label} requested</span>
+                    <span className="text-xs text-ink-soft">by {pendingEvent.requestedBy?.name}</span>
+                  </div>
+                  <p className="mt-1 text-sm text-ink">{pendingEvent.reason}</p>
+                  {pendingEvent.type === 'transfer' && (
+                    <p className="mt-1 text-xs text-ink-soft">→ {pendingEvent.toBuildingName}{pendingEvent.toRoomNumber ? ` · Room ${pendingEvent.toRoomNumber}` : ''} · custodian {pendingEvent.toCustodianName}</p>
+                  )}
+                  {pendingEvent.amount != null && <p className="mt-1 text-xs text-ink-soft">Amount: {inr(pendingEvent.amount)}</p>}
+                  <div className="mt-2 flex flex-wrap items-center gap-1.5 text-xs">
+                    {pendingEvent.approvalChain.map((role, i) => (
+                      <span key={i} className={`rounded-full px-2 py-1 ${i < pendingEvent.chainIndex ? 'bg-sage-tint text-sage' : i === pendingEvent.chainIndex ? 'bg-ochre-tint font-medium text-ochre' : 'bg-white text-ink-soft'}`}>
+                        {i < pendingEvent.chainIndex ? '✓ ' : ''}{ROLE_LABEL[role] || role}
+                      </span>
+                    ))}
+                  </div>
+                </div>
+              )}
+
+              {/* raise a lifecycle event */}
+              {canRaise && !evForm && (
+                <div className="rounded-xl border border-line bg-white p-3">
+                  <p className="mb-2 text-xs font-medium uppercase tracking-wide text-ink-soft">Lifecycle</p>
+                  <div className="flex flex-wrap gap-2">
+                    {availableEvents.map((t) => (
+                      <button key={t} onClick={() => setEvForm({ type: t })}
+                        className="rounded-lg border border-line px-3 py-1.5 text-sm hover:border-pine">
+                        {EVENT_TYPES[t].icon} {EVENT_TYPES[t].label}
+                      </button>
+                    ))}
+                    {canRepair && (
+                      <button onClick={() => repair.mutate(a.id)} disabled={repair.isPending}
+                        className="rounded-lg border border-sage/50 px-3 py-1.5 text-sm text-sage hover:bg-sage-tint/40">✅ Mark repaired</button>
+                    )}
+                  </div>
+                </div>
+              )}
+
+              {/* lifecycle event form */}
+              {evForm && (
+                <div className="rounded-xl border border-pine/30 bg-white p-3">
+                  <div className="mb-2 flex items-center justify-between">
+                    <span className="text-sm font-semibold text-pine">{EVENT_TYPES[evForm.type].icon} {EVENT_TYPES[evForm.type].label}</span>
+                    <button onClick={() => setEvForm(null)} className="text-xs text-ink-soft hover:text-ink">Cancel</button>
+                  </div>
+                  <p className="mb-2 text-xs text-ink-soft">Approval: {EVENT_TYPES[evForm.type].chain}</p>
+                  {evForm.type === 'transfer' && (
+                    <div className="mb-2 grid grid-cols-2 gap-2">
+                      <select value={evForm.toSiteId || ''} onChange={(e) => setEvForm((s) => ({ ...s, toSiteId: e.target.value, toBuildingId: '', toRoomId: '' }))} className="rounded-lg border border-line px-2 py-1.5 text-sm">
+                        <option value="">Destination site…</option>{sites.map((s) => <option key={s.id} value={s.id}>{s.name}</option>)}
+                      </select>
+                      <select value={evForm.toBuildingId || ''} onChange={(e) => setEvForm((s) => ({ ...s, toBuildingId: e.target.value, toRoomId: '' }))} disabled={!evSite} className="rounded-lg border border-line px-2 py-1.5 text-sm">
+                        <option value="">Building…</option>{evBldgs.map((x) => <option key={x.id} value={x.id}>{x.name}</option>)}
+                      </select>
+                      <select value={evForm.toRoomId || ''} onChange={(e) => setEvForm((s) => ({ ...s, toRoomId: e.target.value }))} disabled={!evBldg} className="rounded-lg border border-line px-2 py-1.5 text-sm">
+                        <option value="">No room</option>{evRooms.map((r) => <option key={r.id} value={r.id}>{r.number}</option>)}
+                      </select>
+                      <select value={evForm.toCustodianId || ''} onChange={(e) => setEvForm((s) => ({ ...s, toCustodianId: e.target.value }))} className="rounded-lg border border-line px-2 py-1.5 text-sm">
+                        <option value="">New custodian…</option>
+                        {groupByDept(usersQ.data || []).map(([dept, mem]) => (
+                          <optgroup key={dept} label={dept}>{mem.map((u) => <option key={u.id} value={u.id}>{u.name}</option>)}</optgroup>
+                        ))}
+                      </select>
+                    </div>
+                  )}
+                  {['capex', 'disposal', 'write_off'].includes(evForm.type) && (
+                    <input type="number" placeholder={evForm.type === 'capex' ? 'Amount to capitalise (₹) *' : evForm.type === 'disposal' ? 'Sale proceeds (₹, optional)' : 'Write-off value (₹, optional)'}
+                      value={evForm.amount ?? ''} onChange={(e) => setEvForm((s) => ({ ...s, amount: e.target.value }))}
+                      className="mb-2 w-full rounded-lg border border-line px-2 py-1.5 text-sm" />
+                  )}
+                  <textarea rows={2} placeholder="Reason *" value={evForm.reason || ''} onChange={(e) => setEvForm((s) => ({ ...s, reason: e.target.value }))}
+                    className="w-full rounded-lg border border-line px-2 py-1.5 text-sm" />
+                  <button onClick={submitEvent} disabled={!evValid || raiseEv.isPending}
+                    className="mt-2 rounded-lg bg-pine px-4 py-1.5 text-sm font-medium text-white disabled:opacity-50">
+                    {raiseEv.isPending ? 'Submitting…' : 'Submit request'}
+                  </button>
+                </div>
+              )}
+
               {/* history timeline */}
               <section>
                 <p className="mb-2 text-xs font-medium uppercase tracking-wide text-ink-soft">History</p>
@@ -192,8 +309,19 @@ export default function AssetDetail({ assetId, queueMode, onClose }) {
 
             {err && <p className="border-t border-line bg-brick/5 px-5 py-2 text-sm text-brick">{err}</p>}
 
-            {(canSubmit || canApprove || canAck || canVoid) && (
+            {(canSubmit || canApprove || canAck || canVoid || canActOnEvent) && (
               <footer className="flex flex-wrap items-center gap-2 border-t border-line bg-white px-5 py-3">
+                {canActOnEvent && (
+                  <>
+                    <button onClick={() => approveEv.mutate({ eventId: pendingEvent.id, note: undefined })} disabled={approveEv.isPending}
+                      className="rounded-lg bg-sage px-4 py-2 text-sm font-medium text-white disabled:opacity-50">
+                      {approveEv.isPending ? 'Approving…' : `Approve ${EVENT_TYPES[pendingEvent.type]?.label.toLowerCase()}`}
+                    </button>
+                    <button onClick={() => { const reason = prompt('Reason for rejecting this request:'); if (reason) rejectEv.mutate({ eventId: pendingEvent.id, reason }); }}
+                      disabled={rejectEv.isPending}
+                      className="rounded-lg border border-brick/40 px-4 py-2 text-sm font-medium text-brick disabled:opacity-50">Reject</button>
+                  </>
+                )}
                 {canSubmit && (
                   <button onClick={() => submit.mutate(a.id)} disabled={submit.isPending}
                     className="rounded-lg bg-pine px-4 py-2 text-sm font-medium text-white disabled:opacity-50">Submit for approval</button>

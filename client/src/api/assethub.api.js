@@ -41,3 +41,9 @@ export const bulkCreateAssets = (payload) => api.post('/assethub/assets/bulk', p
 export const importLegacyAssets = (payload) => api.post('/assethub/assets/import', payload).then(d);
 export const assignAssetRoom = (id, roomId) => api.post(`/assethub/assets/${id}/assign-room`, { roomId }).then(d);
 export const bulkAssignRoom = (ids, roomId) => api.post('/assethub/assets/assign-room', { ids, roomId }).then(d);
+
+// phase 4 — lifecycle events
+export const raiseAssetEvent = (id, payload) => api.post(`/assethub/assets/${id}/events`, payload).then(d);
+export const approveAssetEvent = (eventId, note) => api.post(`/assethub/events/${eventId}/approve`, { note }).then(d);
+export const rejectAssetEvent = (eventId, reason) => api.post(`/assethub/events/${eventId}/reject`, { reason }).then(d);
+export const repairAssetRecord = (id, note) => api.post(`/assethub/assets/${id}/repair`, { note }).then(d);

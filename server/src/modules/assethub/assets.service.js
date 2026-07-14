@@ -456,6 +456,162 @@ export async function voidAsset(user, id, reason) {
   return updated;
 }
 
+// ── lifecycle events (PRD §9): transfer / capex / damage / disposal / write-off ──
+const EVENT_CHAINS = {
+  transfer: ['BRANCH_MANAGER', 'FINANCE_MANAGER'],
+  capex: ['FINANCE_MANAGER'],
+  damage: ['BRANCH_MANAGER'],
+  disposal: ['CFO'],
+  write_off: ['CFO'],
+};
+const EVENT_LABEL = { transfer: 'Transfer', capex: 'Capex addition', damage: 'Damage report', disposal: 'Disposal', write_off: 'Write-off' };
+const ASSET_ROLE_KEYS = ['OPERATIONS', 'BRANCH_MANAGER', 'FINANCE_EXECUTIVE', 'FINANCE_MANAGER', 'CFO'];
+const rupee = (n) => `₹${Number(n).toLocaleString('en-IN')}`;
+
+// Which location does a BRANCH_MANAGER step act on? Transfers approve at the
+// destination; every other event acts on the asset's current location.
+function eventLoc(ev, asset) {
+  return ev.type === 'transfer' ? { siteId: ev.toSiteId, buildingId: ev.toBuildingId } : asset;
+}
+
+export async function raiseEvent(user, assetId, input = {}) {
+  const asset = await loadAsset(assetId);
+  const roles = await rolesOf(user.id);
+  const type = input.type;
+  if (!EVENT_CHAINS[type]) throw new ApiError(400, 'Unknown lifecycle event type');
+
+  const okStatus = (type === 'disposal' || type === 'write_off') ? ['active', 'under_repair'] : ['active'];
+  if (!okStatus.includes(asset.status)) {
+    throw new ApiError(400, `A ${EVENT_LABEL[type].toLowerCase()} can only be raised on an ${okStatus.join(' or ')} asset`);
+  }
+  const open = await prisma.assetEvent.findFirst({ where: { assetId, status: 'pending' } });
+  if (open) throw new ApiError(409, 'This asset already has a pending lifecycle request');
+
+  const hasAssetRole = roles.some((r) => ASSET_ROLE_KEYS.includes(r.role));
+  const canRaise = isHubAdmin(user, roles) || hasAssetRole || (type === 'damage' && asset.custodianId === user.id);
+  if (!canRaise) throw new ApiError(403, 'You are not allowed to raise lifecycle requests');
+
+  const reason = (input.reason || '').trim();
+  if (!reason) throw new ApiError(400, 'A reason is required');
+
+  const data = {
+    assetId, type, reason, status: 'pending', approvalChain: EVENT_CHAINS[type], chainIndex: 0,
+    requestedById: user.id, docUrl: input.docUrl || null,
+  };
+  if (type === 'transfer') {
+    const bld = await prisma.assetBuilding.findUnique({ where: { id: input.toBuildingId || '' } });
+    if (!bld) throw new ApiError(400, 'Choose a destination building');
+    const cust = await prisma.user.findUnique({ where: { id: input.toCustodianId || '' }, select: { id: true, status: true } });
+    if (!cust || cust.status !== 'active') throw new ApiError(400, 'Choose an active destination custodian');
+    if (input.toRoomId) {
+      const room = await prisma.assetRoom.findUnique({ where: { id: input.toRoomId } });
+      if (!room || room.buildingId !== bld.id) throw new ApiError(400, 'Room must belong to the destination building');
+    }
+    if (bld.id === asset.buildingId && cust.id === asset.custodianId && (input.toRoomId || null) === asset.roomId) {
+      throw new ApiError(400, 'The destination is the same as the current location and custodian');
+    }
+    Object.assign(data, { toSiteId: bld.siteId, toBuildingId: bld.id, toRoomId: input.toRoomId || null, toCustodianId: cust.id });
+  } else if (type === 'capex') {
+    const amt = Number(input.amount);
+    if (!amt || amt <= 0) throw new ApiError(400, 'Enter the capex amount to capitalise');
+    data.amount = amt;
+  } else if (type === 'disposal' || type === 'write_off') {
+    if (input.amount != null && input.amount !== '') data.amount = Number(input.amount) || 0;
+  }
+
+  const ev = await prisma.assetEvent.create({ data });
+  if (type === 'transfer') await prisma.assetRecord.update({ where: { id: assetId }, data: { status: 'in_transfer' } });
+  await log(assetId, 'event_raised', user.id, `${EVENT_LABEL[type]} requested — ${reason}`, { eventId: ev.id, type });
+  return getAsset(user, assetId);
+}
+
+async function applyEvent(actorId, ev, asset) {
+  if (ev.type === 'transfer') {
+    const custodianChanged = ev.toCustodianId && ev.toCustodianId !== asset.custodianId;
+    await prisma.assetRecord.update({
+      where: { id: asset.id },
+      data: {
+        siteId: ev.toSiteId, buildingId: ev.toBuildingId, roomId: ev.toRoomId || null,
+        custodianId: ev.toCustodianId || asset.custodianId,
+        status: custodianChanged ? 'pending_ack' : 'active',
+        ...(custodianChanged ? { ackRequestedAt: new Date(), acknowledgedAt: null } : {}),
+      },
+    });
+    await log(asset.id, 'transferred', actorId,
+      custodianChanged ? 'Transferred — awaiting new custodian acknowledgement' : 'Transferred', { eventId: ev.id });
+  } else if (ev.type === 'capex') {
+    await prisma.assetRecord.update({ where: { id: asset.id }, data: { totalValue: (asset.totalValue || 0) + (ev.amount || 0), status: 'active' } });
+    await log(asset.id, 'capex_added', actorId, `Capitalised ${rupee(ev.amount)} addition`, { amount: ev.amount });
+  } else if (ev.type === 'damage') {
+    await prisma.assetRecord.update({ where: { id: asset.id }, data: { status: 'under_repair' } });
+    await log(asset.id, 'damaged', actorId, 'Marked under repair', { eventId: ev.id });
+  } else if (ev.type === 'disposal') {
+    await prisma.assetRecord.update({ where: { id: asset.id }, data: { status: 'disposed' } });
+    await log(asset.id, 'disposed', actorId, ev.amount != null ? `Disposed (proceeds ${rupee(ev.amount)})` : 'Disposed', { proceeds: ev.amount ?? null });
+  } else if (ev.type === 'write_off') {
+    await prisma.assetRecord.update({ where: { id: asset.id }, data: { status: 'written_off' } });
+    await log(asset.id, 'written_off', actorId, ev.amount != null ? `Written off (${rupee(ev.amount)})` : 'Written off', { value: ev.amount ?? null });
+  }
+}
+
+export async function approveEvent(user, eventId, note) {
+  const ev = await prisma.assetEvent.findUnique({ where: { id: eventId } });
+  if (!ev) throw new ApiError(404, 'Lifecycle request not found');
+  if (ev.status !== 'pending') throw new ApiError(400, 'This request is no longer pending');
+  const asset = await loadAsset(ev.assetId);
+  const roles = await rolesOf(user.id);
+  if (ev.requestedById === user.id) throw new ApiError(403, 'Maker-checker: you cannot approve a request you raised');
+
+  const role = ev.approvalChain[ev.chainIndex];
+  if (!role) throw new ApiError(400, 'Approval chain is exhausted');
+  const allowed = role === 'BRANCH_MANAGER'
+    ? (scopeCovers(roles, 'BRANCH_MANAGER', eventLoc(ev, asset)) || isHubAdmin(user, roles))
+    : (hasRole(roles, role) || isHubAdmin(user, roles));
+  if (!allowed) throw new ApiError(403, `This step needs the ${role.replaceAll('_', ' ').toLowerCase()} role`);
+
+  const nextIndex = ev.chainIndex + 1;
+  const done = nextIndex >= ev.approvalChain.length;
+  await prisma.assetEvent.update({
+    where: { id: eventId },
+    data: { chainIndex: nextIndex, ...(done ? { status: 'approved', decidedAt: new Date() } : {}) },
+  });
+  await log(ev.assetId, 'event_approved', user.id, note || `Approved ${EVENT_LABEL[ev.type].toLowerCase()} (${role.replaceAll('_', ' ').toLowerCase()})`, { eventId });
+  if (done) await applyEvent(user.id, ev, asset);
+  return getAsset(user, ev.assetId);
+}
+
+export async function rejectEvent(user, eventId, reason) {
+  const ev = await prisma.assetEvent.findUnique({ where: { id: eventId } });
+  if (!ev) throw new ApiError(404, 'Lifecycle request not found');
+  if (ev.status !== 'pending') throw new ApiError(400, 'This request is no longer pending');
+  if (!(reason || '').trim()) throw new ApiError(400, 'A reason is required to reject');
+  const asset = await loadAsset(ev.assetId);
+  const roles = await rolesOf(user.id);
+  const role = ev.approvalChain[ev.chainIndex];
+  const allowed = isHubAdmin(user, roles) || (role === 'BRANCH_MANAGER'
+    ? scopeCovers(roles, 'BRANCH_MANAGER', eventLoc(ev, asset))
+    : hasRole(roles, role));
+  if (!allowed) throw new ApiError(403, 'Only the current approver can reject this request');
+
+  await prisma.assetEvent.update({ where: { id: eventId }, data: { status: 'rejected', decidedAt: new Date() } });
+  if (ev.type === 'transfer' && asset.status === 'in_transfer') {
+    await prisma.assetRecord.update({ where: { id: asset.id }, data: { status: 'active' } });
+  }
+  await log(ev.assetId, 'event_rejected', user.id, reason.trim(), { eventId, type: ev.type });
+  return getAsset(user, ev.assetId);
+}
+
+export async function repairAsset(user, id, note) {
+  const asset = await loadAsset(id);
+  const roles = await rolesOf(user.id);
+  if (asset.status !== 'under_repair') throw new ApiError(400, 'Only assets under repair can be marked repaired');
+  const canDo = isHubAdmin(user, roles) || scopeCovers(roles, 'OPERATIONS', asset) || scopeCovers(roles, 'BRANCH_MANAGER', asset);
+  if (!canDo) throw new ApiError(403, 'That location is outside your scope');
+  const updated = await prisma.assetRecord.update({ where: { id }, data: { status: 'active' }, include: DETAIL_INCLUDE });
+  await log(id, 'repaired', user.id, note || 'Repaired and returned to service');
+  return updated;
+}
+
 // ── reads ────────────────────────────────────────────────────────────
 export async function listAssets(user, { q, status, categoryId, siteId, buildingId, custodianId } = {}) {
   const roles = await rolesOf(user.id);
@@ -501,12 +657,35 @@ export async function listAssets(user, { q, status, categoryId, siteId, building
 
 export async function getAsset(user, id) {
   const asset = await loadAsset(id);
-  const history = await prisma.assetHistory.findMany({
-    where: { assetId: id },
-    orderBy: { createdAt: 'asc' },
-    include: { by: { select: { id: true, name: true } } },
-  });
-  return { ...asset, history };
+  const [history, events] = await Promise.all([
+    prisma.assetHistory.findMany({
+      where: { assetId: id }, orderBy: { createdAt: 'asc' },
+      include: { by: { select: { id: true, name: true } } },
+    }),
+    prisma.assetEvent.findMany({
+      where: { assetId: id }, orderBy: { createdAt: 'desc' },
+      include: { requestedBy: { select: { id: true, name: true } } },
+    }),
+  ]);
+  // Resolve transfer destination labels (buildings / rooms / custodians) in one pass.
+  const bIds = [...new Set(events.map((e) => e.toBuildingId).filter(Boolean))];
+  const rIds = [...new Set(events.map((e) => e.toRoomId).filter(Boolean))];
+  const cIds = [...new Set(events.map((e) => e.toCustodianId).filter(Boolean))];
+  const [blds, rooms, custs] = await Promise.all([
+    bIds.length ? prisma.assetBuilding.findMany({ where: { id: { in: bIds } }, select: { id: true, name: true } }) : [],
+    rIds.length ? prisma.assetRoom.findMany({ where: { id: { in: rIds } }, select: { id: true, number: true } }) : [],
+    cIds.length ? prisma.user.findMany({ where: { id: { in: cIds } }, select: { id: true, name: true } }) : [],
+  ]);
+  const bMap = new Map(blds.map((b) => [b.id, b.name]));
+  const rMap = new Map(rooms.map((r) => [r.id, r.number]));
+  const cMap = new Map(custs.map((c) => [c.id, c.name]));
+  const shaped = events.map((e) => ({
+    ...e,
+    toBuildingName: e.toBuildingId ? bMap.get(e.toBuildingId) : null,
+    toRoomNumber: e.toRoomId ? rMap.get(e.toRoomId) : null,
+    toCustodianName: e.toCustodianId ? cMap.get(e.toCustodianId) : null,
+  }));
+  return { ...asset, history, events: shaped };
 }
 
 // What's waiting on me — used by the Approvals tab AND the notification bell.
@@ -538,5 +717,18 @@ export async function approvalQueue(user) {
     escalated: !!(a.ackRequestedAt && now - a.ackRequestedAt.getTime() > ACK_ESCALATE_HOURS * 3600e3),
   }));
 
-  return { toApprove, toAcknowledge };
+  // Lifecycle requests awaiting my approval (maker-checker excluded).
+  const pendingEvents = await prisma.assetEvent.findMany({
+    where: { status: 'pending' }, orderBy: { createdAt: 'asc' },
+    include: { asset: { include: DETAIL_INCLUDE }, requestedBy: { select: { id: true, name: true } } },
+  });
+  const toApproveEvents = pendingEvents.filter((e) => {
+    if (e.requestedById === user.id) return false;
+    const role = e.approvalChain[e.chainIndex];
+    if (!role) return false;
+    if (role === 'BRANCH_MANAGER') return scopeCovers(roles, 'BRANCH_MANAGER', eventLoc(e, e.asset)) || admin;
+    return hasRole(roles, role) || admin;
+  });
+
+  return { toApprove, toAcknowledge, toApproveEvents };
 }
