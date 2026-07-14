@@ -10,6 +10,7 @@ const KIND = {
   expense: { dot: '#9A6312', label: 'Expense' },
   announcement: { dot: '#134535', label: 'News' },
   kudos: { dot: '#2C7A57', label: 'Kudos' },
+  message: { dot: '#2C7A57', label: 'Message' },
 };
 
 export default function NotificationBell() {

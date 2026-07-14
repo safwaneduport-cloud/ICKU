@@ -1,5 +1,6 @@
 import { prisma } from '../../config/prisma.js';
 import { triggerDate, isTaskPastDue } from '../events/events.lib.js';
+import { listConversations } from '../messages/messages.service.js';
 
 const rupee = (n) => `₹${Math.round(n).toLocaleString('en-IN')}`;
 
@@ -88,6 +89,18 @@ export async function list(user) {
   kudos.forEach((k) => {
     items.push({ id: `kudos-${k.id}`, kind: 'kudos', actionable: false, at: k.createdAt,
       title: `${k.from.name} gave you kudos`, sub: k.message, link: '/engagement' });
+  });
+
+  // Unread chat messages (Groups / DMs / Event chats).
+  const conversations = await listConversations(me);
+  conversations.filter((c) => c.unread > 0).forEach((c) => {
+    const where = c.type === 'group' ? `# ${c.name}` : c.type === 'event' ? `🗓 ${c.name}` : c.name;
+    items.push({
+      id: `msg-${c.id}`, kind: 'message', actionable: true, at: c.lastAt,
+      title: `${c.unread} new message${c.unread === 1 ? '' : 's'}`,
+      sub: `${where}${c.lastMessage ? ' · ' + (c.lastMessage.body || '📎 attachment') : ''}`,
+      link: '/messages',
+    });
   });
 
   // Actionable items first, then most recent by timestamp.

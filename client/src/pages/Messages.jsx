@@ -139,8 +139,8 @@ function RailSection({ title, onAdd, items, selectedId, onSelect, renderIcon, em
             {renderIcon(c)}
             <span className="min-w-0 flex-1 truncate">{c.name}</span>
             {c.unread > 0 && (
-              <span className={`rounded-full px-1.5 text-[10px] font-semibold ${selectedId === c.id ? 'bg-white/25 text-white' : 'bg-brick text-white'}`}>
-                {c.unread}
+              <span className={`flex h-[18px] min-w-[18px] items-center justify-center rounded-full px-1 text-[10px] font-bold ${selectedId === c.id ? 'bg-white/25 text-white' : 'bg-sage text-white'}`}>
+                {c.unread > 99 ? '99+' : c.unread}
               </span>
             )}
           </button>
