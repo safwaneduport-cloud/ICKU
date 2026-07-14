@@ -14,7 +14,7 @@ export async function list(userId, scope) {
   });
   return meetings
     .filter((m) => scope !== 'mine' || m.ownerId === userId || m.attendees.some((a) => a.userId === userId))
-    .map((m) => ({ id: m.id, title: m.title, date: m.date, time: m.time, recurring: m.recurring, owner: m.owner, attendeeCount: m._count.attendees }));
+    .map((m) => ({ id: m.id, title: m.title, date: m.date, time: m.time, recurring: m.recurring, mode: m.mode, meetingLink: m.meetingLink, owner: m.owner, attendeeCount: m._count.attendees }));
 }
 
 export async function get(id) {
@@ -26,12 +26,15 @@ export async function get(id) {
   };
 }
 
-export async function create(ownerId, { title, date, time, recurring, attendeeIds = [], agenda = [] }) {
+export async function create(ownerId, { title, date, time, recurring, mode, meetingLink, attendeeIds = [], agenda = [] }) {
   if (!title?.trim() || !date) throw new ApiError(400, 'Title and date are required');
+  const cleanMode = ['offline', 'online', 'hybrid'].includes(mode) ? mode : 'offline';
+  const link = cleanMode === 'offline' ? null : (meetingLink || '').trim() || null;
   const uniqueAttendees = [...new Set([ownerId, ...attendeeIds])];
   const m = await prisma.meeting.create({
     data: {
       title: title.trim(), date, time: time || '10:00', recurring: recurring || 'One-off',
+      mode: cleanMode, meetingLink: link,
       ownerId, agenda: agenda.filter((a) => a.trim()),
       attendees: { create: uniqueAttendees.map((userId) => ({ userId })) },
     },

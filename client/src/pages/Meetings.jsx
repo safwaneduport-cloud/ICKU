@@ -78,13 +78,22 @@ function MeetingDrawer({ id, onClose }) {
         {!m ? <p className="text-ink-soft">Loading…</p> : (
           <>
             <div className="flex items-start justify-between">
-              <span className="rounded bg-steel-tint px-2 py-0.5 text-xs font-medium text-steel">{m.recurring}</span>
+              <div className="flex flex-wrap gap-2">
+                <span className="rounded bg-steel-tint px-2 py-0.5 text-xs font-medium text-steel">{m.recurring}</span>
+                {m.mode && <span className="rounded bg-pine-tint px-2 py-0.5 text-xs font-medium capitalize text-pine">{m.mode === 'offline' ? '🏢 Offline' : m.mode === 'online' ? '💻 Online' : '🔀 Hybrid'}</span>}
+              </div>
               <button onClick={onClose} className="rounded-lg border border-line px-3 py-1 text-sm">Close</button>
             </div>
             <h2 className="mt-3 font-serif text-2xl font-bold">{m.title}</h2>
             <div className="mt-1 flex flex-wrap gap-3 text-sm text-ink-soft">
               <span>{fmtDate(m.date)}</span><span>{m.time}</span><span>{m.owner.name} · chair</span>
             </div>
+            {m.meetingLink && (
+              <a href={m.meetingLink} target="_blank" rel="noreferrer"
+                className="mt-3 flex w-fit items-center gap-2 rounded-lg bg-pine px-4 py-2 text-sm font-medium text-white hover:opacity-90">
+                🔗 Join meeting
+              </a>
+            )}
 
             <section className="mt-5">
               <div className="text-xs font-semibold uppercase tracking-wide text-ink-soft">Attendees · {m.attendees.length}</div>
@@ -150,7 +159,7 @@ function MeetingDrawer({ id, onClose }) {
 
 function NewMeetingModal({ recurrences, onClose }) {
   const qc = useQueryClient();
-  const [f, setF] = useState({ title: '', date: '', time: '10:00', recurring: 'One-off', attendeeIds: [], agenda: '' });
+  const [f, setF] = useState({ title: '', date: '', time: '10:00', recurring: 'One-off', mode: 'offline', meetingLink: '', attendeeIds: [], agenda: '' });
   const set = (k, v) => setF((s) => ({ ...s, [k]: v }));
   const mut = useMutation({
     mutationFn: () => createMeeting({ ...f, agenda: f.agenda.split('\n').map((a) => a.trim()).filter(Boolean) }),
@@ -170,6 +179,21 @@ function NewMeetingModal({ recurrences, onClose }) {
           <label className="block text-sm"><span className="text-ink-soft">Recurs</span>
             <select value={f.recurring} onChange={(e) => set('recurring', e.target.value)} className="inp mt-1">{recurrences.map((r) => <option key={r}>{r}</option>)}</select></label>
         </div>
+        <div className="mt-3 text-sm">
+          <span className="text-ink-soft">Mode</span>
+          <div className="mt-1 flex gap-2">
+            {['offline', 'online', 'hybrid'].map((mo) => (
+              <button key={mo} type="button" onClick={() => set('mode', mo)}
+                className={`flex-1 rounded-lg border px-3 py-2 text-sm capitalize ${f.mode === mo ? 'border-pine bg-pine text-white' : 'border-line text-ink-soft hover:border-pine'}`}>
+                {mo}
+              </button>
+            ))}
+          </div>
+        </div>
+        {f.mode !== 'offline' && (
+          <label className="mt-3 block text-sm"><span className="text-ink-soft">Meeting link</span>
+            <input value={f.meetingLink} onChange={(e) => set('meetingLink', e.target.value)} className="inp mt-1" placeholder="Paste the Zoom / Teams / Meet link" /></label>
+        )}
         <div className="mt-3 text-sm"><span className="text-ink-soft">Attendees</span>
           <div className="mt-1"><AssignPicker value={f.attendeeIds} onChange={(arr) => set('attendeeIds', arr)} /></div>
         </div>

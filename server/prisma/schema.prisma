@@ -500,6 +500,8 @@ model Meeting {
   ownerId   String
   owner     User              @relation("MeetingOwner", fields: [ownerId], references: [id])
   recurring String            @default("One-off") // Daily | Weekly | Monthly | One-off
+  mode      String            @default("offline") // offline | online | hybrid
+  meetingLink String?         // Zoom/Teams/Meet link (for online/hybrid)
   agenda    String[]          @default([])
   minutes   String            @default("")
   attendees MeetingAttendee[]
