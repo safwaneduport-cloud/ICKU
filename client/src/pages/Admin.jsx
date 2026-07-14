@@ -4,6 +4,7 @@ import {
   adminAccess, getAdminUsers, createUser, updateUser, getAdminDepts, createDept, updateDept,
   getMatrix, setCapability, getSettings, toggleSetting, getAudit,
 } from '../api/admin.api.js';
+import { groupByDept } from '../lib/orgGroups.js';
 
 const TIERS = ['Leadership', 'Department Head', 'Manager', 'Employee'];
 const TABS = [['users', 'Users'], ['depts', 'Departments'], ['roles', 'Roles & Permissions'], ['system', 'System'], ['audit', 'Audit log']];
@@ -107,7 +108,10 @@ function UserModal({ user, users, depts, onClose }) {
       </div>
       <Field label="Reports to">
         <select value={f.reportsToId} onChange={(e) => set('reportsToId', e.target.value)} className="inp">
-          <option value="">— None</option>{users.filter((u) => u.id !== user?.id).map((u) => <option key={u.id} value={u.id}>{u.name}</option>)}
+          <option value="">— None</option>
+          {groupByDept(users.filter((u) => u.id !== user?.id)).map(([dept, members]) => (
+            <optgroup key={dept} label={dept}>{members.map((u) => <option key={u.id} value={u.id}>{u.name}</option>)}</optgroup>
+          ))}
         </select>
       </Field>
       {mut.error && <p className="text-sm text-brick">{mut.error.response?.data?.error?.message || 'Failed'}</p>}

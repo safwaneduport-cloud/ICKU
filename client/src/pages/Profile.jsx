@@ -7,6 +7,7 @@ import { getActiveOptions } from '../api/masters.api.js';
 import { getDepartments } from '../api/departments.api.js';
 import { getUsers } from '../api/users.api.js';
 import { changeOwnPassword } from '../api/credentials.api.js';
+import { groupByDept } from '../lib/orgGroups.js';
 
 const COMPLETION_KEYS = new Set([
   'mobilePhone', 'personalEmail', 'dateOfBirth', 'gender', 'maritalStatus', 'bloodGroup', 'nationality',
@@ -204,7 +205,11 @@ export default function Profile() {
                       <select value={form[f.k] || ''} onChange={(e) => set(f.k, e.target.value)}
                         className="w-full rounded-lg border border-line px-3 py-2 text-sm outline-none focus:border-pine">
                         <option value="">Select manager…</option>
-                        {(users.data || []).map((u) => <option key={u.id} value={u.id}>{u.name} ({u.employeeNumber || u.id})</option>)}
+                        {groupByDept(users.data || []).map(([dept, members]) => (
+                          <optgroup key={dept} label={dept}>
+                            {members.map((u) => <option key={u.id} value={u.id}>{u.name} ({u.employeeNumber || u.id})</option>)}
+                          </optgroup>
+                        ))}
                       </select>
                     ) : f.master || f.dept ? (
                       <MiniSelect field={f} value={form[f.k]} onChange={(v) => set(f.k, v)} />

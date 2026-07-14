@@ -6,6 +6,7 @@ import { getActiveOptions } from '../api/masters.api.js';
 import { getDepartments } from '../api/departments.api.js';
 import { getUsers } from '../api/users.api.js';
 import { onboardEmployee } from '../api/employees.api.js';
+import { groupByDept } from '../lib/orgGroups.js';
 
 // Field layout for the onboarding form. `master` = dropdown from master data,
 // `dept`/`person` = special sources, `req` = mandatory (Part 4).
@@ -148,7 +149,11 @@ export default function OnboardEmployee() {
                       <select value={form[f.k] || ''} onChange={(e) => set(f.k, e.target.value)}
                         className={`w-full rounded-lg border px-3 py-2 text-sm outline-none focus:border-pine ${invalid ? 'border-brick' : 'border-line'}`}>
                         <option value="">Select manager…</option>
-                        {(users.data || []).map((u) => <option key={u.id} value={u.id}>{u.name} ({u.employeeNumber || u.id})</option>)}
+                        {groupByDept(users.data || []).map(([dept, members]) => (
+                          <optgroup key={dept} label={dept}>
+                            {members.map((u) => <option key={u.id} value={u.id}>{u.name} ({u.employeeNumber || u.id})</option>)}
+                          </optgroup>
+                        ))}
                       </select>
                     ) : (
                       <input type={f.type || 'text'} value={form[f.k] || ''} onChange={(e) => set(f.k, e.target.value)}

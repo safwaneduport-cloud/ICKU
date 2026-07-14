@@ -4,6 +4,7 @@ import { useAuth } from '../store/AuthContext.jsx';
 import { useProfile } from '../store/ProfileContext.jsx';
 import { getEngagement, giveKudos, votePoll } from '../api/engagement.api.js';
 import { getUsers } from '../api/users.api.js';
+import { groupByDept } from '../lib/orgGroups.js';
 
 const initials = (n = '') => n.split(' ').map((w) => w[0]).slice(0, 2).join('').toUpperCase();
 
@@ -139,7 +140,11 @@ function GiveKudosModal({ onClose }) {
         <label className="mt-4 block text-sm"><span className="text-ink-soft">To</span>
           <select value={toId} onChange={(e) => setToId(e.target.value)} className="mt-1 w-full rounded-lg border border-line px-3 py-2">
             <option value="">Select a colleague…</option>
-            {(users.data || []).filter((u) => u.id !== user?.id).map((u) => <option key={u.id} value={u.id}>{u.name}</option>)}
+            {groupByDept((users.data || []).filter((u) => u.id !== user?.id)).map(([dept, members]) => (
+              <optgroup key={dept} label={dept}>
+                {members.map((u) => <option key={u.id} value={u.id}>{u.name}</option>)}
+              </optgroup>
+            ))}
           </select>
         </label>
         <label className="mt-3 block text-sm"><span className="text-ink-soft">Message</span>

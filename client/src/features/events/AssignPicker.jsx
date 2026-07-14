@@ -1,6 +1,7 @@
 import { useMemo, useState } from 'react';
 import { useQuery } from '@tanstack/react-query';
 import { getUsers } from '../../api/users.api.js';
+import { groupByDept } from '../../lib/orgGroups.js';
 
 // Searchable multi-select of users, grouped by department (helpful with a large
 // org). Search filters across all departments; a per-department "all" toggles
@@ -13,21 +14,7 @@ export default function AssignPicker({ value = [], onChange }) {
   const all = users.data || [];
   const byId = Object.fromEntries(all.map((u) => [u.id, u.name]));
 
-  const groups = useMemo(() => {
-    const term = q.trim().toLowerCase();
-    const filtered = term
-      ? all.filter((u) => u.name.toLowerCase().includes(term) || (u.role || '').toLowerCase().includes(term) || (u.department?.name || '').toLowerCase().includes(term))
-      : all;
-    const map = new Map();
-    for (const u of filtered) {
-      const dept = u.department?.name || 'Unassigned';
-      if (!map.has(dept)) map.set(dept, []);
-      map.get(dept).push(u);
-    }
-    return [...map.entries()]
-      .map(([dept, list]) => [dept, list.sort((a, b) => a.name.localeCompare(b.name))])
-      .sort((a, b) => a[0].localeCompare(b[0]));
-  }, [all, q]);
+  const groups = useMemo(() => groupByDept(all, q), [all, q]);
 
   const toggle = (id) => onChange(value.includes(id) ? value.filter((x) => x !== id) : [...value, id]);
   const toggleDept = (members) => {

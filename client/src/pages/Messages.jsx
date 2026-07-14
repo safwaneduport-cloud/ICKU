@@ -9,6 +9,7 @@ import { useProfile } from '../store/ProfileContext.jsx';
 import MessageComposer from '../features/messages/MessageComposer.jsx';
 import ChatMessage from '../features/messages/ChatMessage.jsx';
 import AssignPicker from '../features/events/AssignPicker.jsx';
+import { groupByDept } from '../lib/orgGroups.js';
 
 const initials = (n = '') => n.split(' ').map((w) => w[0]).slice(0, 2).join('').toUpperCase();
 
@@ -291,19 +292,25 @@ function NewGroupModal({ onClose, onCreated }) {
 function NewDmModal({ users, onClose, onOpened }) {
   const [q, setQ] = useState('');
   const mut = useMutation({ mutationFn: (userId) => openDm(userId), onSuccess: (c) => onOpened(c.id) });
-  const list = q.trim() ? users.filter((u) => u.name.toLowerCase().includes(q.toLowerCase()) || u.role.toLowerCase().includes(q.toLowerCase())) : users;
+  const groups = groupByDept(users, q);
   return (
     <ModalShell title="New direct message" onClose={onClose}>
-      <input value={q} onChange={(e) => setQ(e.target.value)} autoFocus placeholder="Search a colleague…"
+      <input value={q} onChange={(e) => setQ(e.target.value)} autoFocus placeholder="Search name, role or department…"
         className="mt-4 w-full rounded-lg border border-line px-3 py-2 text-sm outline-none focus:border-pine" />
       <div className="mt-2 max-h-72 overflow-y-auto">
-        {list.map((u) => (
-          <button key={u.id} onClick={() => mut.mutate(u.id)} disabled={mut.isPending}
-            className="flex w-full items-center gap-2 rounded-lg px-2 py-2 text-left text-sm hover:bg-pine-tint">
-            <span className="flex h-7 w-7 items-center justify-center rounded-lg bg-pine text-[10px] font-semibold text-white">{initials(u.name)}</span>
-            <span className="flex-1 truncate">{u.name}</span>
-            <span className="truncate text-xs text-ink-soft">{u.role}</span>
-          </button>
+        {groups.length === 0 && <p className="px-2 py-2 text-xs text-ink-soft">No matches.</p>}
+        {groups.map(([dept, members]) => (
+          <div key={dept} className="mb-1">
+            <div className="rounded bg-paper px-2 py-1 text-[11px] font-semibold uppercase tracking-wide text-ink-soft">{dept} · {members.length}</div>
+            {members.map((u) => (
+              <button key={u.id} onClick={() => mut.mutate(u.id)} disabled={mut.isPending}
+                className="flex w-full items-center gap-2 rounded-lg px-2 py-2 text-left text-sm hover:bg-pine-tint">
+                <span className="flex h-7 w-7 items-center justify-center rounded-lg bg-pine text-[10px] font-semibold text-white">{initials(u.name)}</span>
+                <span className="flex-1 truncate">{u.name}</span>
+                <span className="truncate text-xs text-ink-soft">{u.role}</span>
+              </button>
+            ))}
+          </div>
         ))}
       </div>
     </ModalShell>
