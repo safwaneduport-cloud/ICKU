@@ -44,3 +44,29 @@ export async function listThread(req, res, next) {
 export async function markRead(req, res, next) {
   try { ok(res, await service.markRead(req.user.id, req.params.id)); } catch (e) { next(e); }
 }
+
+export async function editMessage(req, res, next) {
+  try { ok(res, await service.editMessage(req.user.id, req.params.messageId, req.body?.body)); } catch (e) { next(e); }
+}
+
+export async function deleteMessage(req, res, next) {
+  try { ok(res, await service.deleteMessage(req.user.id, req.params.messageId)); } catch (e) { next(e); }
+}
+
+export async function reactMessage(req, res, next) {
+  try { ok(res, await service.toggleReaction(req.user.id, req.params.messageId, req.body?.emoji)); } catch (e) { next(e); }
+}
+
+// reminders
+export async function listReminders(req, res, next) {
+  try { ok(res, await service.listReminders(req.user.id)); } catch (e) { next(e); }
+}
+export async function createReminder(req, res, next) {
+  try { ok(res, await service.createReminder(req.user.id, req.body || {})); } catch (e) { next(e); }
+}
+export async function completeReminder(req, res, next) {
+  try { ok(res, await service.completeReminder(req.user.id, req.params.id)); } catch (e) { next(e); }
+}
+export async function deleteReminder(req, res, next) {
+  try { ok(res, await service.deleteReminder(req.user.id, req.params.id)); } catch (e) { next(e); }
+}

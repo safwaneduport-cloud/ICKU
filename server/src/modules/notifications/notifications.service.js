@@ -1,6 +1,6 @@
 import { prisma } from '../../config/prisma.js';
 import { triggerDate, isTaskPastDue } from '../events/events.lib.js';
-import { listConversations } from '../messages/messages.service.js';
+import { listConversations, dueReminders } from '../messages/messages.service.js';
 import { approvalQueue } from '../assethub/assets.service.js';
 
 const rupee = (n) => `₹${Math.round(n).toLocaleString('en-IN')}`;
@@ -115,6 +115,15 @@ export async function list(user) {
       sub: assetQueue.toApproveEvents.slice(0, 2).map((e) => `${e.asset.assetTag} · ${e.type.replace('_', ' ')}`).join(', '), link: '/assethub',
     });
   }
+
+  // Reminders that have come due ("Remind me" on a message).
+  const reminders = await dueReminders(me);
+  reminders.forEach((r) => {
+    items.push({
+      id: `reminder-${r.id}`, kind: 'reminder', actionable: true, at: r.remindAt,
+      title: 'Reminder', sub: r.text, link: '/messages',
+    });
+  });
 
   // Unread chat messages (Groups / DMs / Event chats).
   const conversations = await listConversations(me);

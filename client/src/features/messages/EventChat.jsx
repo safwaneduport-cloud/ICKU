@@ -44,7 +44,11 @@ export default function EventChat({ eventId }) {
         {messages.data?.length === 0 && <p className="px-3 py-6 text-center text-sm text-ink-soft">No messages yet. Start the conversation 👋</p>}
         {messages.data?.map((m) => (
           <div key={m.id}>
-            <ChatMessage m={m} onOpenThread={() => setExpanded(expanded === m.id ? null : m.id)} onOpenProfile={openProfile} />
+            <ChatMessage m={m} conversationId={cid}
+              onOpenThread={() => setExpanded(expanded === m.id ? null : m.id)}
+              onOpenProfile={openProfile}
+              onChanged={() => qc.invalidateQueries({ queryKey: ['messages', cid] })}
+              onRemind={() => qc.invalidateQueries({ queryKey: ['notifications'] })} />
             {expanded === m.id && <InlineThread conversationId={cid} parentId={m.id} users={userOpts} onOpenProfile={openProfile} />}
           </div>
         ))}
@@ -70,7 +74,8 @@ function InlineThread({ conversationId, parentId, users, onOpenProfile }) {
   });
   return (
     <div className="ml-11 border-l-2 border-pine-tint pl-1">
-      {thread.data?.replies.map((r) => <ChatMessage key={r.id} m={r} onOpenProfile={onOpenProfile} />)}
+      {thread.data?.replies.map((r) => <ChatMessage key={r.id} m={r} conversationId={conversationId} onOpenProfile={onOpenProfile}
+        onChanged={() => qc.invalidateQueries({ queryKey: ['thread', parentId] })} />)}
       <div className="p-2">
         <MessageComposer onSend={(p) => reply.mutateAsync(p)} users={users} placeholder="Reply in thread…" />
       </div>

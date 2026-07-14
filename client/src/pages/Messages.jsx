@@ -12,6 +12,24 @@ import AssignPicker from '../features/events/AssignPicker.jsx';
 import { groupByDept } from '../lib/orgGroups.js';
 
 const initials = (n = '') => n.split(' ').map((w) => w[0]).slice(0, 2).join('').toUpperCase();
+const sameDay = (a, b) => new Date(a).toDateString() === new Date(b).toDateString();
+const withinGap = (a, b) => Math.abs(new Date(b) - new Date(a)) < 5 * 60e3;
+
+function DateDivider({ at }) {
+  const d = new Date(at);
+  const today = new Date();
+  const yest = new Date(Date.now() - 864e5);
+  const label = d.toDateString() === today.toDateString() ? 'Today'
+    : d.toDateString() === yest.toDateString() ? 'Yesterday'
+    : d.toLocaleDateString(undefined, { weekday: 'long', month: 'long', day: 'numeric' });
+  return (
+    <div className="my-2 flex items-center gap-3 px-4">
+      <span className="h-px flex-1 bg-line" />
+      <span className="rounded-full border border-line bg-white px-3 py-0.5 text-xs font-medium text-ink-soft">{label}</span>
+      <span className="h-px flex-1 bg-line" />
+    </div>
+  );
+}
 
 export default function Messages() {
   const qc = useQueryClient();
@@ -37,45 +55,45 @@ export default function Messages() {
 
   return (
     <div className="flex h-[calc(100vh-9rem)] gap-4">
-      {/* ── Left rail ── */}
-      <aside className="flex w-64 shrink-0 flex-col rounded-2xl border border-line bg-white">
-        <div className="flex items-center justify-between px-4 py-3">
-          <h1 className="font-serif text-lg font-bold text-pine">Messages</h1>
+      {/* ── Left rail (Slack-style dark channel list) ── */}
+      <aside className="flex w-64 shrink-0 flex-col overflow-hidden rounded-2xl bg-pine text-white">
+        <div className="flex items-center justify-between border-b border-white/10 px-4 py-3">
+          <h1 className="font-serif text-lg font-bold text-white">Messages</h1>
         </div>
         <div className="flex-1 overflow-y-auto px-2 pb-3">
           <RailSection
-            title="Groups"
+            title="Channels"
             onAdd={() => setModal('group')}
             items={groups}
             selectedId={selectedId}
             onSelect={setSelectedId}
-            renderIcon={(c) => <span className="text-ink-soft">#</span>}
-            empty="No groups yet"
+            renderIcon={() => <span className="text-white/50">#</span>}
+            empty="No channels yet"
           />
           <RailSection
-            title="Direct Messages"
+            title="Direct messages"
             onAdd={() => setModal('dm')}
             items={dms}
             selectedId={selectedId}
             onSelect={setSelectedId}
             renderIcon={(c) => (
-              <span className="flex h-5 w-5 items-center justify-center rounded bg-steel/15 text-[8px] font-semibold text-steel">{initials(c.name)}</span>
+              <span className="flex h-5 w-5 items-center justify-center rounded bg-white/15 text-[8px] font-semibold text-white">{initials(c.name)}</span>
             )}
             empty="No direct messages yet"
           />
           <RailSection
-            title="Event Messages"
+            title="Event messages"
             items={events}
             selectedId={selectedId}
             onSelect={setSelectedId}
-            renderIcon={() => <span className="text-ink-soft">🗓</span>}
+            renderIcon={() => <span>🗓</span>}
             empty="No event chats yet — join one from any event."
           />
         </div>
       </aside>
 
       {/* ── Chat pane ── */}
-      <section className="flex min-w-0 flex-1 flex-col rounded-2xl border border-line bg-white">
+      <section className="relative flex min-w-0 flex-1 flex-col rounded-2xl border border-line bg-white">
         {!selectedId ? (
           <div className="flex flex-1 flex-col items-center justify-center text-center text-ink-soft">
             <div className="text-4xl">💬</div>
@@ -124,23 +142,23 @@ function RailSection({ title, onAdd, items, selectedId, onSelect, renderIcon, em
   return (
     <div className="mt-3">
       <div className="flex items-center justify-between px-2">
-        <span className="text-[10px] font-mono font-semibold uppercase tracking-widest text-ink-soft/60">{title}</span>
-        {onAdd && <button onClick={onAdd} title={`New ${title}`} className="text-ink-soft hover:text-pine">＋</button>}
+        <span className="text-[10px] font-mono font-semibold uppercase tracking-widest text-white/45">{title}</span>
+        {onAdd && <button onClick={onAdd} title={`New ${title}`} className="text-white/55 hover:text-white">＋</button>}
       </div>
       <div className="mt-1 space-y-0.5">
-        {items.length === 0 && <p className="px-2 py-1 text-xs text-ink-soft/70">{empty}</p>}
+        {items.length === 0 && <p className="px-2 py-1 text-xs text-white/40">{empty}</p>}
         {items.map((c) => (
           <button
             key={c.id}
             onClick={() => onSelect(c.id)}
             className={`flex w-full items-center gap-2 rounded-lg px-2 py-1.5 text-left text-sm ${
-              selectedId === c.id ? 'bg-pine text-white' : 'text-ink hover:bg-pine-tint'
+              selectedId === c.id ? 'bg-white/20 font-medium text-white' : 'text-white/80 hover:bg-white/10'
             }`}
           >
             {renderIcon(c)}
             <span className="min-w-0 flex-1 truncate">{c.name}</span>
             {c.unread > 0 && (
-              <span className={`flex h-[18px] min-w-[18px] items-center justify-center rounded-full px-1 text-[10px] font-bold ${selectedId === c.id ? 'bg-white/25 text-white' : 'bg-sage text-white'}`}>
+              <span className={`flex h-[18px] min-w-[18px] items-center justify-center rounded-full px-1 text-[10px] font-bold ${selectedId === c.id ? 'bg-white/30 text-white' : 'bg-sage text-white'}`}>
                 {c.unread > 99 ? '99+' : c.unread}
               </span>
             )}
@@ -154,11 +172,13 @@ function RailSection({ title, onAdd, items, selectedId, onSelect, renderIcon, em
 function ChatPane({ conversationId, users, onOpenThread, onOpenProfile }) {
   const qc = useQueryClient();
   const [addOpen, setAddOpen] = useState(false);
+  const [toast, setToast] = useState('');
   const conv = useQuery({ queryKey: ['conversation', conversationId], queryFn: () => getConversation(conversationId), retry: false });
   const messages = useQuery({ queryKey: ['messages', conversationId], queryFn: () => getMessages(conversationId), retry: false, refetchInterval: 3000 });
   const bottomRef = useRef(null);
 
   useEffect(() => { bottomRef.current?.scrollIntoView({ behavior: 'smooth' }); }, [messages.data?.length]);
+  useEffect(() => { if (!toast) return; const t = setTimeout(() => setToast(''), 2500); return () => clearTimeout(t); }, [toast]);
 
   const send = useMutation({
     mutationFn: (payload) => postMessage(conversationId, payload),
@@ -194,11 +214,25 @@ function ChatPane({ conversationId, users, onOpenThread, onOpenProfile }) {
       <div className="flex-1 overflow-y-auto py-2">
         {messages.isLoading && <p className="px-4 py-6 text-sm text-ink-soft">Loading…</p>}
         {messages.data?.length === 0 && <p className="px-4 py-8 text-center text-sm text-ink-soft">No messages yet. Say hello! 👋</p>}
-        {messages.data?.map((m) => (
-          <ChatMessage key={m.id} m={m} onOpenThread={onOpenThread} onOpenProfile={onOpenProfile} />
-        ))}
+        {messages.data?.map((m, i) => {
+          const prev = messages.data[i - 1];
+          const newDay = !prev || !sameDay(prev.at, m.at);
+          const compact = !newDay && prev && prev.authorId === m.authorId && withinGap(prev.at, m.at) && !prev.deleted;
+          return (
+            <div key={m.id}>
+              {newDay && <DateDivider at={m.at} />}
+              <ChatMessage
+                m={m} compact={compact} conversationId={conversationId}
+                onOpenThread={onOpenThread} onOpenProfile={onOpenProfile}
+                onChanged={() => qc.invalidateQueries({ queryKey: ['messages', conversationId] })}
+                onRemind={() => { qc.invalidateQueries({ queryKey: ['notifications'] }); setToast('⏰ Reminder set'); }}
+              />
+            </div>
+          );
+        })}
         <div ref={bottomRef} />
       </div>
+      {toast && <div className="pointer-events-none absolute bottom-24 left-1/2 -translate-x-1/2 rounded-full bg-pine px-4 py-2 text-sm text-white shadow-lg">{toast}</div>}
 
       {/* composer */}
       <div className="border-t border-line p-3">
@@ -237,13 +271,15 @@ function ThreadPanel({ conversationId, parent, users, onClose, onOpenProfile }) 
       <div className="flex-1 overflow-y-auto py-2">
         {thread.data && (
           <>
-            <ChatMessage m={thread.data.parent} onOpenProfile={onOpenProfile} />
+            <ChatMessage m={thread.data.parent} conversationId={conversationId} onOpenProfile={onOpenProfile}
+              onChanged={() => { qc.invalidateQueries({ queryKey: ['thread', parent.id] }); qc.invalidateQueries({ queryKey: ['messages', conversationId] }); }} />
             <div className="my-1 flex items-center gap-2 px-4 text-[11px] text-ink-soft">
               <span>{thread.data.replies.length} {thread.data.replies.length === 1 ? 'reply' : 'replies'}</span>
               <span className="h-px flex-1 bg-line" />
             </div>
             {thread.data.replies.map((r) => (
-              <ChatMessage key={r.id} m={r} onOpenProfile={onOpenProfile} />
+              <ChatMessage key={r.id} m={r} conversationId={conversationId} onOpenProfile={onOpenProfile}
+                onChanged={() => qc.invalidateQueries({ queryKey: ['thread', parent.id] })} />
             ))}
           </>
         )}

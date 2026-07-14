@@ -96,6 +96,8 @@ model User {
   conversationsCreated Conversation[]       @relation("ConvCreator")
   conversationMembers  ConversationMember[] @relation("ConvMember")
   messagesSent         Message[]            @relation("MessageAuthor")
+  messageReactions     MessageReaction[]
+  reminders            Reminder[]
 
   // AssetHub (V1)
   assetRoles          AssetRoleAssignment[] @relation("AssetRoles")
@@ -728,10 +730,44 @@ model Message {
   replies        Message[]    @relation("MessageThread")
   attachments    Json? // [{ kind: "image" | "file", name, url }]
   mentions       String[]     @default([]) // userIds mentioned via @
+  reactions      MessageReaction[]
+  reminders      Reminder[]
+  editedAt       DateTime? // set when the author edits
+  deletedAt      DateTime? // soft-delete tombstone (keeps thread structure)
   createdAt      DateTime     @default(now())
 
   @@index([conversationId])
   @@index([parentId])
+}
+
+// Emoji reactions on a message (Slack-style). One row per user+emoji.
+model MessageReaction {
+  id        String   @id @default(uuid())
+  messageId String
+  message   Message  @relation(fields: [messageId], references: [id], onDelete: Cascade)
+  userId    String
+  user      User     @relation(fields: [userId], references: [id])
+  emoji     String
+  createdAt DateTime @default(now())
+
+  @@unique([messageId, userId, emoji])
+  @@index([messageId])
+}
+
+// "Remind me" — a personal reminder, optionally anchored to a message.
+model Reminder {
+  id             String    @id @default(uuid())
+  userId         String
+  user           User      @relation(fields: [userId], references: [id])
+  messageId      String? // the message it was set on (null after the message is deleted)
+  message        Message?  @relation(fields: [messageId], references: [id], onDelete: SetNull)
+  conversationId String? // for deep-linking back to the conversation
+  text           String // snapshot of what to be reminded about
+  remindAt       DateTime
+  doneAt         DateTime?
+  createdAt      DateTime  @default(now())
+
+  @@index([userId, doneAt])
 }
 
 // ─── Master data (Part 7/8) ──────────────────────────────────────────

@@ -29,3 +29,26 @@ export const openEventConversation = (eventId) =>
 
 export const markRead = (id) =>
   api.post(`/messages/conversations/${id}/read`).then((r) => r.data.data);
+
+// single-message actions
+export const editMessage = (messageId, body) =>
+  api.patch(`/messages/message/${messageId}`, { body }).then((r) => r.data.data);
+
+export const deleteMessage = (messageId) =>
+  api.delete(`/messages/message/${messageId}`).then((r) => r.data.data);
+
+export const reactMessage = (messageId, emoji) =>
+  api.post(`/messages/message/${messageId}/react`, { emoji }).then((r) => r.data.data);
+
+// reminders ("Remind me")
+export const getReminders = () =>
+  api.get('/messages/reminders').then((r) => r.data.data);
+
+export const createReminder = (payload) =>
+  api.post('/messages/reminders', payload).then((r) => r.data.data);
+
+export const completeReminder = (id) =>
+  api.post(`/messages/reminders/${id}/complete`).then((r) => r.data.data);
+
+export const deleteReminder = (id) =>
+  api.delete(`/messages/reminders/${id}`).then((r) => r.data.data);

@@ -29,18 +29,41 @@ async function loadForRead(userId, conversationId) {
   return conv;
 }
 
-function shapeMessage(m) {
+// What listMessages / listThread need to shape a full message.
+const MSG_INCLUDE = {
+  author: { select: { id: true, name: true } },
+  _count: { select: { replies: true } },
+  replies: { orderBy: { createdAt: 'desc' }, take: 1, select: { createdAt: true } },
+  reactions: { select: { userId: true, emoji: true } },
+};
+
+function groupReactions(list = [], meId) {
+  const map = new Map();
+  for (const r of list) {
+    const e = map.get(r.emoji) || { emoji: r.emoji, count: 0, mine: false };
+    e.count += 1;
+    if (r.userId === meId) e.mine = true;
+    map.set(r.emoji, e);
+  }
+  return [...map.values()];
+}
+
+function shapeMessage(m, meId) {
+  const deleted = !!m.deletedAt;
   return {
     id: m.id,
-    body: m.body,
+    body: deleted ? '' : m.body,
     authorId: m.authorId,
     author: m.author?.name || '—',
     at: m.createdAt,
-    attachments: Array.isArray(m.attachments) ? m.attachments : [],
+    attachments: deleted ? [] : (Array.isArray(m.attachments) ? m.attachments : []),
     mentions: m.mentions || [],
     parentId: m.parentId ?? null,
     replyCount: m._count?.replies,
     lastReplyAt: m.replies?.[0]?.createdAt ?? null,
+    editedAt: m.editedAt ?? null,
+    deleted,
+    reactions: deleted ? [] : groupReactions(m.reactions, meId),
   };
 }
 
@@ -187,29 +210,22 @@ export async function listMessages(userId, conversationId) {
   const msgs = await prisma.message.findMany({
     where: { conversationId, parentId: null },
     orderBy: { createdAt: 'asc' },
-    include: {
-      author: { select: { id: true, name: true } },
-      _count: { select: { replies: true } },
-      replies: { orderBy: { createdAt: 'desc' }, take: 1, select: { createdAt: true } },
-    },
+    include: MSG_INCLUDE,
   });
-  return msgs.map(shapeMessage);
+  return msgs.map((m) => shapeMessage(m, userId));
 }
 
 // A single message's thread: the parent plus its replies.
 export async function listThread(userId, messageId) {
-  const parent = await prisma.message.findUnique({
-    where: { id: messageId },
-    include: { author: { select: { id: true, name: true } } },
-  });
+  const parent = await prisma.message.findUnique({ where: { id: messageId }, include: MSG_INCLUDE });
   if (!parent) throw new ApiError(404, 'Message not found');
   await loadForRead(userId, parent.conversationId);
   const replies = await prisma.message.findMany({
     where: { parentId: messageId },
     orderBy: { createdAt: 'asc' },
-    include: { author: { select: { id: true, name: true } } },
+    include: MSG_INCLUDE,
   });
-  return { parent: shapeMessage(parent), replies: replies.map(shapeMessage) };
+  return { parent: shapeMessage(parent, userId), replies: replies.map((r) => shapeMessage(r, userId)) };
 }
 
 export async function postMessage(userId, conversationId, { body = '', parentId = null, attachments = null, mentions = [] } = {}) {
@@ -261,7 +277,87 @@ export async function postMessage(userId, conversationId, { body = '', parentId 
     }
   }
 
-  return shapeMessage(msg);
+  return shapeMessage(msg, userId);
+}
+
+// ── edit / delete / react ────────────────────────────────────────────
+export async function editMessage(userId, messageId, body) {
+  const m = await prisma.message.findUnique({ where: { id: messageId } });
+  if (!m) throw new ApiError(404, 'Message not found');
+  if (m.authorId !== userId) throw new ApiError(403, 'You can only edit your own messages');
+  if (m.deletedAt) throw new ApiError(400, 'This message was deleted');
+  const text = (body || '').trim();
+  if (!text) throw new ApiError(400, 'Message cannot be empty');
+  const updated = await prisma.message.update({ where: { id: messageId }, data: { body: text, editedAt: new Date() }, include: MSG_INCLUDE });
+  return shapeMessage(updated, userId);
+}
+
+export async function deleteMessage(userId, messageId) {
+  const m = await prisma.message.findUnique({ where: { id: messageId } });
+  if (!m) throw new ApiError(404, 'Message not found');
+  if (m.authorId !== userId) throw new ApiError(403, 'You can only delete your own messages');
+  if (m.deletedAt) return { ok: true };
+  await prisma.message.update({ where: { id: messageId }, data: { deletedAt: new Date(), body: '' } });
+  await prisma.messageReaction.deleteMany({ where: { messageId } });
+  return { ok: true };
+}
+
+export async function toggleReaction(userId, messageId, emoji) {
+  const clean = (emoji || '').trim();
+  if (!clean) throw new ApiError(400, 'An emoji is required');
+  const m = await prisma.message.findUnique({ where: { id: messageId }, select: { conversationId: true, deletedAt: true } });
+  if (!m) throw new ApiError(404, 'Message not found');
+  if (m.deletedAt) throw new ApiError(400, 'This message was deleted');
+  await loadForRead(userId, m.conversationId);
+  const existing = await prisma.messageReaction.findUnique({ where: { messageId_userId_emoji: { messageId, userId, emoji: clean } } });
+  if (existing) await prisma.messageReaction.delete({ where: { id: existing.id } });
+  else await prisma.messageReaction.create({ data: { messageId, userId, emoji: clean } });
+  const list = await prisma.messageReaction.findMany({ where: { messageId }, select: { userId: true, emoji: true } });
+  return groupReactions(list, userId);
+}
+
+// ── reminders ("Remind me") ──────────────────────────────────────────
+export async function createReminder(userId, { messageId = null, conversationId = null, text = '', remindAt } = {}) {
+  const when = new Date(remindAt);
+  if (Number.isNaN(when.getTime())) throw new ApiError(400, 'Invalid reminder time');
+  let convId = conversationId;
+  let snippet = (text || '').trim();
+  if (messageId) {
+    const m = await prisma.message.findUnique({ where: { id: messageId }, select: { conversationId: true, body: true } });
+    if (!m) throw new ApiError(404, 'Message not found');
+    convId = m.conversationId;
+    if (!snippet) snippet = m.body ? m.body.slice(0, 140) : 'a message';
+  }
+  if (!snippet) snippet = 'Reminder';
+  return prisma.reminder.create({ data: { userId, messageId, conversationId: convId, text: snippet, remindAt: when } });
+}
+
+export async function listReminders(userId) {
+  const rows = await prisma.reminder.findMany({ where: { userId, doneAt: null }, orderBy: { remindAt: 'asc' } });
+  const now = Date.now();
+  return rows.map((r) => ({ ...r, due: new Date(r.remindAt).getTime() <= now }));
+}
+
+// Reminders that have come due — surfaced in the notification bell.
+export async function dueReminders(userId) {
+  return prisma.reminder.findMany({
+    where: { userId, doneAt: null, remindAt: { lte: new Date() } },
+    orderBy: { remindAt: 'asc' },
+  });
+}
+
+export async function completeReminder(userId, id) {
+  const r = await prisma.reminder.findUnique({ where: { id } });
+  if (!r || r.userId !== userId) throw new ApiError(404, 'Reminder not found');
+  await prisma.reminder.update({ where: { id }, data: { doneAt: new Date() } });
+  return { ok: true };
+}
+
+export async function deleteReminder(userId, id) {
+  const r = await prisma.reminder.findUnique({ where: { id } });
+  if (!r || r.userId !== userId) throw new ApiError(404, 'Reminder not found');
+  await prisma.reminder.delete({ where: { id } });
+  return { ok: true };
 }
 
 // Find (or create) the chat conversation for an event. Members start as the

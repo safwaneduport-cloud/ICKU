@@ -21,4 +21,15 @@ router.post('/conversations/:id/read', ctrl.markRead);
 // Thread (a message's replies)
 router.get('/thread/:messageId', ctrl.listThread);
 
+// Single-message actions (edit / delete / react)
+router.patch('/message/:messageId', ctrl.editMessage);
+router.delete('/message/:messageId', ctrl.deleteMessage);
+router.post('/message/:messageId/react', ctrl.reactMessage);
+
+// Reminders ("Remind me")
+router.get('/reminders', ctrl.listReminders);
+router.post('/reminders', ctrl.createReminder);
+router.post('/reminders/:id/complete', ctrl.completeReminder);
+router.delete('/reminders/:id', ctrl.deleteReminder);
+
 export default router;
