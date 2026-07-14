@@ -31,6 +31,9 @@ router.delete('/roles/:id', ctrl.removeRole);
 router.get('/approvals', ctrl.approvalQueue);
 router.get('/assets', ctrl.listAssets);
 router.post('/assets', ctrl.createAsset);
+router.post('/assets/bulk', ctrl.bulkCreateAssets);
+router.post('/assets/import', ctrl.bulkImportLegacy);
+router.post('/assets/assign-room', ctrl.bulkAssignRoom);
 router.get('/assets/:id', ctrl.getAsset);
 router.patch('/assets/:id', ctrl.updateAsset);
 router.post('/assets/:id/submit', ctrl.submitAsset);
@@ -38,5 +41,6 @@ router.post('/assets/:id/approve', ctrl.approveAsset);
 router.post('/assets/:id/sendback', ctrl.sendBackAsset);
 router.post('/assets/:id/acknowledge', ctrl.acknowledgeAsset);
 router.post('/assets/:id/void', ctrl.voidAsset);
+router.post('/assets/:id/assign-room', ctrl.assignRoom);
 
 export default router;

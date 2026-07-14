@@ -35,3 +35,9 @@ export const sendBackAssetRecord = (id, reason) => api.post(`/assethub/assets/${
 export const acknowledgeAssetRecord = (id) => api.post(`/assethub/assets/${id}/acknowledge`).then(d);
 export const voidAssetRecord = (id, reason) => api.post(`/assethub/assets/${id}/void`, { reason }).then(d);
 export const getApprovalQueue = () => api.get('/assethub/approvals').then(d);
+
+// phase 3 — bulk create, legacy import, room assignment
+export const bulkCreateAssets = (payload) => api.post('/assethub/assets/bulk', payload).then(d);
+export const importLegacyAssets = (payload) => api.post('/assethub/assets/import', payload).then(d);
+export const assignAssetRoom = (id, roomId) => api.post(`/assethub/assets/${id}/assign-room`, { roomId }).then(d);
+export const bulkAssignRoom = (ids, roomId) => api.post('/assethub/assets/assign-room', { ids, roomId }).then(d);

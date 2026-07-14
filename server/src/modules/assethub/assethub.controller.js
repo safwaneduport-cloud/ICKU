@@ -45,3 +45,9 @@ export const sendBackAsset = read((req) => assets.sendBack(req.user, req.params.
 export const acknowledgeAsset = read((req) => assets.acknowledgeAsset(req.user, req.params.id));
 export const voidAsset = read((req) => assets.voidAsset(req.user, req.params.id, req.body?.reason));
 export const approvalQueue = read((req) => assets.approvalQueue(req.user));
+
+// phase 3 — bulk create, legacy import, room assignment
+export const bulkCreateAssets = read((req) => assets.bulkCreateAssets(req.user, req.body || {}));
+export const bulkImportLegacy = read((req) => assets.bulkImportLegacy(req.user, req.body || {}));
+export const assignRoom = read((req) => assets.assignRoom(req.user, req.params.id, req.body?.roomId || null));
+export const bulkAssignRoom = read((req) => assets.bulkAssignRoom(req.user, req.body || {}));

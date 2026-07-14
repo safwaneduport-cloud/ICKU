@@ -1,5 +1,6 @@
 // AssetHub — asset records + the approval workflow engine (PRD §5–§8).
 // Chain = the matching approval band's role sequence, snapshotted at submit.
+import { randomUUID } from 'node:crypto';
 import { prisma } from '../../config/prisma.js';
 import { ApiError } from '../../middleware/errorHandler.js';
 import { canAdmin } from '../../lib/access.js';
@@ -96,22 +97,34 @@ function pick(input, fields) {
 }
 
 // ── create / edit ────────────────────────────────────────────────────
-export async function createAsset(user, input) {
-  const roles = await rolesOf(user.id);
+// Whoever may create, and only within their location scope (admins are global).
+function assertCanCreateAt(user, roles, loc) {
   const canCreate = isHubAdmin(user, roles) || hasRole(roles, 'OPERATIONS') || hasRole(roles, 'BRANCH_MANAGER');
   if (!canCreate) throw new ApiError(403, 'You need the Operations role to create assets');
+  if (!isHubAdmin(user, roles)) {
+    const opsOk = scopeCovers(roles, 'OPERATIONS', loc) || scopeCovers(roles, 'BRANCH_MANAGER', loc);
+    if (!opsOk) throw new ApiError(403, 'That location is outside your Operations scope');
+  }
+}
 
+async function assertActiveCustodians(ids) {
+  const uniq = [...new Set(ids.filter(Boolean))];
+  if (!uniq.length) return;
+  const found = await prisma.user.findMany({ where: { id: { in: uniq } }, select: { id: true, status: true } });
+  const byId = new Map(found.map((u) => [u.id, u.status]));
+  for (const id of uniq) {
+    if (byId.get(id) !== 'active') throw new ApiError(400, 'Every custodian must be an active employee');
+  }
+}
+
+export async function createAsset(user, input) {
+  const roles = await rolesOf(user.id);
   const d = pick(input, CREATE_FIELDS);
   for (const k of ['categoryId', 'subCategoryId', 'description', 'siteId', 'buildingId', 'custodianId']) {
     if (!d[k]) throw new ApiError(400, 'Category, sub-category, description, site, building and custodian are required');
   }
-  // Scoped Operations may only create within their scope (admins are global)
-  if (!isHubAdmin(user, roles)) {
-    const opsOk = scopeCovers(roles, 'OPERATIONS', d) || scopeCovers(roles, 'BRANCH_MANAGER', d);
-    if (!opsOk) throw new ApiError(403, 'That location is outside your Operations scope');
-  }
-  const custodian = await prisma.user.findUnique({ where: { id: d.custodianId }, select: { id: true, status: true } });
-  if (!custodian || custodian.status !== 'active') throw new ApiError(400, 'Custodian must be an active employee');
+  assertCanCreateAt(user, roles, d);
+  await assertActiveCustodians([d.custodianId]);
 
   d.totalValue = computeTotal(d);
   const assetTag = await generateTag(d.siteId, d.buildingId, d.subCategoryId);
@@ -121,6 +134,175 @@ export async function createAsset(user, input) {
   });
   await log(asset.id, 'created', user.id, `Draft created (${assetTag})`);
   return asset;
+}
+
+// ── bulk create (N identical units, optionally per-unit room/serial/custodian) ──
+export async function bulkCreateAssets(user, { base = {}, units = [] }) {
+  const roles = await rolesOf(user.id);
+  if (!Array.isArray(units) || units.length === 0) throw new ApiError(400, 'Add at least one unit');
+  if (units.length > 200) throw new ApiError(400, 'Bulk create is limited to 200 units at a time');
+
+  const d = pick(base, CREATE_FIELDS);
+  for (const k of ['categoryId', 'subCategoryId', 'description', 'siteId', 'buildingId', 'custodianId']) {
+    if (!d[k]) throw new ApiError(400, 'Category, sub-category, description, site, building and default custodian are required');
+  }
+  assertCanCreateAt(user, roles, d);
+  d.totalValue = computeTotal(d);
+
+  // Validate rooms belong to this building, custodians are active.
+  const rooms = await prisma.assetRoom.findMany({ where: { buildingId: d.buildingId }, select: { id: true } });
+  const roomOk = new Set(rooms.map((r) => r.id));
+  const custodianIds = [d.custodianId];
+  units.forEach((u, i) => {
+    if (u.roomId && !roomOk.has(u.roomId)) throw new ApiError(400, `Row ${i + 1}: room does not belong to the selected building`);
+    if (u.custodianId) custodianIds.push(u.custodianId);
+  });
+  await assertActiveCustodians(custodianIds);
+
+  const [site, bldg, sub] = await Promise.all([
+    prisma.assetSite.findUnique({ where: { id: d.siteId } }),
+    prisma.assetBuilding.findUnique({ where: { id: d.buildingId } }),
+    prisma.assetSubCategory.findUnique({ where: { id: d.subCategoryId } }),
+  ]);
+  if (!site || !bldg || !sub) throw new ApiError(400, 'Invalid site, building or sub-category');
+  const prefix = `${site.code}-${bldg.code}-${sub.code}-`;
+  const start = await prisma.assetRecord.count({ where: { assetTag: { startsWith: prefix } } });
+  const batchId = randomUUID();
+
+  const created = await prisma.$transaction(
+    units.map((u, i) => prisma.assetRecord.create({
+      data: {
+        ...d,
+        roomId: u.roomId || d.roomId || null,
+        serialNumber: u.serialNumber || d.serialNumber || null,
+        custodianId: u.custodianId || d.custodianId,
+        assetTag: `${prefix}${String(start + 1 + i).padStart(4, '0')}`,
+        bulkBatchId: batchId,
+        createdById: user.id,
+        status: 'draft',
+      },
+      select: { id: true, assetTag: true },
+    })),
+  );
+  await prisma.assetHistory.createMany({
+    data: created.map((a) => ({ assetId: a.id, action: 'created', byId: user.id, note: `Bulk draft (${a.assetTag})` })),
+  });
+  return { batchId, count: created.length, tags: created.map((a) => a.assetTag) };
+}
+
+// ── legacy CSV import (one building at a time; deemed-cost, Legacy flag) ──
+export async function bulkImportLegacy(user, { siteId, buildingId, categoryId, rows = [] }) {
+  const roles = await rolesOf(user.id);
+  if (!siteId || !buildingId || !categoryId) throw new ApiError(400, 'Choose a site, building and category for the import');
+  if (!Array.isArray(rows) || rows.length === 0) throw new ApiError(400, 'The file has no rows');
+  if (rows.length > 500) throw new ApiError(400, 'Import up to 500 rows at a time');
+  assertCanCreateAt(user, roles, { siteId, buildingId });
+
+  const [subs, rooms] = await Promise.all([
+    prisma.assetSubCategory.findMany({ where: { categoryId }, select: { id: true, code: true, name: true } }),
+    prisma.assetRoom.findMany({ where: { buildingId }, select: { id: true, number: true } }),
+  ]);
+  const subByCode = new Map(subs.map((s) => [s.code.toUpperCase(), s]));
+  const subByName = new Map(subs.map((s) => [s.name.toLowerCase(), s]));
+  const roomByNo = new Map(rooms.map((r) => [String(r.number).toLowerCase(), r]));
+
+  // Resolve custodians (row value = Employee Number = User.id) in one query.
+  const empNos = [...new Set(rows.map((r) => (r.custodian || '').trim()).filter(Boolean))];
+  const users = empNos.length
+    ? await prisma.user.findMany({ where: { id: { in: empNos } }, select: { id: true, status: true } })
+    : [];
+  const userOk = new Map(users.map((u) => [u.id, u.status]));
+
+  const errors = [];
+  const clean = rows.map((r, i) => {
+    const n = i + 1;
+    const key = (r.subCategory || '').trim();
+    const sub = subByCode.get(key.toUpperCase()) || subByName.get(key.toLowerCase());
+    if (!key) errors.push({ row: n, message: 'Missing sub-category' });
+    else if (!sub) errors.push({ row: n, message: `Unknown sub-category "${key}"` });
+    if (!(r.description || '').trim()) errors.push({ row: n, message: 'Missing description' });
+
+    const cust = (r.custodian || '').trim();
+    if (!cust) errors.push({ row: n, message: 'Missing custodian (employee number)' });
+    else if (userOk.get(cust) !== 'active') errors.push({ row: n, message: `Custodian "${cust}" is not an active employee` });
+
+    let roomId = null;
+    if ((r.room || '').trim()) {
+      const room = roomByNo.get(String(r.room).trim().toLowerCase());
+      if (!room) errors.push({ row: n, message: `Room "${r.room}" not found in this building` });
+      else roomId = room.id;
+    }
+    const deemed = r.deemedCost != null && r.deemedCost !== '' ? Number(r.deemedCost) : null;
+    if (deemed != null && Number.isNaN(deemed)) errors.push({ row: n, message: 'Deemed cost is not a number' });
+
+    return {
+      subCategoryId: sub?.id, description: (r.description || '').trim(), make: (r.make || '').trim() || null,
+      model: (r.model || '').trim() || null, serialNumber: (r.serialNumber || '').trim() || null,
+      custodianId: cust, roomId, dateOfPurchase: (r.dateOfPurchase || '').trim() || null,
+      totalValue: deemed, taxableValue: deemed,
+    };
+  });
+  if (errors.length) throw new ApiError(422, `${errors.length} row(s) need fixing`, errors);
+
+  const [site, bldg] = await Promise.all([
+    prisma.assetSite.findUnique({ where: { id: siteId } }),
+    prisma.assetBuilding.findUnique({ where: { id: buildingId } }),
+  ]);
+  if (!site || !bldg) throw new ApiError(400, 'Invalid site or building');
+  const batchId = randomUUID();
+
+  // Tags are per sub-category — track running counts across the batch.
+  const counts = {};
+  for (const sub of subs) {
+    const prefix = `${site.code}-${bldg.code}-${sub.code}-`;
+    counts[sub.id] = { prefix, n: await prisma.assetRecord.count({ where: { assetTag: { startsWith: prefix } } }) };
+  }
+  const created = await prisma.$transaction(clean.map((c) => {
+    const t = counts[c.subCategoryId];
+    t.n += 1;
+    return prisma.assetRecord.create({
+      data: {
+        categoryId, siteId, buildingId,
+        subCategoryId: c.subCategoryId, description: c.description, make: c.make, model: c.model,
+        serialNumber: c.serialNumber, custodianId: c.custodianId, roomId: c.roomId,
+        dateOfPurchase: c.dateOfPurchase, taxableValue: c.taxableValue, totalValue: c.totalValue,
+        capitalisationMethod: 'deemed_cost', deemedCostBasis: c.totalValue != null ? 'imported' : null,
+        legacy: true, assetTag: `${t.prefix}${String(t.n).padStart(4, '0')}`,
+        bulkBatchId: batchId, createdById: user.id, status: 'draft',
+      },
+      select: { id: true, assetTag: true },
+    });
+  }));
+  await prisma.assetHistory.createMany({
+    data: created.map((a) => ({ assetId: a.id, action: 'created', byId: user.id, note: `Legacy import (${a.assetTag})` })),
+  });
+  return { batchId, count: created.length };
+}
+
+// ── room assignment (physical location within a building) ──
+export async function assignRoom(user, id, roomId) {
+  const asset = await loadAsset(id);
+  const roles = await rolesOf(user.id);
+  if (['void', 'disposed', 'written_off'].includes(asset.status)) throw new ApiError(400, 'This asset is no longer in service');
+  const canDo = isHubAdmin(user, roles) || scopeCovers(roles, 'OPERATIONS', asset) || scopeCovers(roles, 'BRANCH_MANAGER', asset);
+  if (!canDo) throw new ApiError(403, 'That location is outside your scope');
+
+  let room = null;
+  if (roomId) {
+    room = await prisma.assetRoom.findUnique({ where: { id: roomId }, select: { id: true, number: true, buildingId: true } });
+    if (!room || room.buildingId !== asset.buildingId) throw new ApiError(400, 'Room must belong to this asset\'s building');
+  }
+  const updated = await prisma.assetRecord.update({ where: { id }, data: { roomId: roomId || null }, include: DETAIL_INCLUDE });
+  await log(id, 'room_assigned', user.id, room ? `Assigned to room ${room.number}` : 'Room cleared',
+    { from: asset.room?.number || null, to: room?.number || null });
+  return updated;
+}
+
+export async function bulkAssignRoom(user, { ids = [], roomId }) {
+  if (!Array.isArray(ids) || !ids.length) throw new ApiError(400, 'Select at least one asset');
+  const results = [];
+  for (const id of ids) results.push(await assignRoom(user, id, roomId));
+  return { count: results.length };
 }
 
 export async function updateAsset(user, id, input) {

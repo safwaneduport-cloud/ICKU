@@ -1,10 +1,12 @@
 import { env } from '../config/env.js';
 
 // A small helper so services can throw errors with an HTTP status.
+// `details` is optional structured data (e.g. per-row import errors).
 export class ApiError extends Error {
-  constructor(status, message) {
+  constructor(status, message, details) {
     super(message);
     this.status = status;
+    if (details !== undefined) this.details = details;
   }
 }
 
@@ -13,6 +15,7 @@ export class ApiError extends Error {
 export function errorHandler(err, req, res, next) {
   const status = err.status || 500;
   const payload = { data: null, error: { message: err.message || 'Internal Server Error' } };
+  if (err.details !== undefined) payload.error.details = err.details;
   if (env.nodeEnv !== 'production' && status >= 500) payload.error.stack = err.stack;
   if (status >= 500) console.error(err);
   res.status(status).json(payload);

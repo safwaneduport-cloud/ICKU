@@ -23,5 +23,5 @@ export const inr = (n) => (n == null ? '—' : `₹${Number(n).toLocaleString('e
 export const ACTION_LABEL = {
   created: 'Created', submitted: 'Submitted for approval', approved: 'Approved',
   sent_back: 'Sent back', finance_edited: 'Finance edit', acknowledged: 'Acknowledged',
-  voided: 'Voided',
+  voided: 'Voided', room_assigned: 'Room assigned',
 };
