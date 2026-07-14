@@ -97,6 +97,9 @@ model User {
   conversationMembers  ConversationMember[] @relation("ConvMember")
   messagesSent         Message[]            @relation("MessageAuthor")
 
+  // AssetHub (V1)
+  assetRoles AssetRoleAssignment[] @relation("AssetRoles")
+
   // ── Employee master (imported from the HR sheet; all optional) ──────
   // Canonical fields already above: name(=Full Name), email(=Work Email),
   // designation(=Job Title), tier, departmentId, reportsToId, birthday, joinedOn.
@@ -742,4 +745,112 @@ model MasterOption {
 
   @@unique([type, value])
   @@index([type])
+}
+
+// ─── AssetHub (V1) — Fixed Asset Register ────────────────────────────
+// Masters are retired (active=false), never deleted, per the PRD.
+
+model AssetCategory {
+  id              String             @id @default(uuid())
+  code            String             @unique // e.g. FUR — used in Asset IDs
+  name            String // Furniture & Fixtures
+  defaultGlCodeId String?
+  defaultGlCode   GlCode?            @relation(fields: [defaultGlCodeId], references: [id])
+  active          Boolean            @default(true)
+  subCategories   AssetSubCategory[]
+  createdAt       DateTime           @default(now())
+  updatedAt       DateTime           @updatedAt
+}
+
+model AssetSubCategory {
+  id                 String        @id @default(uuid())
+  code               String // e.g. BED — used in Asset IDs
+  name               String // Steel Cot
+  categoryId         String
+  category           AssetCategory @relation(fields: [categoryId], references: [id])
+  defaultGstRate     Float         @default(18) // percent
+  defaultItcEligible Boolean       @default(true)
+  itcBlockReason     String? // shown only when ITC = No
+  active             Boolean       @default(true)
+  createdAt          DateTime      @default(now())
+  updatedAt          DateTime      @updatedAt
+
+  @@unique([categoryId, code])
+}
+
+model AssetSite {
+  id        String          @id @default(uuid())
+  code      String          @unique // SC
+  name      String // Single Campus
+  active    Boolean         @default(true)
+  buildings AssetBuilding[]
+  createdAt DateTime        @default(now())
+}
+
+model AssetBuilding {
+  id        String      @id @default(uuid())
+  code      String // HSLA
+  name      String // Hostel A
+  siteId    String
+  site      AssetSite   @relation(fields: [siteId], references: [id])
+  active    Boolean     @default(true)
+  rooms     AssetRoom[]
+  createdAt DateTime    @default(now())
+
+  @@unique([siteId, code])
+}
+
+model AssetRoom {
+  id         String        @id @default(uuid())
+  number     String // "101" — no type/AC/sharing tracked (PRD)
+  buildingId String
+  building   AssetBuilding @relation(fields: [buildingId], references: [id])
+  active     Boolean       @default(true)
+
+  @@unique([buildingId, number])
+}
+
+model AssetVendor {
+  id        String   @id @default(uuid())
+  code      String   @unique // auto: VEN-0001
+  name      String
+  gstin     String?
+  pan       String?
+  contact   String?
+  active    Boolean  @default(true)
+  createdAt DateTime @default(now())
+}
+
+model GlCode {
+  id         String          @id @default(uuid())
+  code       String          @unique // GL-1200
+  name       String // Furniture & Fixtures
+  active     Boolean         @default(true)
+  categories AssetCategory[]
+  createdAt  DateTime        @default(now())
+}
+
+// Value bands deciding the approval sequence (thresholds admin-editable).
+model AssetApprovalBand {
+  id        String   @id @default(uuid())
+  minValue  Float    @default(0)
+  maxValue  Float? // null = no upper cap
+  approvers String[] // role keys in sequence, e.g. ["BRANCH_MANAGER","FINANCE_EXECUTIVE"]
+  label     String?
+  sort      Int      @default(0)
+}
+
+// Who plays which AssetHub role, optionally scoped to a site/building.
+// Roles: OPERATIONS | BRANCH_MANAGER | FINANCE_EXECUTIVE | FINANCE_MANAGER | CFO | ASSET_ADMIN
+model AssetRoleAssignment {
+  id         String   @id @default(uuid())
+  userId     String
+  user       User     @relation("AssetRoles", fields: [userId], references: [id])
+  role       String
+  siteId     String? // null = all sites
+  buildingId String? // null = all buildings
+  createdAt  DateTime @default(now())
+
+  @@index([userId])
+  @@index([role])
 }

@@ -27,6 +27,7 @@ import MasterData from './pages/MasterData.jsx';
 import Credentials from './pages/Credentials.jsx';
 import OnboardEmployee from './pages/OnboardEmployee.jsx';
 import Profile from './pages/Profile.jsx';
+import AssetHub from './pages/AssetHub.jsx';
 
 export default function App() {
   return (
@@ -60,6 +61,7 @@ export default function App() {
         <Route path="exit" element={<Exit />} />
         <Route path="expenses" element={<Expenses />} />
         <Route path="assets" element={<Assets />} />
+        <Route path="assethub" element={<AssetHub />} />
         <Route path="helpdesk" element={<Helpdesk />} />
         <Route path="admin" element={<Admin />} />
         <Route path="reports" element={<Reports />} />

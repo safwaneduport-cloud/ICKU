@@ -38,6 +38,7 @@ import masterRoutes from './modules/masters/masters.routes.js';
 import credentialRoutes from './modules/credentials/credentials.routes.js';
 import employeeRoutes from './modules/employees/employees.routes.js';
 import fileRoutes from './modules/files/files.routes.js';
+import assethubRoutes from './modules/assethub/assethub.routes.js';
 
 export const app = express();
 
@@ -96,6 +97,7 @@ api.use('/masters', authenticate, masterRoutes);          // protected (HR-gated
 api.use('/credentials', authenticate, credentialRoutes);  // protected (HR-gated + self change-password)
 api.use('/employees', authenticate, employeeRoutes);      // protected (HR-gated onboarding)
 api.use('/files', authenticate, fileRoutes);              // protected (Supabase Storage upload)
+api.use('/assethub', authenticate, assethubRoutes);       // protected (writes ASSET_ADMIN-gated inside)
 app.use('/api/v1', api);
 
 // Unknown /api routes → JSON 404 (never fall through to the SPA).

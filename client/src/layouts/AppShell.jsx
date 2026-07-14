@@ -32,7 +32,8 @@ const NAV_GROUPS = [
     title: 'Services',
     items: [
       { to: '/expenses', label: 'Expenses' },
-      { to: '/assets', label: 'Assets' },
+      { to: '/assethub', label: 'AssetHub' },
+      { to: '/assets', label: 'IT Devices' },
       { to: '/helpdesk', label: 'Helpdesk' },
     ],
   },

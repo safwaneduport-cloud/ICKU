@@ -12,9 +12,12 @@ export default function Assets() {
 
   return (
     <div className="space-y-6">
-      <h1 className="font-serif text-3xl font-bold text-pine">Assets</h1>
+      <div>
+        <h1 className="font-serif text-3xl font-bold text-pine">IT Devices</h1>
+        <p className="text-sm text-ink-soft">Employee-issued devices (laptops, phones). Company fixed assets live in AssetHub.</p>
+      </div>
       <div className="flex gap-2">
-        {[['my', 'My Assets'], ...(admin ? [['inv', 'Inventory']] : [])].map(([t, label]) => (
+        {[['my', 'My Devices'], ...(admin ? [['inv', 'Inventory']] : [])].map(([t, label]) => (
           <button key={t} onClick={() => setTab(t)}
             className={`rounded-full px-4 py-1.5 text-sm font-medium ${tab === t ? 'bg-pine text-white' : 'border border-line bg-white text-ink-soft'}`}>
             {label}
