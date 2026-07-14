@@ -6,6 +6,7 @@ import RegisterTab from '../features/assethub/RegisterTab.jsx';
 import CreateHub from '../features/assethub/CreateHub.jsx';
 import ApprovalsTab from '../features/assethub/ApprovalsTab.jsx';
 import VerificationTab from '../features/assethub/VerificationTab.jsx';
+import ReportsTab from '../features/assethub/ReportsTab.jsx';
 
 // Sub-screens land phase by phase; placeholders name what's coming.
 const TABS = [
@@ -13,7 +14,7 @@ const TABS = [
   ['create', 'Create', null],
   ['approvals', 'Approvals', null],
   ['verification', 'Verification', null],
-  ['reports', 'Reports', 'Phase 6 — register, movement, disposal, audit-trail reports'],
+  ['reports', 'Reports', null],
   ['setup', 'Setup', null],
 ];
 
@@ -43,6 +44,7 @@ export default function AssetHub() {
         : tab === 'create' ? <CreateHub onCreated={() => setTab('register')} />
         : tab === 'approvals' ? <ApprovalsTab />
         : tab === 'verification' ? <VerificationTab />
+        : tab === 'reports' ? <ReportsTab />
         : <ComingSoon tab={TABS.find(([id]) => id === tab)} isAdmin={isAdmin} onSetup={() => setTab('setup')} />}
     </div>
   );

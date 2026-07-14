@@ -48,6 +48,12 @@ export const approveAssetEvent = (eventId, note) => api.post(`/assethub/events/$
 export const rejectAssetEvent = (eventId, reason) => api.post(`/assethub/events/${eventId}/reject`, { reason }).then(d);
 export const repairAssetRecord = (id, note) => api.post(`/assethub/assets/${id}/repair`, { note }).then(d);
 
+// phase 6 — reports & audit trail
+export const getReportKpis = () => api.get('/assethub/reports/kpis').then(d);
+export const getReportTypes = () => api.get('/assethub/reports/types').then(d);
+export const runReport = (type) => api.get(`/assethub/reports/${type}`).then(d);
+export const getAuditTrail = (params) => api.get('/assethub/reports/audit', { params }).then(d);
+
 // phase 5 — physical verification
 export const listVerifications = () => api.get('/assethub/verifications').then(d);
 export const getVerification = (id) => api.get(`/assethub/verifications/${id}`).then(d);

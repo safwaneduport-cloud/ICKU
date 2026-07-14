@@ -49,6 +49,12 @@ router.post('/assets/:id/repair', ctrl.repairAsset);
 router.post('/events/:eventId/approve', ctrl.approveEvent);
 router.post('/events/:eventId/reject', ctrl.rejectEvent);
 
+// phase 6 — reports & audit trail
+router.get('/reports/kpis', ctrl.reportKpis);
+router.get('/reports/types', ctrl.reportTypes);
+router.get('/reports/audit', ctrl.auditTrail);
+router.get('/reports/:type', ctrl.runReport);
+
 // phase 5 — physical verification
 router.get('/verifications', ctrl.listVerifications);
 router.post('/verifications', ctrl.createVerification);

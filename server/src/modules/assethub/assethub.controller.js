@@ -1,6 +1,7 @@
 import * as service from './assethub.service.js';
 import * as assets from './assets.service.js';
 import * as verify from './verification.service.js';
+import * as reports from './reports.service.js';
 
 const ok = (res, data) => res.json({ data, error: null });
 
@@ -67,3 +68,9 @@ export const markVerifyLine = read((req) => verify.markLine(req.user, req.params
 export const setVerifyCount = read((req) => verify.setCount(req.user, req.params.id, req.params.countId, req.body?.actual));
 export const resolveVerifyLine = read((req) => verify.resolveLine(req.user, req.params.id, req.params.lineId));
 export const closeVerification = read((req) => verify.closeSession(req.user, req.params.id));
+
+// phase 6 — reports & audit trail
+export const reportKpis = read((req) => reports.kpis(req.user));
+export const reportTypes = read(() => reports.REPORT_TYPES);
+export const runReport = read((req) => reports.report(req.user, req.params.type));
+export const auditTrail = read((req) => reports.auditTrail(req.user, req.query));
