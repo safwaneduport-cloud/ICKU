@@ -20,7 +20,7 @@ export default function BulkCreate({ onDone }) {
   const masters = useQuery({ queryKey: ['assetMasters'], queryFn: getAssetMasters, retry: false });
   const users = useQuery({ queryKey: ['users'], queryFn: getUsers, retry: false });
   const [b, setB] = useState({});          // base fields
-  const [qty, setQty] = useState(5);
+  const [qty, setQty] = useState('5'); // raw field text; units.length is the real count
   const [units, setUnits] = useState(() => Array.from({ length: 5 }, () => ({ roomId: '', serialNumber: '' })));
   const [uploading, setUploading] = useState(false);
   const [err, setErr] = useState('');
@@ -44,16 +44,30 @@ export default function BulkCreate({ onDone }) {
     return null;
   }, [b.taxableValue, b.gstAmount]);
 
+  const setUnitCount = (n) =>
+    setUnits((prev) => Array.from({ length: n }, (_, i) => prev[i] || { roomId: '', serialNumber: '' }));
+
   function resize(n) {
     n = Math.max(1, Math.min(200, Number(n) || 1));
-    setQty(n);
-    setUnits((prev) => Array.from({ length: n }, (_, i) => prev[i] || { roomId: '', serialNumber: '' }));
+    setQty(String(n));
+    setUnitCount(n);
   }
+  // Keep the raw text in state so the field can be cleared; only rebuild the unit
+  // rows once it parses to a real count. Clamped on blur.
+  function onQtyChange(v) {
+    const digits = String(v).replace(/\D/g, '').replace(/^0+(?=\d)/, '');
+    setQty(digits);
+    const n = parseInt(digits, 10);
+    if (n >= 1) setUnitCount(Math.min(200, n));
+  }
+  const commitQty = () => resize(qty);
+
   function setUnit(i, k, v) { setUnits((prev) => prev.map((u, idx) => (idx === i ? { ...u, [k]: v } : u))); }
   function oneRoomEach() {
     if (!rooms.length) return;
-    resize(rooms.length);
-    setUnits(rooms.map((r) => ({ roomId: r.id, serialNumber: '' })));
+    const n = Math.min(200, rooms.length);
+    setQty(String(n));
+    setUnits(rooms.slice(0, n).map((r) => ({ roomId: r.id, serialNumber: '' })));
   }
   function spreadRooms() {
     if (!rooms.length) return;
@@ -158,7 +172,10 @@ export default function BulkCreate({ onDone }) {
           <h2 className="font-serif text-lg font-semibold text-pine">Units</h2>
           <div className="flex items-center gap-1 text-sm">
             <span className="text-ink-soft">Quantity</span>
-            <input type="number" min={1} max={200} value={qty} onChange={(e) => resize(e.target.value)} className="w-20 rounded-lg border border-line px-2 py-1" />
+            <input type="text" inputMode="numeric" value={qty}
+              onChange={(e) => onQtyChange(e.target.value)}
+              onFocus={(e) => e.target.select()} onBlur={commitQty}
+              className="w-20 rounded-lg border border-line px-2 py-1 text-center" />
           </div>
           {rooms.length > 0 && (
             <div className="flex gap-2">
@@ -194,10 +211,11 @@ export default function BulkCreate({ onDone }) {
 
       <div className="sticky bottom-0 flex items-center justify-end gap-2 border-t border-line bg-paper/80 py-3 backdrop-blur">
         {baseMissing.length > 0 && <span className="mr-auto text-xs text-ink-soft">{baseMissing.length} shared field{baseMissing.length === 1 ? '' : 's'} required</span>}
-        <span className="mr-2 text-sm text-ink-soft">{qty} draft{qty === 1 ? '' : 's'}{perUnit != null ? ` · ${inr(perUnit * qty)} total` : ''}</span>
+        {/* units.length is the real count — qty is just the field's raw text */}
+        <span className="mr-2 text-sm text-ink-soft">{units.length} draft{units.length === 1 ? '' : 's'}{perUnit != null ? ` · ${inr(perUnit * units.length)} total` : ''}</span>
         <button onClick={() => save.mutate()} disabled={save.isPending || uploading || baseMissing.length > 0}
           className="rounded-lg bg-pine px-6 py-2.5 text-sm font-medium text-white disabled:opacity-50">
-          {save.isPending ? 'Creating…' : `Create ${qty} drafts`}
+          {save.isPending ? 'Creating…' : `Create ${units.length} draft${units.length === 1 ? '' : 's'}`}
         </button>
       </div>
     </div>

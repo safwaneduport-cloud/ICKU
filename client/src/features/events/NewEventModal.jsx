@@ -28,7 +28,8 @@ export default function NewEventModal({ onClose, onCreated, initialMonth, initia
       name: name.trim(),
       status: dated ? 'confirmed' : 'tbd',
       triggerMonth: dated ? month : null,
-      triggerDay: dated ? day : null,
+      // day may be '' while the field is being edited — settle it here too.
+      triggerDay: dated ? Math.min(31, Math.max(1, parseInt(day, 10) || 1)) : null,
       writeup: writeup.trim(),
       // dueOffset may be '' while the field is being edited — settle it to a number here.
       tasks: tasks.filter((t) => t.name.trim()).map((t) => ({
@@ -71,7 +72,14 @@ export default function NewEventModal({ onClose, onCreated, initialMonth, initia
                 </select>
               </label>
               <label className="block text-sm"><span className="text-ink-soft">Day</span>
-                <input type="number" min={1} max={31} value={day} onChange={(e) => setDay(+e.target.value)} className="mt-1 w-full rounded-lg border border-line px-3 py-2" />
+                {/* Same treatment as Due: text+numeric so the field can be cleared
+                    and can't drift from state; clamped to 1–31 on blur. */}
+                <input
+                  type="text" inputMode="numeric" value={day}
+                  onChange={(e) => setDay(e.target.value.replace(/\D/g, '').replace(/^0+(?=\d)/, ''))}
+                  onFocus={(e) => e.target.select()}
+                  onBlur={() => setDay(Math.min(31, Math.max(1, parseInt(day, 10) || 1)))}
+                  className="mt-1 w-full rounded-lg border border-line px-3 py-2" />
               </label>
             </>
           )}
