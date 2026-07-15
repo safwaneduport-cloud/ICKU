@@ -11,6 +11,7 @@ import Expenses from './pages/Expenses.jsx';
 import Assets from './pages/Assets.jsx';
 import Helpdesk from './pages/Helpdesk.jsx';
 import Events from './pages/Events.jsx';
+import Calendar from './pages/Calendar.jsx';
 import Approvals from './pages/Approvals.jsx';
 import Onboarding from './pages/Onboarding.jsx';
 import Exit from './pages/Exit.jsx';
@@ -50,6 +51,7 @@ export default function App() {
         <Route path="onboard-employee" element={<OnboardEmployee />} />
         <Route path="profile" element={<Profile />} />
         <Route path="events" element={<Events />} />
+        <Route path="calendar" element={<Calendar />} />
         <Route path="okrs" element={<Okrs />} />
         <Route path="meetings" element={<Meetings />} />
         <Route path="workspaces" element={<Workspaces />} />

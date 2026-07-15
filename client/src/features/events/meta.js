@@ -15,3 +15,16 @@ export const MONTHS = ['Jan', 'Feb', 'Mar', 'Apr', 'May', 'Jun', 'Jul', 'Aug', '
 
 export const triggerLabel = (e) =>
   e.status === 'confirmed' && e.triggerMonth ? `${MONTHS[e.triggerMonth - 1]} ${e.triggerDay}` : '—';
+
+// Academic year 2026-27: Apr–Dec map to 2026, Jan–Mar to 2027.
+// Mirrors server/src/modules/events/events.lib.js — keep the two in step.
+export const CYCLE_START = 2026;
+export const cycleYearFor = (month) => (month >= 4 ? CYCLE_START : CYCLE_START + 1);
+
+// The real Date an event fires on (null for undated / TBD events).
+export function eventDate(e) {
+  if (e.status !== 'confirmed' || !e.triggerMonth) return null;
+  return new Date(cycleYearFor(e.triggerMonth), e.triggerMonth - 1, e.triggerDay);
+}
+
+export const ymd = (d) => `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}-${String(d.getDate()).padStart(2, '0')}`;

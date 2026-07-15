@@ -11,6 +11,7 @@ const NAV_GROUPS = [
     title: 'Work',
     items: [
       { to: '/events', label: 'Tasks & Events' },
+      { to: '/calendar', label: 'Institutional Calendar' },
       { to: '/okrs', label: 'OKRs & Checklists' },
       { to: '/meetings', label: 'Meetings' },
       { to: '/approvals', label: 'Approvals' },

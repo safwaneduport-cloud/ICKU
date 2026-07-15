@@ -1,9 +1,9 @@
 import { useState } from 'react';
-import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query';
-import { getEvents, createEvent } from '../api/events.api.js';
-import { STATE, FILTERS, MONTHS, triggerLabel } from '../features/events/meta.js';
-import AssignPicker from '../features/events/AssignPicker.jsx';
+import { useQuery } from '@tanstack/react-query';
+import { getEvents } from '../api/events.api.js';
+import { STATE, FILTERS, triggerLabel } from '../features/events/meta.js';
 import EventDrawer from '../features/events/EventDrawer.jsx';
+import NewEventModal from '../features/events/NewEventModal.jsx';
 
 function Badge({ state }) {
   const m = STATE[state] || STATE.upcoming;
@@ -56,93 +56,6 @@ export default function Events() {
 
       {openId && <EventDrawer id={openId} onClose={() => setOpenId(null)} />}
       {showNew && <NewEventModal onClose={() => setShowNew(false)} />}
-    </div>
-  );
-}
-
-function NewEventModal({ onClose }) {
-  const qc = useQueryClient();
-  const [name, setName] = useState('');
-  const [dated, setDated] = useState(true);
-  const [month, setMonth] = useState(7);
-  const [day, setDay] = useState(1);
-  const [writeup, setWriteup] = useState('');
-  const [tasks, setTasks] = useState([{ name: '', assignees: [], dueOffset: 0 }]);
-
-  const setTask = (i, patch) => setTasks((ts) => ts.map((t, idx) => (idx === i ? { ...t, ...patch } : t)));
-
-  const mut = useMutation({
-    mutationFn: () => createEvent({
-      name: name.trim(),
-      status: dated ? 'confirmed' : 'tbd',
-      triggerMonth: dated ? month : null,
-      triggerDay: dated ? day : null,
-      writeup: writeup.trim(),
-      tasks: tasks.filter((t) => t.name.trim()).map((t) => ({ name: t.name.trim(), assignees: t.assignees, dueOffset: dated ? t.dueOffset : null })),
-    }),
-    onSuccess: () => { qc.invalidateQueries(); onClose(); },
-  });
-
-  return (
-    <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/30 p-4" onClick={onClose}>
-      <div className="max-h-[90vh] w-full max-w-lg overflow-y-auto rounded-2xl bg-white p-6" onClick={(e) => e.stopPropagation()}>
-        <h3 className="font-serif text-lg font-semibold">New event</h3>
-        <p className="mt-1 text-xs text-ink-soft">Unless you're the CEO, this is sent to your reporting manager for approval.</p>
-
-        <label className="mt-4 block text-sm"><span className="text-ink-soft">Event name</span>
-          <input value={name} onChange={(e) => setName(e.target.value)} className="mt-1 w-full rounded-lg border border-line px-3 py-2" placeholder="e.g. Orientation Day" />
-        </label>
-
-        <div className="mt-3 grid grid-cols-3 gap-3">
-          <label className="block text-sm"><span className="text-ink-soft">Trigger</span>
-            <select value={dated ? 'fixed' : 'tbd'} onChange={(e) => setDated(e.target.value === 'fixed')} className="mt-1 w-full rounded-lg border border-line px-3 py-2">
-              <option value="fixed">Fixed date</option><option value="tbd">Date TBD</option>
-            </select>
-          </label>
-          {dated && (
-            <>
-              <label className="block text-sm"><span className="text-ink-soft">Month</span>
-                <select value={month} onChange={(e) => setMonth(+e.target.value)} className="mt-1 w-full rounded-lg border border-line px-3 py-2">
-                  {MONTHS.map((mn, i) => <option key={i} value={i + 1}>{mn}</option>)}
-                </select>
-              </label>
-              <label className="block text-sm"><span className="text-ink-soft">Day</span>
-                <input type="number" min={1} max={31} value={day} onChange={(e) => setDay(+e.target.value)} className="mt-1 w-full rounded-lg border border-line px-3 py-2" />
-              </label>
-            </>
-          )}
-        </div>
-
-        <label className="mt-3 block text-sm"><span className="text-ink-soft">SOP write-up</span>
-          <textarea rows={2} value={writeup} onChange={(e) => setWriteup(e.target.value)} className="mt-1 w-full rounded-lg border border-line px-3 py-2" placeholder="How this event is run…" />
-        </label>
-
-        <div className="mt-3 text-sm">
-          <span className="text-ink-soft">Tasks</span>
-          <div className="mt-1 space-y-2">
-            {tasks.map((t, i) => (
-              <div key={i} className="grid grid-cols-[1fr_auto] gap-2">
-                <input value={t.name} onChange={(e) => setTask(i, { name: e.target.value })} placeholder={`Task ${i + 1}`} className="rounded-lg border border-line px-3 py-2" />
-                {dated && (
-                  <div className="flex items-center gap-1 rounded-lg border border-line px-2 text-xs text-ink-soft">
-                    Due + <input type="number" min={0} value={t.dueOffset} onChange={(e) => setTask(i, { dueOffset: Math.max(0, +e.target.value) })} className="w-12 border-none text-center outline-none" /> d
-                  </div>
-                )}
-                <div className="col-span-2"><AssignPicker value={t.assignees} onChange={(arr) => setTask(i, { assignees: arr })} /></div>
-              </div>
-            ))}
-          </div>
-          <button onClick={() => setTasks([...tasks, { name: '', assignees: [], dueOffset: 0 }])} className="mt-2 text-sm text-pine">+ Add another task</button>
-        </div>
-
-        {mut.error && <p className="mt-2 text-sm text-brick">{mut.error.response?.data?.error?.message || 'Failed'}</p>}
-        <div className="mt-4 flex justify-end gap-2">
-          <button onClick={onClose} className="rounded-lg border border-line px-4 py-2 text-sm">Cancel</button>
-          <button onClick={() => mut.mutate()} disabled={!name.trim() || mut.isPending} className="rounded-lg bg-pine px-4 py-2 text-sm font-medium text-white disabled:opacity-60">
-            {mut.isPending ? 'Creating…' : 'Create event'}
-          </button>
-        </div>
-      </div>
     </div>
   );
 }
