@@ -30,7 +30,11 @@ export default function NewEventModal({ onClose, onCreated, initialMonth, initia
       triggerMonth: dated ? month : null,
       triggerDay: dated ? day : null,
       writeup: writeup.trim(),
-      tasks: tasks.filter((t) => t.name.trim()).map((t) => ({ name: t.name.trim(), assignees: t.assignees, dueOffset: dated ? t.dueOffset : null })),
+      // dueOffset may be '' while the field is being edited — settle it to a number here.
+      tasks: tasks.filter((t) => t.name.trim()).map((t) => ({
+        name: t.name.trim(), assignees: t.assignees,
+        dueOffset: dated ? (parseInt(t.dueOffset, 10) || 0) : null,
+      })),
     }),
     onSuccess: () => { qc.invalidateQueries(); onCreated?.(); onClose(); },
   });
@@ -98,7 +102,17 @@ export default function NewEventModal({ onClose, onCreated, initialMonth, initia
                     placeholder="What needs doing?" className="rounded-lg border border-line bg-white px-3 py-2" />
                   {dated && (
                     <div className="flex items-center gap-1 rounded-lg border border-line bg-white px-2 text-xs text-ink-soft">
-                      Due + <input type="number" min={0} value={t.dueOffset} onChange={(e) => setTask(i, { dueOffset: Math.max(0, +e.target.value) })} className="w-12 border-none bg-transparent text-center outline-none" /> d
+                      Due +
+                      <input
+                        // Deliberately type=text: for type=number React compares the DOM
+                        // value to state with loose equality ("012" == 12), so it skips the
+                        // rewrite and the stray leading zero sticks. Text compares strictly,
+                        // so state and the field can never drift apart.
+                        type="text" inputMode="numeric" value={t.dueOffset}
+                        onChange={(e) => setTask(i, { dueOffset: e.target.value.replace(/\D/g, '').replace(/^0+(?=\d)/, '') })}
+                        onFocus={(e) => e.target.select()}
+                        onBlur={() => { if (t.dueOffset === '') setTask(i, { dueOffset: '0' }); }}
+                        className="w-10 border-none bg-transparent text-center outline-none" /> d
                     </div>
                   )}
                 </div>
