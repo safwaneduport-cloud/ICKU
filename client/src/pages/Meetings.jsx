@@ -167,9 +167,13 @@ function NewMeetingModal({ recurrences, onClose }) {
   });
   return (
     <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/30 p-4" onClick={onClose}>
-      <div className="max-h-[90vh] w-full max-w-md overflow-y-auto rounded-2xl bg-white p-6" onClick={(e) => e.stopPropagation()}>
-        <h3 className="font-serif text-lg font-semibold">New meeting</h3>
-        <label className="mt-4 block text-sm"><span className="text-ink-soft">Title</span>
+      {/* header / scrolling body / footer — Schedule stays put however long the form gets */}
+      <div className="flex max-h-[90vh] w-full max-w-md flex-col overflow-hidden rounded-2xl bg-white" onClick={(e) => e.stopPropagation()}>
+        <div className="shrink-0 border-b border-line px-6 pb-3 pt-6">
+          <h3 className="font-serif text-lg font-semibold">New meeting</h3>
+        </div>
+        <div className="flex-1 overflow-y-auto px-6 py-4">
+        <label className="block text-sm"><span className="text-ink-soft">Title</span>
           <input value={f.title} onChange={(e) => set('title', e.target.value)} className="inp mt-1" /></label>
         <div className="mt-3 grid grid-cols-3 gap-3">
           <label className="block text-sm"><span className="text-ink-soft">Date</span>
@@ -199,8 +203,10 @@ function NewMeetingModal({ recurrences, onClose }) {
         </div>
         <label className="mt-3 block text-sm"><span className="text-ink-soft">Agenda <span className="text-xs">(one per line)</span></span>
           <textarea rows={3} value={f.agenda} onChange={(e) => set('agenda', e.target.value)} className="inp mt-1" /></label>
-        {mut.error && <p className="mt-2 text-sm text-brick">{mut.error.response?.data?.error?.message || 'Failed'}</p>}
-        <div className="mt-4 flex justify-end gap-2">
+        {mut.error && <p className="mt-3 text-sm text-brick">{mut.error.response?.data?.error?.message || 'Failed'}</p>}
+        </div>
+
+        <div className="flex shrink-0 items-center justify-end gap-2 border-t border-line bg-white px-6 py-3">
           <button onClick={onClose} className="rounded-lg border border-line px-4 py-2 text-sm">Cancel</button>
           <button onClick={() => mut.mutate()} disabled={!f.title.trim() || !f.date || mut.isPending} className="rounded-lg bg-pine px-4 py-2 text-sm font-medium text-white disabled:opacity-60">Schedule</button>
         </div>

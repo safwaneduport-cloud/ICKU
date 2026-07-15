@@ -295,7 +295,9 @@ function ThreadPanel({ conversationId, parent, users, onClose, onOpenProfile }) 
 function ModalShell({ title, children, onClose }) {
   return (
     <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/30 p-4" onClick={onClose}>
-      <div className="w-full max-w-md rounded-2xl bg-white p-6" onClick={(e) => e.stopPropagation()}>
+      {/* max-h + scroll: with the people picker open this can get tall, and the
+          action buttons must stay reachable rather than run off the viewport. */}
+      <div className="max-h-[90vh] w-full max-w-md overflow-y-auto rounded-2xl bg-white p-6" onClick={(e) => e.stopPropagation()}>
         <h3 className="font-serif text-lg font-semibold text-pine">{title}</h3>
         {children}
       </div>
