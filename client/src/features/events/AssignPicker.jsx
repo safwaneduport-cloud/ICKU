@@ -66,12 +66,19 @@ export default function AssignPicker({ value = [], onChange, onDone }) {
 
       {open && (
         <div className="mt-1 rounded-lg border border-line bg-white p-2 shadow-sm">
-          <input
-            value={q} onChange={(e) => setQ(e.target.value)} onKeyDown={onKeyDown} autoFocus
-            placeholder="Search name, role or department…"
-            className="w-full rounded border border-line px-2 py-1 text-sm outline-none focus:border-pine"
-          />
-          <p className="mt-1 px-1 text-[10px] text-ink-soft">↑↓ to move · Enter to select · Esc to close</p>
+          {/* Search + Done sit together at the TOP so the way out is always in view */}
+          <div className="flex items-center gap-2">
+            <input
+              value={q} onChange={(e) => setQ(e.target.value)} onKeyDown={onKeyDown} autoFocus
+              placeholder="Search name, role or department…"
+              className="min-w-0 flex-1 rounded border border-line px-2 py-1.5 text-sm outline-none focus:border-pine"
+            />
+            <button type="button" onClick={() => { setOpen(false); onDone?.(); }}
+              className="shrink-0 rounded-lg bg-pine px-3 py-1.5 text-xs font-medium text-white">
+              Done{value.length ? ` (${value.length})` : ''}
+            </button>
+          </div>
+          <p className="mt-1 px-1 text-[10px] text-ink-soft">↑↓ to move · Enter to select · Esc or Done to close</p>
 
           <div ref={listRef} className="mt-1 max-h-56 overflow-y-auto">
             {groups.length === 0 && <p className="px-2 py-2 text-xs text-ink-soft">No matches.</p>}
@@ -101,10 +108,9 @@ export default function AssignPicker({ value = [], onChange, onDone }) {
             })}
           </div>
 
-          <div className="mt-1 flex items-center justify-between border-t border-line pt-2">
-            <span className="text-xs text-ink-soft">{value.length} selected</span>
-            <button type="button" onClick={() => { setOpen(false); onDone?.(); }} className="rounded-lg bg-pine px-3 py-1 text-xs font-medium text-white">Done</button>
-          </div>
+          <p className="mt-1 border-t border-line pt-1.5 text-center text-[11px] text-ink-soft">
+            {value.length} selected
+          </p>
         </div>
       )}
     </div>

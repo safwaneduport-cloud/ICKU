@@ -39,11 +39,15 @@ export default function NewEventModal({ onClose, onCreated, initialMonth, initia
 
   return (
     <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/30 p-4" onClick={onClose}>
-      <div className="max-h-[90vh] w-full max-w-lg overflow-y-auto rounded-2xl bg-white p-6" onClick={(e) => e.stopPropagation()}>
-        <h3 className="font-serif text-lg font-semibold">New event</h3>
-        <p className="mt-1 text-xs text-ink-soft">Unless you're the CEO, this is sent to your reporting manager for approval.</p>
+      {/* header / scrolling body / footer — so the footer can never cover the form */}
+      <div className="flex max-h-[90vh] w-full max-w-lg flex-col overflow-hidden rounded-2xl bg-white" onClick={(e) => e.stopPropagation()}>
+        <div className="shrink-0 border-b border-line px-6 pb-3 pt-6">
+          <h3 className="font-serif text-lg font-semibold">New event</h3>
+          <p className="mt-1 text-xs text-ink-soft">Unless you're the CEO, this is sent to your reporting manager for approval.</p>
+        </div>
 
-        <label className="mt-4 block text-sm"><span className="text-ink-soft">Event name</span>
+        <div className="flex-1 overflow-y-auto px-6 py-4">
+        <label className="block text-sm"><span className="text-ink-soft">Event name</span>
           <input value={name} autoFocus onChange={(e) => setName(e.target.value)}
             onKeyDown={(e) => { if (e.key === 'Enter') { e.preventDefault(); taskRefs.current[0]?.focus(); } }}
             className="mt-1 w-full rounded-lg border border-line px-3 py-2" placeholder="e.g. Orientation Day" />
@@ -77,35 +81,41 @@ export default function NewEventModal({ onClose, onCreated, initialMonth, initia
           <span className="text-ink-soft">Tasks</span>
           <div className="mt-1 space-y-3">
             {tasks.map((t, i) => (
-              <div key={i} className="rounded-lg border border-line/70 p-2">
+              <div key={i} className="rounded-lg border border-line/70 bg-paper/30 p-2.5">
+                <div className="mb-1.5 flex items-center justify-between">
+                  <span className="text-[11px] font-semibold uppercase tracking-wide text-ink-soft">Task {i + 1}</span>
+                  {tasks.length > 1 && (
+                    <button type="button" onClick={() => setTasks((ts) => ts.filter((_, idx) => idx !== i))}
+                      className="text-xs text-ink-soft hover:text-brick">Remove</button>
+                  )}
+                </div>
                 <div className="grid grid-cols-[1fr_auto] gap-2">
                   <input
                     ref={(el) => { taskRefs.current[i] = el; }}
                     value={t.name}
                     onChange={(e) => setTask(i, { name: e.target.value })}
                     onKeyDown={(e) => { if (e.key === 'Enter') { e.preventDefault(); if (t.name.trim() && i === tasks.length - 1) addTask(); } }}
-                    placeholder={`Task ${i + 1}`} className="rounded-lg border border-line px-3 py-2" />
+                    placeholder="What needs doing?" className="rounded-lg border border-line bg-white px-3 py-2" />
                   {dated && (
-                    <div className="flex items-center gap-1 rounded-lg border border-line px-2 text-xs text-ink-soft">
-                      Due + <input type="number" min={0} value={t.dueOffset} onChange={(e) => setTask(i, { dueOffset: Math.max(0, +e.target.value) })} className="w-12 border-none text-center outline-none" /> d
+                    <div className="flex items-center gap-1 rounded-lg border border-line bg-white px-2 text-xs text-ink-soft">
+                      Due + <input type="number" min={0} value={t.dueOffset} onChange={(e) => setTask(i, { dueOffset: Math.max(0, +e.target.value) })} className="w-12 border-none bg-transparent text-center outline-none" /> d
                     </div>
                   )}
                 </div>
                 <div className="mt-2"><AssignPicker value={t.assignees} onChange={(arr) => setTask(i, { assignees: arr })} /></div>
-                {tasks.length > 1 && (
-                  <button type="button" onClick={() => setTasks((ts) => ts.filter((_, idx) => idx !== i))}
-                    className="mt-1 text-xs text-ink-soft hover:text-brick">Remove task</button>
-                )}
               </div>
             ))}
           </div>
-          <button type="button" onClick={() => addTask()} className="mt-2 text-sm text-pine hover:underline">+ Add another task</button>
+          <button type="button" onClick={() => addTask()}
+            className="mt-3 w-full rounded-lg border border-dashed border-line py-2 text-sm font-medium text-pine hover:border-pine hover:bg-pine-tint/40">
+            + Add another task
+          </button>
         </div>
 
-        {mut.error && <p className="mt-2 text-sm text-brick">{mut.error.response?.data?.error?.message || 'Failed'}</p>}
+        {mut.error && <p className="mt-3 text-sm text-brick">{mut.error.response?.data?.error?.message || 'Failed'}</p>}
+        </div>
 
-        {/* sticky footer — always reachable no matter how long the form gets */}
-        <div className="sticky bottom-0 -mx-6 -mb-6 mt-4 flex items-center justify-end gap-2 border-t border-line bg-white px-6 py-3">
+        <div className="flex shrink-0 items-center justify-end gap-2 border-t border-line bg-white px-6 py-3">
           <button onClick={onClose} className="rounded-lg border border-line px-4 py-2 text-sm">Cancel</button>
           <button onClick={() => mut.mutate()} disabled={!canSave} className="rounded-lg bg-pine px-4 py-2 text-sm font-medium text-white disabled:opacity-60">
             {mut.isPending ? 'Creating…' : 'Create event'}
