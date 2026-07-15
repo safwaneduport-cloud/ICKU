@@ -3,7 +3,7 @@
 import { randomUUID } from 'node:crypto';
 import { prisma } from '../../config/prisma.js';
 import { ApiError } from '../../middleware/errorHandler.js';
-import { canAdmin } from '../../lib/access.js';
+import { isCeo } from '../../lib/access.js';
 
 const FINANCE_ROLES = ['FINANCE_EXECUTIVE', 'FINANCE_MANAGER', 'CFO'];
 const PENDING = ['pending_branch', 'pending_finance_review', 'pending_finance_approval'];
@@ -26,7 +26,7 @@ async function rolesOf(userId) {
   return prisma.assetRoleAssignment.findMany({ where: { userId } });
 }
 const hasRole = (roles, role) => roles.some((r) => r.role === role);
-const isHubAdmin = (user, roles) => canAdmin(user) || hasRole(roles, 'ASSET_ADMIN');
+const isHubAdmin = (user, roles) => isCeo(user) || hasRole(roles, 'ASSET_ADMIN');
 
 // Does one of my assignments for `role` cover this asset's location?
 function scopeCovers(roles, role, asset) {

@@ -2,7 +2,7 @@
 // A session audits a location against the register; variances route to write-off / damage.
 import { prisma } from '../../config/prisma.js';
 import { ApiError } from '../../middleware/errorHandler.js';
-import { canAdmin } from '../../lib/access.js';
+import { isCeo } from '../../lib/access.js';
 import { raiseEvent } from './assets.service.js';
 
 // Assets that should physically exist (excludes draft / void / disposed / written_off).
@@ -10,7 +10,7 @@ const PRESENT = ['active', 'under_repair', 'in_transfer', 'pending_ack'];
 const ROLE_KEYS = ['OPERATIONS', 'BRANCH_MANAGER', 'FINANCE_EXECUTIVE', 'FINANCE_MANAGER', 'CFO'];
 
 async function rolesOf(userId) { return prisma.assetRoleAssignment.findMany({ where: { userId } }); }
-const isHubAdmin = (user, roles) => canAdmin(user) || roles.some((r) => r.role === 'ASSET_ADMIN');
+const isHubAdmin = (user, roles) => isCeo(user) || roles.some((r) => r.role === 'ASSET_ADMIN');
 const hasAssetRole = (roles) => roles.some((r) => ROLE_KEYS.includes(r.role));
 function scopeCovers(roles, loc) {
   return roles.some((r) => {

@@ -3,7 +3,7 @@
 // render + export any report generically.
 import { prisma } from '../../config/prisma.js';
 import { ApiError } from '../../middleware/errorHandler.js';
-import { canAdmin } from '../../lib/access.js';
+import { isCeo } from '../../lib/access.js';
 
 const ROLE_KEYS = ['OPERATIONS', 'BRANCH_MANAGER', 'FINANCE_EXECUTIVE', 'FINANCE_MANAGER', 'CFO'];
 const LIVE = ['active', 'under_repair', 'in_transfer', 'pending_ack'];
@@ -12,7 +12,7 @@ const PENDING = ['pending_branch', 'pending_finance_review', 'pending_finance_ap
 async function rolesOf(userId) { return prisma.assetRoleAssignment.findMany({ where: { userId } }); }
 async function assertReportAccess(user) {
   const roles = await rolesOf(user.id);
-  const ok = canAdmin(user) || roles.some((r) => r.role === 'ASSET_ADMIN' || ROLE_KEYS.includes(r.role));
+  const ok = isCeo(user) || roles.some((r) => r.role === 'ASSET_ADMIN' || ROLE_KEYS.includes(r.role));
   if (!ok) throw new ApiError(403, 'AssetHub reports are limited to asset roles');
 }
 

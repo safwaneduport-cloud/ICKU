@@ -1,6 +1,6 @@
 import { prisma } from '../../config/prisma.js';
 import { ApiError } from '../../middleware/errorHandler.js';
-import { canAdmin } from '../../lib/access.js';
+import { isCeo } from '../../lib/access.js';
 
 export const ASSET_ROLES = [
   'OPERATIONS', 'BRANCH_MANAGER', 'FINANCE_EXECUTIVE', 'FINANCE_MANAGER', 'CFO', 'ASSET_ADMIN',
@@ -12,7 +12,7 @@ export async function myAccess(user) {
     where: { userId: user.id },
     select: { role: true, siteId: true, buildingId: true },
   });
-  const isAssetAdmin = canAdmin(user) || roles.some((r) => r.role === 'ASSET_ADMIN');
+  const isAssetAdmin = isCeo(user) || roles.some((r) => r.role === 'ASSET_ADMIN');
   return { roles, isAssetAdmin, allRoles: ASSET_ROLES };
 }
 
