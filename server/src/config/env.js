@@ -25,4 +25,13 @@ export const env = {
     serviceKey: process.env.SUPABASE_SERVICE_KEY || '',
     bucket: process.env.SUPABASE_BUCKET || 'uploads',
   },
+  // Microsoft 365 (Entra) — per-user Outlook/Teams calendar connect. Delegated
+  // OAuth; ICKU never sees passwords, only scoped tokens the user granted.
+  microsoft: {
+    clientId: process.env.MS_CLIENT_ID || '',
+    tenantId: process.env.MS_TENANT_ID || '',
+    clientSecret: process.env.MS_CLIENT_SECRET || '',
+    // Optional override; otherwise derived from the request host at runtime.
+    redirectUri: process.env.MS_REDIRECT_URI || '',
+  },
 };

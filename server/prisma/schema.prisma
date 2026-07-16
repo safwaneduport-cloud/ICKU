@@ -98,6 +98,7 @@ model User {
   messagesSent         Message[]            @relation("MessageAuthor")
   messageReactions     MessageReaction[]
   reminders            Reminder[]
+  microsoftAccount     MicrosoftAccount?
 
   // AssetHub (V1)
   assetRoles          AssetRoleAssignment[] @relation("AssetRoles")
@@ -1068,4 +1069,23 @@ model AssetHistory {
   createdAt DateTime  @default(now())
 
   @@index([assetId])
+}
+
+// A user's connected Microsoft 365 (Outlook/Teams) account. Tokens are stored
+// encrypted (see lib/secretbox.js). One per user; connecting is self-service.
+model MicrosoftAccount {
+  id           String   @id @default(uuid())
+  userId       String   @unique
+  user         User     @relation(fields: [userId], references: [id], onDelete: Cascade)
+  msId         String // Graph user id
+  email        String
+  displayName  String   @default("")
+  accessToken  String // encrypted
+  refreshToken String // encrypted
+  expiresAt    DateTime // access-token expiry
+  scope        String   @default("")
+  connectedAt  DateTime @default(now())
+  updatedAt    DateTime @updatedAt
+
+  @@index([email])
 }

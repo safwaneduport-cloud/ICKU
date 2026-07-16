@@ -7,6 +7,7 @@ import { getActiveOptions } from '../api/masters.api.js';
 import { getDepartments } from '../api/departments.api.js';
 import { getUsers } from '../api/users.api.js';
 import { changeOwnPassword } from '../api/credentials.api.js';
+import { getMicrosoftStatus, getMicrosoftConnectUrl, disconnectMicrosoft } from '../api/integrations.api.js';
 import { groupByDept } from '../lib/orgGroups.js';
 
 const COMPLETION_KEYS = new Set([
@@ -254,8 +255,77 @@ export default function Profile() {
         </button>
       </div>
 
+      {viewingSelf && <Connections />}
       {viewingSelf && <ChangePassword />}
     </div>
+  );
+}
+
+function Connections() {
+  const qc = useQueryClient();
+  const [params, setParams] = useSearchParams();
+  const [busy, setBusy] = useState(false);
+  const [note, setNote] = useState('');
+
+  const status = useQuery({ queryKey: ['ms-status'], queryFn: getMicrosoftStatus, retry: false });
+  const s = status.data;
+
+  // Show the outcome of the OAuth round-trip, then clear the URL flag.
+  useEffect(() => {
+    const flag = params.get('ms');
+    if (!flag) return;
+    if (flag === 'connected') { setNote('✓ Microsoft account connected.'); qc.invalidateQueries({ queryKey: ['ms-status'] }); }
+    else if (flag === 'denied') setNote('Connection cancelled — you didn’t grant access.');
+    else if (flag === 'error') setNote(`Couldn’t connect: ${params.get('msg') || 'please try again'}`);
+    const next = new URLSearchParams(params); next.delete('ms'); next.delete('msg');
+    setParams(next, { replace: true });
+  }, []); // eslint-disable-line
+
+  const disconnect = useMutation({
+    mutationFn: disconnectMicrosoft,
+    onSuccess: () => { setNote('Microsoft account disconnected.'); qc.invalidateQueries({ queryKey: ['ms-status'] }); },
+  });
+
+  async function connect() {
+    setBusy(true);
+    try { window.location.href = await getMicrosoftConnectUrl(); }
+    catch (e) { setNote(e.response?.data?.error?.message || 'Could not start Microsoft sign-in'); setBusy(false); }
+  }
+
+  return (
+    <section className="rounded-2xl border border-line bg-white p-5">
+      <h2 className="font-serif text-lg font-semibold text-pine">Connections</h2>
+      <p className="mt-0.5 text-sm text-ink-soft">Link your Outlook / Teams calendar so meetings sync between ICKU and Microsoft.</p>
+
+      <div className="mt-3 flex flex-wrap items-center justify-between gap-3 rounded-xl border border-line p-3">
+        <div className="flex items-center gap-3">
+          <span className="flex h-9 w-9 items-center justify-center rounded-lg bg-[#EAF1FB] text-lg">🗓️</span>
+          <div>
+            <div className="text-sm font-medium text-ink">Microsoft 365 (Outlook / Teams)</div>
+            {s?.connected
+              ? <div className="text-xs text-sage">Connected as {s.email}</div>
+              : <div className="text-xs text-ink-soft">Not connected</div>}
+          </div>
+        </div>
+
+        {!s?.configured ? (
+          <span className="text-xs text-ink-soft">Not enabled by your admin yet</span>
+        ) : s?.connected ? (
+          <button onClick={() => disconnect.mutate()} disabled={disconnect.isPending}
+            className="rounded-lg border border-line px-4 py-2 text-sm hover:border-brick hover:text-brick disabled:opacity-50">
+            {disconnect.isPending ? 'Disconnecting…' : 'Disconnect'}
+          </button>
+        ) : (
+          <button onClick={connect} disabled={busy}
+            className="rounded-lg bg-pine px-4 py-2 text-sm font-medium text-white disabled:opacity-50">
+            {busy ? 'Redirecting…' : 'Connect Microsoft'}
+          </button>
+        )}
+      </div>
+
+      {note && <p className="mt-2 text-sm text-ink-soft">{note}</p>}
+      <p className="mt-2 text-[11px] text-ink-soft">You sign in on Microsoft’s own page — ICKU never sees your password, only calendar access you can revoke anytime.</p>
+    </section>
   );
 }
 

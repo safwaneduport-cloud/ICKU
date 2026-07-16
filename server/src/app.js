@@ -39,6 +39,7 @@ import credentialRoutes from './modules/credentials/credentials.routes.js';
 import employeeRoutes from './modules/employees/employees.routes.js';
 import fileRoutes from './modules/files/files.routes.js';
 import assethubRoutes from './modules/assethub/assethub.routes.js';
+import integrationsRoutes from './modules/integrations/integrations.routes.js';
 
 export const app = express();
 
@@ -52,6 +53,8 @@ if (env.nodeEnv === 'production') app.set('trust proxy', 1);
 if (env.siteAccessUser && env.siteAccessPass) {
   app.use((req, res, next) => {
     if (req.path === '/api/v1/health') return next();
+    // Microsoft's OAuth redirect can't send Basic-Auth credentials.
+    if (req.path === '/api/v1/integrations/microsoft/callback') return next();
     const [scheme, encoded] = (req.headers.authorization || '').split(' ');
     if (scheme === 'Basic' && encoded) {
       const [u, p] = Buffer.from(encoded, 'base64').toString().split(':');
@@ -98,6 +101,7 @@ api.use('/credentials', authenticate, credentialRoutes);  // protected (HR-gated
 api.use('/employees', authenticate, employeeRoutes);      // protected (HR-gated onboarding)
 api.use('/files', authenticate, fileRoutes);              // protected (Supabase Storage upload)
 api.use('/assethub', authenticate, assethubRoutes);       // protected (writes ASSET_ADMIN-gated inside)
+api.use('/integrations', integrationsRoutes);             // per-route auth; OAuth callback is public (state-verified)
 app.use('/api/v1', api);
 
 // Unknown /api routes → JSON 404 (never fall through to the SPA).
