@@ -3,6 +3,7 @@ import { useMutation, useQueryClient } from '@tanstack/react-query';
 import { createEvent } from '../../api/events.api.js';
 import { MONTHS } from './meta.js';
 import AssignPicker from './AssignPicker.jsx';
+import SopFields from './SopFields.jsx';
 
 // Shared by Tasks & Events and the Institutional Calendar (which prefills the
 // date from the clicked day). The footer is sticky so Create is always reachable,
@@ -14,6 +15,7 @@ export default function NewEventModal({ onClose, onCreated, initialMonth, initia
   const [month, setMonth] = useState(initialMonth ?? 7);
   const [day, setDay] = useState(initialDay ?? 1);
   const [writeup, setWriteup] = useState('');
+  const [sop, setSop] = useState([]); // SOP PDFs + links -> event attachments
   const [tasks, setTasks] = useState([{ name: '', assignees: [], dueOffset: 0 }]);
   const taskRefs = useRef([]);
 
@@ -31,6 +33,7 @@ export default function NewEventModal({ onClose, onCreated, initialMonth, initia
       // day may be '' while the field is being edited — settle it here too.
       triggerDay: dated ? Math.min(31, Math.max(1, parseInt(day, 10) || 1)) : null,
       writeup: writeup.trim(),
+      attachments: sop,
       // dueOffset may be '' while the field is being edited — settle it to a number here.
       tasks: tasks.filter((t) => t.name.trim()).map((t) => ({
         name: t.name.trim(), assignees: t.assignees,
@@ -85,9 +88,12 @@ export default function NewEventModal({ onClose, onCreated, initialMonth, initia
           )}
         </div>
 
-        <label className="mt-3 block text-sm"><span className="text-ink-soft">SOP write-up</span>
-          <textarea rows={2} value={writeup} onChange={(e) => setWriteup(e.target.value)} className="mt-1 w-full rounded-lg border border-line px-3 py-2" placeholder="How this event is run…" />
-        </label>
+        <div className="mt-3 text-sm">
+          <span className="text-ink-soft">SOP write-up</span>
+          <div className="mt-1">
+            <SopFields writeup={writeup} onWriteup={setWriteup} attachments={sop} onAttachments={setSop} />
+          </div>
+        </div>
 
         <div className="mt-3 text-sm">
           <span className="text-ink-soft">Tasks</span>

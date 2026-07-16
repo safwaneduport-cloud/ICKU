@@ -10,6 +10,7 @@ router.get('/:id', ctrl.get);
 router.post('/:id/approve', ctrl.approve);
 router.post('/:id/reject', ctrl.reject);
 router.post('/:id/owner', ctrl.changeOwner);
+router.patch('/:id/sop', ctrl.updateSop);
 router.post('/:id/comments', ctrl.addComment);
 router.post('/tasks/:taskId/toggle', ctrl.toggleTask);
 

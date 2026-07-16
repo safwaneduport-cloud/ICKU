@@ -1,6 +1,50 @@
 import { prisma } from '../../config/prisma.js';
 import { ApiError } from '../../middleware/errorHandler.js';
+import { canAdmin } from '../../lib/access.js';
 import { computeState, triggerDate, isTaskPastDue } from './events.lib.js';
+
+// An event's SOP (write-up + PDF/link attachments) lives on the event, but it
+// also belongs in the SOP library — so we keep a companion KnowledgeDoc in step
+// with it. The event is the source of truth; this doc is its Knowledge Base face
+// (searchable, type-filtered, with the existing "Linked event" pill).
+const sopAttachments = (list = []) =>
+  list.filter((a) => a?.url).map((a) => ({
+    kind: a.kind === 'link' ? 'link' : 'pdf',
+    label: (a.label || '').trim() || (a.kind === 'link' ? 'SOP link' : 'SOP document'),
+    url: a.url,
+  }));
+
+async function syncEventSop(eventId) {
+  const e = await prisma.event.findUnique({
+    where: { id: eventId },
+    include: { attachments: true, owner: { select: { id: true, departmentId: true } } },
+  });
+  if (!e) return;
+
+  const files = e.attachments.filter((a) => a.kind === 'pdf').map((a) => ({ kind: 'pdf', label: a.label, url: a.url }));
+  const firstLink = e.attachments.find((a) => a.kind === 'link');
+  const hasSop = !!(e.writeup?.trim() || files.length || firstLink);
+  const existing = await prisma.knowledgeDoc.findFirst({ where: { eventId, type: 'SOP' } });
+
+  // SOP emptied out → retire the library entry rather than leave a stale one.
+  if (!hasSop) {
+    if (existing) await prisma.knowledgeDoc.delete({ where: { id: existing.id } });
+    return;
+  }
+
+  const data = {
+    title: `${e.name} — SOP`,
+    type: 'SOP',
+    body: e.writeup || '',
+    link: firstLink?.url || null,
+    attachments: files,
+    eventId,
+    ownerId: e.ownerId || null,
+    departmentId: e.owner?.departmentId || null,
+  };
+  if (existing) await prisma.knowledgeDoc.update({ where: { id: existing.id }, data });
+  else await prisma.knowledgeDoc.create({ data });
+}
 
 const eventInclude = {
   owner: { select: { id: true, name: true } },
@@ -57,7 +101,7 @@ export async function get(id) {
 }
 
 export async function create(creator, payload) {
-  const { name, status, triggerMonth, triggerDay, writeup, tasks = [] } = payload;
+  const { name, status, triggerMonth, triggerDay, writeup, tasks = [], attachments = [] } = payload;
   if (!name?.trim()) throw new ApiError(400, 'Event name is required');
 
   // Approval routing: CEO auto-approves; everyone else routes to their manager.
@@ -70,7 +114,7 @@ export async function create(creator, payload) {
     approverId = u?.reportsToId || 'ceo';
   }
 
-  return prisma.event.create({
+  const event = await prisma.event.create({
     data: {
       name: name.trim(),
       ownerId: creator.id,
@@ -79,6 +123,7 @@ export async function create(creator, payload) {
       triggerDay: status === 'confirmed' ? triggerDay : null,
       writeup: writeup || '',
       approval, approverId, createdById: creator.id,
+      attachments: { create: sopAttachments(attachments) },
       tasks: {
         create: tasks.map((t, i) => ({
           name: t.name, dueOffset: t.dueOffset ?? null, sort: i,
@@ -87,6 +132,29 @@ export async function create(creator, payload) {
       },
     },
   });
+  await syncEventSop(event.id);
+  return event;
+}
+
+// Edit an event's SOP after the fact — write-up, PDF and link. Owner/creator/admin.
+export async function updateSop(actor, id, { writeup, attachments } = {}) {
+  const e = await prisma.event.findUnique({ where: { id }, select: { id: true, ownerId: true, createdById: true } });
+  if (!e) throw new ApiError(404, 'Event not found');
+  if (e.ownerId !== actor.id && e.createdById !== actor.id && !canAdmin(actor)) {
+    throw new ApiError(403, 'Only the event owner (or an admin) can edit its SOP');
+  }
+
+  if (writeup !== undefined) {
+    await prisma.event.update({ where: { id }, data: { writeup: (writeup || '').trim() } });
+  }
+  if (Array.isArray(attachments)) {
+    // Full replace — the client always sends the complete list.
+    await prisma.attachment.deleteMany({ where: { eventId: id } });
+    const clean = sopAttachments(attachments);
+    if (clean.length) await prisma.attachment.createMany({ data: clean.map((a) => ({ ...a, eventId: id })) });
+  }
+  await syncEventSop(id);
+  return get(id);
 }
 
 export async function decide(id, approverId, decision) {

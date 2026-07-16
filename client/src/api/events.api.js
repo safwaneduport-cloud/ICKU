@@ -10,3 +10,4 @@ export const rejectEvent = (id) => api.post(`/events/${id}/reject`).then((r) => 
 export const changeEventOwner = (id, ownerId) => api.post(`/events/${id}/owner`, { ownerId }).then((r) => r.data.data);
 export const toggleTask = (taskId) => api.post(`/events/tasks/${taskId}/toggle`).then((r) => r.data.data);
 export const addEventComment = (id, body) => api.post(`/events/${id}/comments`, { body }).then((r) => r.data.data);
+export const updateEventSop = (id, payload) => api.patch(`/events/${id}/sop`, payload).then((r) => r.data.data);

@@ -54,3 +54,8 @@ export async function addComment(req, res, next) {
     res.json({ data: await service.addComment(req.params.id, req.user.id, body, parentId), error: null });
   } catch (e) { next(e); }
 }
+
+export async function updateSop(req, res, next) {
+  try { res.json({ data: await service.updateSop(req.user, req.params.id, req.body || {}), error: null }); }
+  catch (e) { next(e); }
+}

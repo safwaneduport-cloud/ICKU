@@ -1,8 +1,10 @@
+import { useState } from 'react';
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query';
 import { useAuth } from '../../store/AuthContext.jsx';
-import { getEvent, toggleTask } from '../../api/events.api.js';
+import { getEvent, toggleTask, updateEventSop } from '../../api/events.api.js';
 import { STATE, triggerLabel } from './meta.js';
 import EventChat from '../messages/EventChat.jsx';
+import SopFields from './SopFields.jsx';
 
 function Badge({ state }) {
   const m = STATE[state] || STATE.upcoming;
@@ -16,6 +18,8 @@ export default function EventDrawer({ id, onClose }) {
   const toggle = useMutation({ mutationFn: toggleTask, onSuccess: () => qc.invalidateQueries() });
 
   const e = q.data;
+  const isAdmin = user?.id === 'ceo' || user?.id === 'EP002' || user?.role === 'HR Head';
+  const canEditSop = !!e && (e.ownerId === user?.id || e.createdById === user?.id || isAdmin);
 
   return (
     <div className="fixed inset-0 z-40 flex justify-end bg-black/30" onClick={onClose}>
@@ -36,23 +40,7 @@ export default function EventDrawer({ id, onClose }) {
               <button onClick={onClose} className="rounded-lg border border-line px-3 py-1 text-sm">Close</button>
             </div>
 
-            {e.writeup && (
-              <section className="mt-5 rounded-2xl border border-line bg-white p-4">
-                <div className="text-xs font-semibold uppercase tracking-wide text-ink-soft">SOP write-up</div>
-                <p className="mt-2 text-sm leading-relaxed">{e.writeup}</p>
-              </section>
-            )}
-
-            {e.attachments?.length > 0 && (
-              <section className="mt-4 flex flex-wrap gap-2">
-                {e.attachments.map((a) => (
-                  <a key={a.id} href={a.url || '#'} target="_blank" rel="noreferrer"
-                    className="rounded-lg border border-line bg-white px-3 py-1.5 text-xs hover:border-pine">
-                    {a.kind === 'pdf' ? '📄' : '🔗'} {a.label}
-                  </a>
-                ))}
-              </section>
-            )}
+            <SopSection e={e} canEdit={canEditSop} onSaved={() => qc.invalidateQueries()} />
 
             <section className="mt-4 rounded-2xl border border-line bg-white p-4">
               <div className="text-xs font-semibold uppercase tracking-wide text-ink-soft">Tasks · {e.tasksDone}/{e.tasksTotal}</div>
@@ -83,5 +71,71 @@ export default function EventDrawer({ id, onClose }) {
         )}
       </div>
     </div>
+  );
+}
+
+// The event's SOP: write-up + PDF/link attachments. Editable in place by the
+// owner/creator/admin; whatever's here is mirrored into the Knowledge Base.
+function SopSection({ e, canEdit, onSaved }) {
+  const [editing, setEditing] = useState(false);
+  const [writeup, setWriteup] = useState(e.writeup || '');
+  const [atts, setAtts] = useState((e.attachments || []).map((a) => ({ kind: a.kind, label: a.label, url: a.url })));
+  const [err, setErr] = useState('');
+
+  const save = useMutation({
+    mutationFn: () => updateEventSop(e.id, { writeup, attachments: atts }),
+    onSuccess: () => { setEditing(false); setErr(''); onSaved(); },
+    onError: (ex) => setErr(ex.response?.data?.error?.message || 'Could not save the SOP'),
+  });
+
+  const start = () => {
+    setWriteup(e.writeup || '');
+    setAtts((e.attachments || []).map((a) => ({ kind: a.kind, label: a.label, url: a.url })));
+    setEditing(true);
+  };
+
+  const isEmpty = !e.writeup && !(e.attachments || []).length;
+
+  return (
+    <section className="mt-5 rounded-2xl border border-line bg-white p-4">
+      <div className="flex items-center justify-between">
+        <div className="text-xs font-semibold uppercase tracking-wide text-ink-soft">SOP</div>
+        {canEdit && !editing && (
+          <button onClick={start} className="text-xs font-medium text-pine hover:underline">
+            {isEmpty ? '+ Add SOP' : 'Edit'}
+          </button>
+        )}
+      </div>
+
+      {editing ? (
+        <div className="mt-2">
+          <SopFields writeup={writeup} onWriteup={setWriteup} attachments={atts} onAttachments={setAtts} />
+          {err && <p className="mt-1 text-xs text-brick">{err}</p>}
+          <div className="mt-2 flex justify-end gap-2">
+            <button onClick={() => { setEditing(false); setErr(''); }} className="rounded-lg border border-line px-3 py-1.5 text-sm">Cancel</button>
+            <button onClick={() => save.mutate()} disabled={save.isPending}
+              className="rounded-lg bg-pine px-4 py-1.5 text-sm font-medium text-white disabled:opacity-60">
+              {save.isPending ? 'Saving…' : 'Save SOP'}
+            </button>
+          </div>
+        </div>
+      ) : isEmpty ? (
+        <p className="mt-2 text-sm text-ink-soft">No SOP yet.</p>
+      ) : (
+        <>
+          {e.writeup && <p className="mt-2 whitespace-pre-wrap text-sm leading-relaxed">{e.writeup}</p>}
+          {e.attachments?.length > 0 && (
+            <div className="mt-3 flex flex-wrap gap-2">
+              {e.attachments.map((a) => (
+                <a key={a.id} href={a.url || '#'} target="_blank" rel="noreferrer"
+                  className="rounded-lg border border-line px-3 py-1.5 text-xs hover:border-pine">
+                  {a.kind === 'pdf' ? '📄' : '🔗'} {a.label}
+                </a>
+              ))}
+            </div>
+          )}
+        </>
+      )}
+    </section>
   );
 }
