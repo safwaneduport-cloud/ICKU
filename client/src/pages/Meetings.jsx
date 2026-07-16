@@ -4,7 +4,7 @@ import { useAuth } from '../store/AuthContext.jsx';
 import { useProfile } from '../store/ProfileContext.jsx';
 import { getUsers } from '../api/users.api.js';
 import { meetingsMeta, getMeetings, getMeeting, createMeeting, updateMinutes, addMeetingAction, toggleMeetingAction } from '../api/collab.api.js';
-import { getMicrosoftCalendar } from '../api/integrations.api.js';
+import { getMicrosoftCalendar, getMicrosoftStatus } from '../api/integrations.api.js';
 import AssignPicker from '../features/events/AssignPicker.jsx';
 
 const initials = (n = '') => n.split(' ').map((w) => w[0]).slice(0, 2).join('').toUpperCase();
@@ -195,10 +195,18 @@ function MeetingDrawer({ id, onClose }) {
 function NewMeetingModal({ recurrences, onClose }) {
   const qc = useQueryClient();
   const [f, setF] = useState({ title: '', date: '', time: '10:00', recurring: 'One-off', mode: 'offline', meetingLink: '', attendeeIds: [], agenda: '' });
+  const [note, setNote] = useState('');
   const set = (k, v) => setF((s) => ({ ...s, [k]: v }));
+  const ms = useQuery({ queryKey: ['ms-status'], queryFn: getMicrosoftStatus, retry: false });
+  const willAutoTeams = f.mode !== 'offline' && !f.meetingLink.trim() && ms.data?.connected;
   const mut = useMutation({
     mutationFn: () => createMeeting({ ...f, agenda: f.agenda.split('\n').map((a) => a.trim()).filter(Boolean) }),
-    onSuccess: () => { qc.invalidateQueries({ queryKey: ['meetings'] }); onClose(); },
+    onSuccess: (data) => {
+      qc.invalidateQueries({ queryKey: ['meetings'] });
+      qc.invalidateQueries({ queryKey: ['ms-calendar'] });
+      if (data?.teamsWarning) setNote(data.teamsWarning);   // created, but no Teams link — let them read why
+      else onClose();
+    },
   });
   return (
     <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/30 p-4" onClick={onClose}>
@@ -231,7 +239,14 @@ function NewMeetingModal({ recurrences, onClose }) {
         </div>
         {f.mode !== 'offline' && (
           <label className="mt-3 block text-sm"><span className="text-ink-soft">Meeting link</span>
-            <input value={f.meetingLink} onChange={(e) => set('meetingLink', e.target.value)} className="inp mt-1" placeholder="Paste the Zoom / Teams / Meet link" /></label>
+            <input value={f.meetingLink} onChange={(e) => set('meetingLink', e.target.value)} className="inp mt-1"
+              placeholder={ms.data?.connected ? 'Leave blank to auto-create a Teams meeting' : 'Paste the Zoom / Teams / Meet link'} />
+            {willAutoTeams
+              ? <p className="mt-1 text-[11px] text-sage">✓ A Teams meeting will be created on your Outlook and attendees invited.</p>
+              : f.mode !== 'offline' && !ms.data?.connected
+                ? <p className="mt-1 text-[11px] text-ink-soft">Connect Microsoft in <a href="/profile" className="text-pine hover:underline">Profile</a> to auto-create a Teams link.</p>
+                : null}
+          </label>
         )}
         <div className="mt-3 text-sm"><span className="text-ink-soft">Attendees</span>
           <div className="mt-1"><AssignPicker value={f.attendeeIds} onChange={(arr) => set('attendeeIds', arr)} /></div>
@@ -239,11 +254,12 @@ function NewMeetingModal({ recurrences, onClose }) {
         <label className="mt-3 block text-sm"><span className="text-ink-soft">Agenda <span className="text-xs">(one per line)</span></span>
           <textarea rows={3} value={f.agenda} onChange={(e) => set('agenda', e.target.value)} className="inp mt-1" /></label>
         {mut.error && <p className="mt-3 text-sm text-brick">{mut.error.response?.data?.error?.message || 'Failed'}</p>}
+        {note && <p className="mt-3 rounded-lg bg-ochre-tint/40 px-3 py-2 text-sm text-ochre">Meeting scheduled. {note}</p>}
         </div>
 
         <div className="flex shrink-0 items-center justify-end gap-2 border-t border-line bg-white px-6 py-3">
-          <button onClick={onClose} className="rounded-lg border border-line px-4 py-2 text-sm">Cancel</button>
-          <button onClick={() => mut.mutate()} disabled={!f.title.trim() || !f.date || mut.isPending} className="rounded-lg bg-pine px-4 py-2 text-sm font-medium text-white disabled:opacity-60">Schedule</button>
+          <button onClick={onClose} className="rounded-lg border border-line px-4 py-2 text-sm">{note ? 'Close' : 'Cancel'}</button>
+          {!note && <button onClick={() => mut.mutate()} disabled={!f.title.trim() || !f.date || mut.isPending} className="rounded-lg bg-pine px-4 py-2 text-sm font-medium text-white disabled:opacity-60">{mut.isPending ? 'Scheduling…' : 'Schedule'}</button>}
         </div>
       </div>
     </div>

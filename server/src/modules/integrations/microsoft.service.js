@@ -201,3 +201,45 @@ export async function listCalendar(userId, from, to) {
     }));
   return { connected: true, events };
 }
+
+// Create a real Teams meeting on the owner's Outlook calendar and invite the
+// attendees (so it lands in their Outlook too). Returns { id, joinUrl, webLink }.
+// Returns null if the owner isn't connected. Times are IST wall-clock strings.
+export async function createTeamsEvent(ownerId, { subject, startDateTime, endDateTime, attendees = [], bodyText = '' }) {
+  const token = await accessTokenFor(ownerId);
+  if (!token) return null;
+
+  const payload = {
+    subject: subject || '(no subject)',
+    start: { dateTime: startDateTime, timeZone: IST },
+    end: { dateTime: endDateTime, timeZone: IST },
+    isOnlineMeeting: true,
+    onlineMeetingProvider: 'teamsForBusiness',
+    body: bodyText ? { contentType: 'text', content: bodyText } : undefined,
+    attendees: attendees
+      .filter((a) => a.email)
+      .map((a) => ({ emailAddress: { address: a.email, name: a.name || a.email }, type: 'required' })),
+  };
+  const r = await fetch('https://graph.microsoft.com/v1.0/me/events', {
+    method: 'POST',
+    headers: { Authorization: `Bearer ${token}`, 'Content-Type': 'application/json' },
+    body: JSON.stringify(payload),
+  });
+  const data = await r.json();
+  if (!r.ok) {
+    const msg = data.error?.message || 'Could not create the Teams meeting';
+    throw new ApiError(502, msg.slice(0, 200));
+  }
+  return { id: data.id, joinUrl: data.onlineMeeting?.joinUrl || null, webLink: data.webLink || null };
+}
+
+// Cancel a Teams meeting we created (sends cancellations to attendees).
+export async function deleteTeamsEvent(ownerId, eventId) {
+  if (!eventId) return;
+  const token = await accessTokenFor(ownerId);
+  if (!token) return;
+  await fetch(`https://graph.microsoft.com/v1.0/me/events/${eventId}`, {
+    method: 'DELETE',
+    headers: { Authorization: `Bearer ${token}` },
+  }).catch(() => {});
+}

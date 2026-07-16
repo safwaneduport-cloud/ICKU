@@ -1,5 +1,18 @@
 import { prisma } from '../../config/prisma.js';
 import { ApiError } from '../../middleware/errorHandler.js';
+import { createTeamsEvent, deleteTeamsEvent } from '../integrations/microsoft.service.js';
+
+// ICKU stores a start time only; a Teams event needs an end, so assume 60 min.
+const MEETING_MINUTES = 60;
+function istWindow(date, time) {
+  const [h, m] = (time || '10:00').split(':').map((n) => parseInt(n, 10) || 0);
+  // Use UTC math purely for wall-clock arithmetic (IST has no DST); the timeZone
+  // is sent separately to Graph, so these strings are IST local times.
+  const start = new Date(Date.UTC(...date.split('-').map(Number).map((v, i) => (i === 1 ? v - 1 : v)), h, m));
+  const end = new Date(start.getTime() + MEETING_MINUTES * 60000);
+  const fmt = (d) => d.toISOString().slice(0, 19); // "YYYY-MM-DDTHH:MM:SS"
+  return { startDateTime: fmt(start), endDateTime: fmt(end) };
+}
 
 const detailInclude = {
   owner: { select: { id: true, name: true } },
@@ -29,17 +42,48 @@ export async function get(id) {
 export async function create(ownerId, { title, date, time, recurring, mode, meetingLink, attendeeIds = [], agenda = [] }) {
   if (!title?.trim() || !date) throw new ApiError(400, 'Title and date are required');
   const cleanMode = ['offline', 'online', 'hybrid'].includes(mode) ? mode : 'offline';
-  const link = cleanMode === 'offline' ? null : (meetingLink || '').trim() || null;
+  const manualLink = (meetingLink || '').trim() || null;
   const uniqueAttendees = [...new Set([ownerId, ...attendeeIds])];
+  const cleanAgenda = agenda.filter((a) => a.trim());
+
   const m = await prisma.meeting.create({
     data: {
       title: title.trim(), date, time: time || '10:00', recurring: recurring || 'One-off',
-      mode: cleanMode, meetingLink: link,
-      ownerId, agenda: agenda.filter((a) => a.trim()),
+      mode: cleanMode, meetingLink: cleanMode === 'offline' ? null : manualLink,
+      ownerId, agenda: cleanAgenda,
       attendees: { create: uniqueAttendees.map((userId) => ({ userId })) },
     },
   });
-  return get(m.id);
+
+  // Online/hybrid with no manually-pasted link → try to make a real Teams meeting
+  // on the owner's Outlook (and invite attendees). Non-fatal: the ICKU meeting
+  // stands even if the owner isn't connected or Graph errors — we just flag it.
+  let teamsWarning = null;
+  if (cleanMode !== 'offline' && !manualLink) {
+    try {
+      const invitees = await prisma.user.findMany({
+        where: { id: { in: uniqueAttendees.filter((id) => id !== ownerId) } },
+        select: { name: true, email: true },
+      });
+      const { startDateTime, endDateTime } = istWindow(date, time);
+      const teams = await createTeamsEvent(ownerId, {
+        subject: title.trim(),
+        startDateTime, endDateTime,
+        attendees: invitees.map((u) => ({ email: u.email, name: u.name })),
+        bodyText: cleanAgenda.length ? `Agenda:\n- ${cleanAgenda.join('\n- ')}` : '',
+      });
+      if (teams?.joinUrl) {
+        await prisma.meeting.update({ where: { id: m.id }, data: { meetingLink: teams.joinUrl, msEventId: teams.id } });
+      } else {
+        teamsWarning = 'Connect your Microsoft account in Profile to auto-create a Teams link.';
+      }
+    } catch (e) {
+      teamsWarning = e.message || 'Could not create the Teams meeting automatically.';
+    }
+  }
+
+  const shaped = await get(m.id);
+  return teamsWarning ? { ...shaped, teamsWarning } : shaped;
 }
 
 export async function updateMinutes(id, minutes) {
