@@ -4,10 +4,15 @@ import { useAuth } from '../store/AuthContext.jsx';
 import { useProfile } from '../store/ProfileContext.jsx';
 import { getUsers } from '../api/users.api.js';
 import { meetingsMeta, getMeetings, getMeeting, createMeeting, updateMinutes, addMeetingAction, toggleMeetingAction } from '../api/collab.api.js';
+import { getMicrosoftCalendar } from '../api/integrations.api.js';
 import AssignPicker from '../features/events/AssignPicker.jsx';
 
 const initials = (n = '') => n.split(' ').map((w) => w[0]).slice(0, 2).join('').toUpperCase();
 const fmtDate = (iso) => new Date(iso).toLocaleDateString(undefined, { weekday: 'short', month: 'short', day: 'numeric' });
+// MS times arrive as IST wall-clock strings ("YYYY-MM-DDTHH:MM:SS") — format by
+// slicing so no timezone conversion can shift them.
+const msDay = (s) => (s ? new Date(`${s.slice(0, 10)}T00:00:00`).toLocaleDateString(undefined, { month: 'short', day: 'numeric' }) : '');
+const msTime = (s) => (s ? s.slice(11, 16) : '');
 
 export default function Meetings() {
   const meta = useQuery({ queryKey: ['meetings-meta'], queryFn: meetingsMeta, retry: false });
@@ -16,6 +21,18 @@ export default function Meetings() {
   const [showNew, setShowNew] = useState(false);
   const list = useQuery({ queryKey: ['meetings', scope], queryFn: () => getMeetings(scope), retry: false });
 
+  // Poll-on-view: pull the signed-in user's own Outlook/Teams calendar (next 30d).
+  const from = new Date().toISOString();
+  const to = new Date(Date.now() + 30 * 86400e3).toISOString();
+  const cal = useQuery({ queryKey: ['ms-calendar'], queryFn: () => getMicrosoftCalendar(from, to), retry: false, refetchOnWindowFocus: true });
+  const msEvents = cal.data?.connected ? (cal.data.events || []) : [];
+
+  // Merge ICKU meetings + my Microsoft events, sorted chronologically.
+  const merged = [
+    ...(list.data || []).map((m) => ({ kind: 'icku', sortKey: `${m.date}T${m.time || '00:00'}`, m })),
+    ...msEvents.map((e) => ({ kind: 'ms', sortKey: (e.start || '').slice(0, 16), e })),
+  ].sort((a, b) => a.sortKey.localeCompare(b.sortKey));
+
   return (
     <div className="space-y-5">
       <div className="flex items-center justify-between">
@@ -23,30 +40,48 @@ export default function Meetings() {
         {meta.data?.canCreate && <button onClick={() => setShowNew(true)} className="rounded-lg bg-pine px-4 py-2 text-sm font-medium text-white">+ New meeting</button>}
       </div>
 
-      <div className="flex gap-2">
+      <div className="flex flex-wrap items-center gap-2">
         {[['all', 'All'], ['mine', 'My meetings']].map(([s, label]) => (
           <button key={s} onClick={() => setScope(s)}
             className={`rounded-full px-4 py-1.5 text-sm font-medium ${scope === s ? 'bg-pine text-white' : 'border border-line bg-white text-ink-soft'}`}>
             {label}
           </button>
         ))}
+        {cal.data?.connected
+          ? <span className="ml-auto text-xs text-ink-soft">🗓️ Showing your Outlook / Teams calendar too</span>
+          : <a href="/profile" className="ml-auto text-xs text-pine hover:underline">Connect your calendar to see Teams meetings here →</a>}
       </div>
 
       <div className="space-y-3">
         {list.isLoading && <p className="text-ink-soft">Loading…</p>}
-        {!list.isLoading && (list.data || []).length === 0 && <p className="text-ink-soft">No meetings.</p>}
-        {(list.data || []).map((m) => (
-          <button key={m.id} onClick={() => setOpenId(m.id)} className="flex w-full items-center gap-4 rounded-2xl border border-line bg-white p-4 text-left hover:border-pine">
+        {!list.isLoading && merged.length === 0 && <p className="text-ink-soft">No meetings.</p>}
+        {merged.map((row) => row.kind === 'icku' ? (
+          <button key={`i-${row.m.id}`} onClick={() => setOpenId(row.m.id)} className="flex w-full items-center gap-4 rounded-2xl border border-line bg-white p-4 text-left hover:border-pine">
             <div className="w-16 shrink-0 text-center">
-              <div className="text-sm font-semibold">{fmtDate(m.date).split(' ').slice(1).join(' ')}</div>
-              <div className="text-xs text-ink-soft">{m.time}</div>
+              <div className="text-sm font-semibold">{fmtDate(row.m.date).split(' ').slice(1).join(' ')}</div>
+              <div className="text-xs text-ink-soft">{row.m.time}</div>
             </div>
             <div className="flex-1">
-              <div className="font-medium">{m.title}</div>
-              <div className="text-xs text-ink-soft">{m.owner.name} · chair · {m.attendeeCount} attendees</div>
+              <div className="font-medium">{row.m.title}</div>
+              <div className="text-xs text-ink-soft">{row.m.owner.name} · chair · {row.m.attendeeCount} attendees</div>
             </div>
-            <span className="rounded bg-steel-tint px-2 py-0.5 text-xs font-medium text-steel">{m.recurring}</span>
+            <span className="rounded bg-steel-tint px-2 py-0.5 text-xs font-medium text-steel">{row.m.recurring}</span>
           </button>
+        ) : (
+          <a key={`m-${row.e.id}`} href={row.e.joinUrl || row.e.webLink || '#'} target="_blank" rel="noreferrer"
+            className="flex w-full items-center gap-4 rounded-2xl border border-line bg-white p-4 text-left hover:border-[#4B53BC]">
+            <div className="w-16 shrink-0 text-center">
+              <div className="text-sm font-semibold">{msDay(row.e.start)}</div>
+              <div className="text-xs text-ink-soft">{row.e.allDay ? 'All day' : msTime(row.e.start)}</div>
+            </div>
+            <div className="min-w-0 flex-1">
+              <div className="truncate font-medium">{row.e.subject}</div>
+              <div className="truncate text-xs text-ink-soft">{row.e.organizer ? `${row.e.organizer} · ` : ''}{row.e.location || (row.e.isOnlineMeeting ? 'Online' : 'Outlook')}</div>
+            </div>
+            <span className="flex shrink-0 items-center gap-1 rounded px-2 py-0.5 text-xs font-medium" style={{ color: '#4B53BC', background: '#EAF1FB' }}>
+              {row.e.isOnlineMeeting ? 'Teams ↗' : 'Outlook ↗'}
+            </span>
+          </a>
         ))}
       </div>
 

@@ -25,3 +25,7 @@ export async function microsoftCallback(req, res) {
 export async function microsoftDisconnect(req, res, next) {
   try { res.json({ data: await ms.disconnect(req.user.id), error: null }); } catch (e) { next(e); }
 }
+
+export async function microsoftCalendar(req, res, next) {
+  try { res.json({ data: await ms.listCalendar(req.user.id, req.query.from, req.query.to), error: null }); } catch (e) { next(e); }
+}

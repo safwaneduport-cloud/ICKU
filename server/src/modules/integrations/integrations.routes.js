@@ -10,6 +10,7 @@ const router = Router();
 router.get('/microsoft/callback', ctrl.microsoftCallback);
 router.get('/microsoft/status', authenticate, ctrl.microsoftStatus);
 router.get('/microsoft/connect', authenticate, ctrl.microsoftConnect);
+router.get('/microsoft/calendar', authenticate, ctrl.microsoftCalendar);
 router.delete('/microsoft', authenticate, ctrl.microsoftDisconnect);
 
 export default router;

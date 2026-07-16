@@ -158,3 +158,46 @@ export async function disconnect(userId) {
   await prisma.microsoftAccount.deleteMany({ where: { userId } });
   return { ok: true };
 }
+
+const IST = 'India Standard Time';
+
+// The connected user's Outlook/Teams calendar for a window (poll-on-view — no
+// stored copy, always fresh). calendarView expands recurrences within the range.
+// Returns times already in IST (via the Prefer header), and the Teams join link.
+export async function listCalendar(userId, from, to) {
+  const token = await accessTokenFor(userId);
+  if (!token) return { connected: false, events: [] };
+
+  const start = from ? new Date(from) : new Date();
+  const end = to ? new Date(to) : new Date(Date.now() + 30 * 86400e3);
+  const params = new URLSearchParams({
+    startDateTime: start.toISOString(),
+    endDateTime: end.toISOString(),
+    $select: 'subject,start,end,isAllDay,isOnlineMeeting,onlineMeeting,onlineMeetingProvider,webLink,location,organizer,isCancelled',
+    $orderby: 'start/dateTime',
+    $top: '100',
+  });
+  const r = await fetch(`https://graph.microsoft.com/v1.0/me/calendarView?${params}`, {
+    headers: { Authorization: `Bearer ${token}`, Prefer: `outlook.timezone="${IST}"` },
+  });
+  if (!r.ok) {
+    if (r.status === 401) return { connected: false, events: [] }; // token no longer valid
+    throw new ApiError(502, 'Could not read your Microsoft calendar');
+  }
+  const data = await r.json();
+  const events = (data.value || [])
+    .filter((e) => !e.isCancelled)
+    .map((e) => ({
+      id: e.id,
+      subject: e.subject || '(no subject)',
+      start: e.start?.dateTime || null, // IST local time string
+      end: e.end?.dateTime || null,
+      allDay: !!e.isAllDay,
+      isOnlineMeeting: !!e.isOnlineMeeting,
+      joinUrl: e.onlineMeeting?.joinUrl || null,
+      webLink: e.webLink || null, // opens the event in Outlook on the web
+      location: e.location?.displayName || '',
+      organizer: e.organizer?.emailAddress?.name || e.organizer?.emailAddress?.address || '',
+    }));
+  return { connected: true, events };
+}
