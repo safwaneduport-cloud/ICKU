@@ -24,6 +24,16 @@ export async function create(req, res, next) {
   } catch (e) { next(e); }
 }
 
+export async function update(req, res, next) {
+  try { res.json({ data: await service.update(req.user, req.params.id, req.body || {}), error: null }); }
+  catch (e) { next(e); }
+}
+
+export async function remove(req, res, next) {
+  try { res.json({ data: await service.remove(req.user, req.params.id), error: null }); }
+  catch (e) { next(e); }
+}
+
 // Minutes + actions can be edited by the owner or any attendee.
 async function requireParticipant(req) {
   if (!(await service.isParticipant(req.params.id, req.user.id))) {

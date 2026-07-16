@@ -234,6 +234,30 @@ export async function createTeamsEvent(ownerId, { subject, startDateTime, endDat
   return { id: data.id, joinUrl: data.onlineMeeting?.joinUrl || null, webLink: data.webLink || null };
 }
 
+// Update a Teams meeting we created (re-issues invites/updates for attendees).
+export async function updateTeamsEvent(ownerId, eventId, { subject, startDateTime, endDateTime, attendees = [], bodyText = '', recurrence = null }) {
+  const token = await accessTokenFor(ownerId);
+  if (!token || !eventId) return null;
+  const payload = {
+    subject: subject || '(no subject)',
+    start: { dateTime: startDateTime, timeZone: IST },
+    end: { dateTime: endDateTime, timeZone: IST },
+    body: bodyText ? { contentType: 'text', content: bodyText } : undefined,
+    recurrence: recurrence || null, // null clears an existing recurrence
+    attendees: attendees
+      .filter((a) => a.email)
+      .map((a) => ({ emailAddress: { address: a.email, name: a.name || a.email }, type: 'required' })),
+  };
+  const r = await fetch(`https://graph.microsoft.com/v1.0/me/events/${eventId}`, {
+    method: 'PATCH',
+    headers: { Authorization: `Bearer ${token}`, 'Content-Type': 'application/json' },
+    body: JSON.stringify(payload),
+  });
+  const data = await r.json().catch(() => ({}));
+  if (!r.ok) throw new ApiError(502, data.error?.message?.slice(0, 200) || 'Could not update the Teams meeting');
+  return { id: data.id, joinUrl: data.onlineMeeting?.joinUrl || null };
+}
+
 // Cancel a Teams meeting we created (sends cancellations to attendees).
 export async function deleteTeamsEvent(ownerId, eventId) {
   if (!eventId) return;
