@@ -121,7 +121,9 @@ function MeetingDrawer({ id, onClose }) {
             </div>
             <h2 className="mt-3 font-serif text-2xl font-bold">{m.title}</h2>
             <div className="mt-1 flex flex-wrap gap-3 text-sm text-ink-soft">
-              <span>{fmtDate(m.date)}</span><span>{m.time}</span><span>{m.owner.name} · chair</span>
+              <span>{fmtDate(m.date)}</span><span>{m.time}</span>
+              {m.durationMin && <span>{m.durationMin < 60 ? `${m.durationMin} min` : `${(m.durationMin / 60).toFixed(m.durationMin % 60 ? 1 : 0)} hr`}</span>}
+              <span>{m.owner.name} · chair</span>
             </div>
             {m.meetingLink && (
               <a href={m.meetingLink} target="_blank" rel="noreferrer"
@@ -194,7 +196,7 @@ function MeetingDrawer({ id, onClose }) {
 
 function NewMeetingModal({ recurrences, onClose }) {
   const qc = useQueryClient();
-  const [f, setF] = useState({ title: '', date: '', time: '10:00', recurring: 'One-off', mode: 'offline', meetingLink: '', attendeeIds: [], agenda: '' });
+  const [f, setF] = useState({ title: '', date: '', time: '10:00', durationMin: 60, recurring: 'One-off', mode: 'offline', meetingLink: '', attendeeIds: [], agenda: '' });
   const [note, setNote] = useState('');
   const set = (k, v) => setF((s) => ({ ...s, [k]: v }));
   const ms = useQuery({ queryKey: ['ms-status'], queryFn: getMicrosoftStatus, retry: false });
@@ -218,11 +220,15 @@ function NewMeetingModal({ recurrences, onClose }) {
         <div className="flex-1 overflow-y-auto px-6 py-4">
         <label className="block text-sm"><span className="text-ink-soft">Title</span>
           <input value={f.title} onChange={(e) => set('title', e.target.value)} className="inp mt-1" /></label>
-        <div className="mt-3 grid grid-cols-3 gap-3">
+        <div className="mt-3 grid grid-cols-2 gap-3">
           <label className="block text-sm"><span className="text-ink-soft">Date</span>
             <input type="date" value={f.date} onChange={(e) => set('date', e.target.value)} className="inp mt-1" /></label>
           <label className="block text-sm"><span className="text-ink-soft">Time</span>
             <input type="time" value={f.time} onChange={(e) => set('time', e.target.value)} className="inp mt-1" /></label>
+          <label className="block text-sm"><span className="text-ink-soft">Duration</span>
+            <select value={f.durationMin} onChange={(e) => set('durationMin', +e.target.value)} className="inp mt-1">
+              {[15, 30, 45, 60, 90, 120, 180, 240].map((d) => <option key={d} value={d}>{d < 60 ? `${d} min` : d % 60 ? `${Math.floor(d / 60)} hr 30 min` : `${d / 60} hr`}</option>)}
+            </select></label>
           <label className="block text-sm"><span className="text-ink-soft">Recurs</span>
             <select value={f.recurring} onChange={(e) => set('recurring', e.target.value)} className="inp mt-1">{recurrences.map((r) => <option key={r}>{r}</option>)}</select></label>
         </div>

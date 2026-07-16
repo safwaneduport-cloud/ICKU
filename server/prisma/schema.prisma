@@ -511,6 +511,7 @@ model Meeting {
   ownerId   String
   owner     User              @relation("MeetingOwner", fields: [ownerId], references: [id])
   recurring String            @default("One-off") // Daily | Weekly | Monthly | One-off
+  durationMin Int             @default(60) // meeting length in minutes
   mode      String            @default("offline") // offline | online | hybrid
   meetingLink String?         // Zoom/Teams/Meet link (for online/hybrid)
   msEventId String?           // Graph event id when we created a real Teams meeting

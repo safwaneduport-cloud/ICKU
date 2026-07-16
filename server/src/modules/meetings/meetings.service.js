@@ -2,16 +2,28 @@ import { prisma } from '../../config/prisma.js';
 import { ApiError } from '../../middleware/errorHandler.js';
 import { createTeamsEvent, deleteTeamsEvent } from '../integrations/microsoft.service.js';
 
-// ICKU stores a start time only; a Teams event needs an end, so assume 60 min.
-const MEETING_MINUTES = 60;
-function istWindow(date, time) {
+// Build the IST wall-clock start/end for a Teams event. UTC math is used purely
+// for arithmetic (IST has no DST); the timeZone is sent to Graph separately.
+function istWindow(date, time, durationMin = 60) {
   const [h, m] = (time || '10:00').split(':').map((n) => parseInt(n, 10) || 0);
-  // Use UTC math purely for wall-clock arithmetic (IST has no DST); the timeZone
-  // is sent separately to Graph, so these strings are IST local times.
   const start = new Date(Date.UTC(...date.split('-').map(Number).map((v, i) => (i === 1 ? v - 1 : v)), h, m));
-  const end = new Date(start.getTime() + MEETING_MINUTES * 60000);
+  const end = new Date(start.getTime() + durationMin * 60000);
   const fmt = (d) => d.toISOString().slice(0, 19); // "YYYY-MM-DDTHH:MM:SS"
   return { startDateTime: fmt(start), endDateTime: fmt(end) };
+}
+
+// Map ICKU's recurring value → a Microsoft Graph recurrence (or null for one-off).
+// Range is open-ended ("noEnd") — the same as an ongoing standing meeting.
+function graphRecurrence(recurring, date) {
+  if (!recurring || recurring === 'One-off') return null;
+  const d = new Date(`${date}T00:00:00Z`);
+  const dow = ['sunday', 'monday', 'tuesday', 'wednesday', 'thursday', 'friday', 'saturday'][d.getUTCDay()];
+  let pattern;
+  if (recurring === 'Daily') pattern = { type: 'daily', interval: 1 };
+  else if (recurring === 'Weekly') pattern = { type: 'weekly', interval: 1, daysOfWeek: [dow] };
+  else if (recurring === 'Monthly') pattern = { type: 'absoluteMonthly', interval: 1, dayOfMonth: d.getUTCDate() };
+  else return null;
+  return { pattern, range: { type: 'noEnd', startDate: date } };
 }
 
 const detailInclude = {
@@ -39,16 +51,18 @@ export async function get(id) {
   };
 }
 
-export async function create(ownerId, { title, date, time, recurring, mode, meetingLink, attendeeIds = [], agenda = [] }) {
+export async function create(ownerId, { title, date, time, recurring, durationMin, mode, meetingLink, attendeeIds = [], agenda = [] }) {
   if (!title?.trim() || !date) throw new ApiError(400, 'Title and date are required');
   const cleanMode = ['offline', 'online', 'hybrid'].includes(mode) ? mode : 'offline';
   const manualLink = (meetingLink || '').trim() || null;
   const uniqueAttendees = [...new Set([ownerId, ...attendeeIds])];
   const cleanAgenda = agenda.filter((a) => a.trim());
+  const dur = Math.min(480, Math.max(15, parseInt(durationMin, 10) || 60));
+  const cleanRecurring = ['One-off', 'Daily', 'Weekly', 'Monthly'].includes(recurring) ? recurring : 'One-off';
 
   const m = await prisma.meeting.create({
     data: {
-      title: title.trim(), date, time: time || '10:00', recurring: recurring || 'One-off',
+      title: title.trim(), date, time: time || '10:00', recurring: cleanRecurring, durationMin: dur,
       mode: cleanMode, meetingLink: cleanMode === 'offline' ? null : manualLink,
       ownerId, agenda: cleanAgenda,
       attendees: { create: uniqueAttendees.map((userId) => ({ userId })) },
@@ -65,10 +79,11 @@ export async function create(ownerId, { title, date, time, recurring, mode, meet
         where: { id: { in: uniqueAttendees.filter((id) => id !== ownerId) } },
         select: { name: true, email: true },
       });
-      const { startDateTime, endDateTime } = istWindow(date, time);
+      const { startDateTime, endDateTime } = istWindow(date, time, dur);
       const teams = await createTeamsEvent(ownerId, {
         subject: title.trim(),
         startDateTime, endDateTime,
+        recurrence: graphRecurrence(cleanRecurring, date),
         attendees: invitees.map((u) => ({ email: u.email, name: u.name })),
         bodyText: cleanAgenda.length ? `Agenda:\n- ${cleanAgenda.join('\n- ')}` : '',
       });
