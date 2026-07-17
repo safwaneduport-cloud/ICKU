@@ -1,13 +1,40 @@
 import { prisma } from '../../config/prisma.js';
 import { ApiError } from '../../middleware/errorHandler.js';
-import { canHelpdesk } from '../../lib/access.js';
+import { canHelpdesk, isCeo } from '../../lib/access.js';
 import { ymd } from '../attendance/attendance.lib.js';
 
-// A ticket is visible to the person who raised it and to helpdesk agents.
+export const CATEGORIES = ['HR query', 'Payroll issue', 'Access request', 'IT support', 'Other'];
+
+// Which agent roles handle which category. Routing is by ROLE, not by person, so
+// a change of job carries the queue with it. The CEO sees everything.
+// Anything not listed here goes to every agent role.
+const ALL_AGENT_ROLES = ['HR Head', 'Tech Head'];
+const CATEGORY_ROLES = {
+  'IT support': ['Tech Head'],
+  Other: ['HR Head'],
+};
+const rolesForCategory = (c) => CATEGORY_ROLES[c] || ALL_AGENT_ROLES;
+
+// Can this user act on a ticket of this category (as an agent)?
+export function canHandle(user, category) {
+  if (!canHelpdesk(user)) return false;
+  if (isCeo(user)) return true;
+  return rolesForCategory(category).includes(user.role);
+}
+// The categories this agent's queue should show (null = everything).
+export function allowedCategories(user) {
+  if (!canHelpdesk(user)) return [];
+  if (isCeo(user)) return null;
+  return CATEGORIES.filter((c) => rolesForCategory(c).includes(user.role));
+}
+
+// A ticket is visible to the person who raised it, and to agents who handle that
+// category — an IT ticket isn't HR's business and vice versa.
 async function loadFor(user, id) {
   const t = await prisma.ticket.findUnique({ where: { id } });
   if (!t) throw new ApiError(404, 'Ticket not found');
-  if (t.userId !== user.id && !canHelpdesk(user)) throw new ApiError(403, 'This ticket is not yours');
+  if (t.userId === user.id) return t;
+  if (!canHandle(user, t.category)) throw new ApiError(403, 'This ticket is not yours');
   return t;
 }
 
@@ -33,7 +60,7 @@ export async function addComment(user, id, body) {
   // up. Without this they'd never be notified of the reply (read marks only track
   // the raiser and the assignee), and the ticket would sit "awaiting assignment"
   // while a conversation was already underway.
-  if (!t.assigneeId && t.status === 'open' && canHelpdesk(user) && t.userId !== user.id) {
+  if (!t.assigneeId && t.status === 'open' && canHandle(user, t.category) && t.userId !== user.id) {
     await prisma.ticket.update({ where: { id }, data: { assigneeId: user.id, status: 'assigned' } });
   }
 
@@ -68,7 +95,8 @@ export async function bellFor(user) {
   let awaitingAssignment = 0;
   let assignedToMe = 0;
   if (canHelpdesk(user)) {
-    awaitingAssignment = await prisma.ticket.count({ where: { status: 'open' } });
+    const cats = allowedCategories(user); // only nag about categories they handle
+    awaitingAssignment = await prisma.ticket.count({ where: { status: 'open', ...(cats ? { category: { in: cats } } : {}) } });
     assignedToMe = await prisma.ticket.count({ where: { assigneeId: user.id, status: 'assigned' } });
   }
   return { unread, awaitingAssignment, assignedToMe };
@@ -81,19 +109,35 @@ export const listMine = (userId) =>
     include: { assignee: { select: { id: true, name: true } } },
   });
 
-export const listQueue = () =>
-  prisma.ticket.findMany({
+// An agent's queue only shows the categories they handle.
+export function listQueue(user) {
+  const cats = allowedCategories(user);
+  return prisma.ticket.findMany({
+    where: cats ? { category: { in: cats } } : {},
     orderBy: { createdAt: 'desc' },
     include: { user: { select: { id: true, name: true } }, assignee: { select: { id: true, name: true } } },
   });
+}
 
-export const create = (userId, { category, subject }) =>
-  prisma.ticket.create({ data: { userId, category, subject, status: 'open', raised: ymd(new Date()) } });
+export function create(userId, { category, subject }) {
+  if (!CATEGORIES.includes(category)) throw new ApiError(400, 'Pick a valid category');
+  return prisma.ticket.create({ data: { userId, category, subject, status: 'open', raised: ymd(new Date()) } });
+}
 
-export const assign = (id, assigneeId) =>
-  prisma.ticket.update({ where: { id }, data: { assigneeId, status: 'assigned' } });
+export async function assign(user, id, assigneeId) {
+  const t = await loadFor(user, id); // 403s if this isn't their category
+  if (!canHandle(user, t.category)) throw new ApiError(403, 'Helpdesk agent access required');
+  if (assigneeId !== user.id) {
+    // Don't hand a ticket to someone who wouldn't be able to open it.
+    const target = await prisma.user.findUnique({ where: { id: assigneeId }, select: { id: true, role: true } });
+    if (!target || !canHandle(target, t.category)) throw new ApiError(400, `That person doesn't handle "${t.category}" tickets`);
+  }
+  return prisma.ticket.update({ where: { id }, data: { assigneeId, status: 'assigned' } });
+}
 
-export async function setStatus(id, status) {
+export async function setStatus(user, id, status) {
   if (!['open', 'assigned', 'resolved', 'closed'].includes(status)) throw new ApiError(400, 'Invalid status');
+  const t = await loadFor(user, id);
+  if (!canHandle(user, t.category)) throw new ApiError(403, 'Helpdesk agent access required');
   return prisma.ticket.update({ where: { id }, data: { status } });
 }

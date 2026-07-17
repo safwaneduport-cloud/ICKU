@@ -6,7 +6,6 @@ import {
   getTicket, addTicketComment, markTicketRead,
 } from '../api/services.api.js';
 
-const CATEGORIES = ['HR query', 'Payroll issue', 'Access request', 'IT support', 'Other'];
 const STATUS = {
   open: { c: '#9A6312', b: '#F5EAD4' },
   assigned: { c: '#3F6075', b: '#E3EAEF' },
@@ -42,8 +41,11 @@ export default function Helpdesk() {
           </button>
         ))}
       </div>
+      {tab === 'queue' && access.data?.handles && (
+        <p className="-mt-3 text-xs text-ink-soft">Showing the categories you handle: {access.data.handles.join(' · ')}</p>
+      )}
       {tab === 'my' ? <MyTickets onOpen={setOpenId} /> : <Queue onOpen={setOpenId} />}
-      {showNew && <NewTicketModal onClose={() => setShowNew(false)} onCreated={(t) => { setShowNew(false); setOpenId(t.id); }} />}
+      {showNew && <NewTicketModal categories={access.data?.categories || []} onClose={() => setShowNew(false)} onCreated={(t) => { setShowNew(false); setOpenId(t.id); }} />}
       {openId && <TicketDrawer id={openId} agent={agent} onClose={() => setOpenId(null)} />}
     </div>
   );
@@ -193,9 +195,9 @@ function TicketDrawer({ id, agent, onClose }) {
   );
 }
 
-function NewTicketModal({ onClose, onCreated }) {
+function NewTicketModal({ categories, onClose, onCreated }) {
   const qc = useQueryClient();
-  const [category, setCategory] = useState(CATEGORIES[0]);
+  const [category, setCategory] = useState(categories[0] || '');
   const [subject, setSubject] = useState('');
   const mut = useMutation({
     mutationFn: () => createTicket({ category, subject: subject.trim() }),
@@ -207,7 +209,7 @@ function NewTicketModal({ onClose, onCreated }) {
         <h3 className="font-serif text-lg font-semibold">Raise a ticket</h3>
         <label className="mt-4 block text-sm"><span className="text-ink-soft">Category</span>
           <select value={category} onChange={(e) => setCategory(e.target.value)} className="mt-1 w-full rounded-lg border border-line px-3 py-2">
-            {CATEGORIES.map((c) => <option key={c}>{c}</option>)}
+            {categories.map((c) => <option key={c}>{c}</option>)}
           </select>
         </label>
         <label className="mt-3 block text-sm"><span className="text-ink-soft">Subject</span>
