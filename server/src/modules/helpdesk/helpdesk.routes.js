@@ -10,4 +10,9 @@ router.post('/', ctrl.create);
 router.post('/:id/assign', ctrl.assign); // { assigneeId? } defaults to self
 router.post('/:id/status/:status', ctrl.setStatus); // resolved | closed | ...
 
+// Ticket detail + conversation (declared after the literal routes above).
+router.get('/:id', ctrl.get);
+router.post('/:id/comments', ctrl.addComment);
+router.post('/:id/read', ctrl.markRead);
+
 export default router;

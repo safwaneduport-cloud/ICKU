@@ -2,6 +2,7 @@ import { prisma } from '../../config/prisma.js';
 import { triggerDate, isTaskPastDue } from '../events/events.lib.js';
 import { listConversations, dueReminders } from '../messages/messages.service.js';
 import { approvalQueue } from '../assethub/assets.service.js';
+import { bellFor as helpdeskBell } from '../helpdesk/helpdesk.service.js';
 
 const rupee = (n) => `₹${Math.round(n).toLocaleString('en-IN')}`;
 
@@ -113,6 +114,30 @@ export async function list(user) {
       id: 'assets-events', kind: 'approval', actionable: true, at: assetQueue.toApproveEvents[0].createdAt,
       title: `${assetQueue.toApproveEvents.length} asset lifecycle request${assetQueue.toApproveEvents.length === 1 ? '' : 's'}`,
       sub: assetQueue.toApproveEvents.slice(0, 2).map((e) => `${e.asset.assetTag} · ${e.type.replace('_', ' ')}`).join(', '), link: '/assethub',
+    });
+  }
+
+  // Helpdesk — replies on my tickets, plus the agent queue.
+  const hd = await helpdeskBell(user);
+  if (hd.unread.length) {
+    items.push({
+      id: 'hd-replies', kind: 'ticket', actionable: true, at: hd.unread[0].updatedAt,
+      title: `${hd.unread.length} new repl${hd.unread.length === 1 ? 'y' : 'ies'} on your tickets`,
+      sub: hd.unread.slice(0, 2).map((t) => t.subject).join(', '), link: '/helpdesk',
+    });
+  }
+  if (hd.awaitingAssignment) {
+    items.push({
+      id: 'hd-open', kind: 'ticket', actionable: true, at: null,
+      title: `${hd.awaitingAssignment} ticket${hd.awaitingAssignment === 1 ? '' : 's'} awaiting assignment`,
+      sub: 'Helpdesk queue', link: '/helpdesk',
+    });
+  }
+  if (hd.assignedToMe) {
+    items.push({
+      id: 'hd-mine', kind: 'ticket', actionable: true, at: null,
+      title: `${hd.assignedToMe} ticket${hd.assignedToMe === 1 ? '' : 's'} assigned to you`,
+      sub: 'Helpdesk', link: '/helpdesk',
     });
   }
 

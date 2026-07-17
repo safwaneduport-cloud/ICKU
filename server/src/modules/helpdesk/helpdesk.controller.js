@@ -40,3 +40,19 @@ export async function setStatus(req, res, next) {
     res.json({ data: await service.setStatus(req.params.id, req.params.status), error: null });
   } catch (e) { next(e); }
 }
+
+// Detail + the comment thread. Access (raiser or agent) is enforced in the service.
+export async function get(req, res, next) {
+  try { res.json({ data: await service.get(req.user, req.params.id), error: null }); }
+  catch (e) { next(e); }
+}
+
+export async function addComment(req, res, next) {
+  try { res.json({ data: await service.addComment(req.user, req.params.id, req.body?.body), error: null }); }
+  catch (e) { next(e); }
+}
+
+export async function markRead(req, res, next) {
+  try { res.json({ data: await service.markRead(req.user, req.params.id), error: null }); }
+  catch (e) { next(e); }
+}

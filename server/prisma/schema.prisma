@@ -62,6 +62,7 @@ model User {
   assetsAssigned  Asset[]  @relation("AssetAssignee")
   ticketsRaised   Ticket[] @relation("TicketRaiser")
   ticketsAssigned Ticket[] @relation("TicketAssignee")
+  ticketComments  TicketComment[] @relation("TicketCommentAuthor")
 
   // Work — events & tasks (Step 7)
   eventsOwned     Event[]        @relation("EventOwner")
@@ -351,11 +352,31 @@ model Ticket {
   assignee   User?   @relation("TicketAssignee", fields: [assigneeId], references: [id])
   raised     String // "YYYY-MM-DD"
 
+  comments TicketComment[]
+  // Per-participant read marks — a ticket only ever has two sides (raiser and
+  // assignee), so two columns beat a join table here.
+  raiserReadAt   DateTime?
+  assigneeReadAt DateTime?
+
   createdAt DateTime @default(now())
   updatedAt DateTime @updatedAt
 
   @@index([userId])
   @@index([assigneeId])
+}
+
+// The conversation on a ticket — raiser ↔ agent.
+model TicketComment {
+  id       String @id @default(uuid())
+  ticketId String
+  ticket   Ticket @relation(fields: [ticketId], references: [id], onDelete: Cascade)
+  authorId String
+  author   User   @relation("TicketCommentAuthor", fields: [authorId], references: [id])
+  body     String
+
+  createdAt DateTime @default(now())
+
+  @@index([ticketId])
 }
 
 // ── Work: events & tasks (Step 7) ────────────────────────────────

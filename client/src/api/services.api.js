@@ -23,3 +23,6 @@ export const getTicketQueue = () => api.get('/helpdesk/queue').then((r) => r.dat
 export const createTicket = (payload) => api.post('/helpdesk', payload).then((r) => r.data.data);
 export const assignTicket = (id, assigneeId) => api.post(`/helpdesk/${id}/assign`, { assigneeId }).then((r) => r.data.data);
 export const setTicketStatus = (id, status) => api.post(`/helpdesk/${id}/status/${status}`).then((r) => r.data.data);
+export const getTicket = (id) => api.get(`/helpdesk/${id}`).then((r) => r.data.data);
+export const addTicketComment = (id, body) => api.post(`/helpdesk/${id}/comments`, { body }).then((r) => r.data.data);
+export const markTicketRead = (id) => api.post(`/helpdesk/${id}/read`).then((r) => r.data.data);
