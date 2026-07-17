@@ -29,10 +29,11 @@ export default function MasterData() {
         <p className="text-sm text-ink-soft">Manage the dropdown values used across onboarding, attendance, leave and profiles.</p>
       </div>
 
-      <div className="flex gap-4">
-        {/* type rail */}
-        <aside className="w-64 shrink-0 rounded-2xl border border-line bg-white p-2">
-          <div className="max-h-[70vh] space-y-0.5 overflow-y-auto">
+      <div className="flex flex-col gap-4 lg:flex-row">
+        {/* type rail — stacks above the panel on phones; a 16rem rail would leave
+            the options table barely 70px wide */}
+        <aside className="w-full shrink-0 rounded-2xl border border-line bg-white p-2 lg:w-64">
+          <div className="max-h-44 space-y-0.5 overflow-y-auto lg:max-h-[70vh]">
             {(types.data || []).map((t) => (
               <button
                 key={t.type}
@@ -124,8 +125,8 @@ function OptionsPanel({ type, label }) {
 
       {err && <div className="border-b border-line bg-brick/5 px-4 py-2 text-sm text-brick">{err}</div>}
 
-      <div className="max-h-[55vh] overflow-y-auto">
-        <table className="w-full text-left text-sm">
+      <div className="max-h-[55vh] overflow-auto">
+        <table className="w-full min-w-[36rem] text-left text-sm">
           <thead className="sticky top-0 border-b border-line bg-white text-xs uppercase tracking-wide text-ink-soft">
             <tr>
               <th className="px-4 py-2">Value</th>

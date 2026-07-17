@@ -50,7 +50,7 @@ export default function Expenses() {
 
   return (
     <div className="space-y-6">
-      <div className="flex items-center justify-between">
+      <div className="flex flex-wrap items-center justify-between gap-2">
         <h1 className="font-serif text-3xl font-bold text-pine">Expenses</h1>
         <button onClick={() => setShowNew(true)} className="rounded-lg bg-pine px-4 py-2 text-sm font-medium text-white hover:opacity-90">+ New claim</button>
       </div>
@@ -152,7 +152,7 @@ function NewClaimModal({ onClose }) {
 
   return (
     <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/30 p-4" onClick={onClose}>
-      <div className="w-full max-w-md rounded-2xl bg-white p-6" onClick={(e) => e.stopPropagation()}>
+      <div className="max-h-[85dvh] w-full overflow-y-auto max-w-md rounded-2xl bg-white p-6" onClick={(e) => e.stopPropagation()}>
         <h3 className="font-serif text-lg font-semibold">New expense claim</h3>
         <div className="mt-4 grid grid-cols-2 gap-3">
           <label className="col-span-2 block text-sm"><span className="text-ink-soft">Category</span>

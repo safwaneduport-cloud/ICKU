@@ -23,6 +23,7 @@ export default function Calendar() {
   const [idx, setIdx] = useState(startIdx);
   const [openId, setOpenId] = useState(null);
   const [newFor, setNewFor] = useState(null); // { month, day }
+  const [dayFor, setDayFor] = useState(null); // phone: the day whose sheet is open
 
   const { month, year } = CYCLE[idx];
 
@@ -76,8 +77,35 @@ export default function Calendar() {
       </div>
 
       <div className="grid gap-4 lg:grid-cols-[1fr_16rem]">
+        {/* Phone month grid — a day cell is only ~45px wide, so event names are
+            dots here and the detail lives in a tap-through sheet. */}
+        <div className="overflow-hidden rounded-2xl border border-line bg-white sm:hidden">
+          <div className="grid grid-cols-7 border-b border-line bg-paper/60">
+            {DOW.map((d) => <div key={d} className="py-1.5 text-center text-[10px] font-semibold uppercase tracking-wide text-ink-soft">{d[0]}</div>)}
+          </div>
+          <div className="grid grid-cols-7">
+            {cells.map((d, i) => {
+              if (!d) return <div key={i} className="aspect-square border-b border-r border-line/50 bg-paper/30" />;
+              const date = new Date(year, month - 1, d);
+              const list = byDay.get(ymd(date)) || [];
+              const isToday = date.toDateString() === today.toDateString();
+              return (
+                <button key={i} onClick={() => setDayFor(d)}
+                  className="flex aspect-square flex-col items-center justify-center gap-1 border-b border-r border-line/50 active:bg-pine-tint/50">
+                  <span className={`flex h-6 w-6 items-center justify-center rounded-full text-xs ${isToday ? 'bg-pine font-bold text-white' : 'text-ink'}`}>{d}</span>
+                  <span className="flex h-1.5 items-center gap-0.5">
+                    {list.slice(0, 3).map((e) => (
+                      <span key={e.id} className="h-1.5 w-1.5 rounded-full" style={{ background: (STATE[e.state] || STATE.upcoming).c }} />
+                    ))}
+                  </span>
+                </button>
+              );
+            })}
+          </div>
+        </div>
+
         {/* month grid */}
-        <div className="overflow-hidden rounded-2xl border border-line bg-white">
+        <div className="hidden overflow-hidden rounded-2xl border border-line bg-white sm:block">
           <div className="grid grid-cols-7 border-b border-line bg-paper/60">
             {DOW.map((d) => <div key={d} className="px-2 py-2 text-center text-[11px] font-semibold uppercase tracking-wide text-ink-soft">{d}</div>)}
           </div>
@@ -131,6 +159,42 @@ export default function Calendar() {
           </div>
         </aside>
       </div>
+
+      {/* Phone: what's on the tapped day, and the way to add to it. */}
+      {dayFor && (
+        <div className="fixed inset-0 z-40 flex items-end bg-ink/40 sm:hidden" onClick={() => setDayFor(null)}>
+          <div className="max-h-[70vh] w-full overflow-y-auto rounded-t-2xl bg-white p-4" onClick={(e) => e.stopPropagation()}>
+            <div className="flex items-center justify-between">
+              <h2 className="font-serif text-lg font-bold text-pine">
+                {new Date(year, month - 1, dayFor).toLocaleDateString(undefined, { weekday: 'long', day: 'numeric', month: 'long' })}
+              </h2>
+              <button onClick={() => setDayFor(null)} className="rounded-lg p-1 text-ink-soft" aria-label="Close">✕</button>
+            </div>
+            <div className="mt-3 space-y-1.5">
+              {(byDay.get(ymd(new Date(year, month - 1, dayFor))) || []).length === 0 && (
+                <p className="py-3 text-center text-sm text-ink-soft">Nothing on this day.</p>
+              )}
+              {(byDay.get(ymd(new Date(year, month - 1, dayFor))) || []).map((e) => {
+                const s = STATE[e.state] || STATE.upcoming;
+                return (
+                  <button key={e.id} onClick={() => { setOpenId(e.id); setDayFor(null); }}
+                    className="flex w-full items-center gap-2 rounded-lg border border-line px-3 py-2 text-left">
+                    <span className="h-2 w-2 shrink-0 rounded-full" style={{ background: s.c }} />
+                    <span className="min-w-0 flex-1">
+                      <span className="block truncate text-sm font-medium">{e.name}</span>
+                      <span className="block truncate text-[11px] text-ink-soft">{e.owner?.name || '—'} · {s.label}</span>
+                    </span>
+                  </button>
+                );
+              })}
+            </div>
+            <button onClick={() => { setNewFor({ month, day: dayFor }); setDayFor(null); }}
+              className="mt-3 w-full rounded-lg bg-pine py-2.5 text-sm font-medium text-white">
+              ＋ New event on this day
+            </button>
+          </div>
+        </div>
+      )}
 
       {openId && <EventDrawer id={openId} onClose={() => setOpenId(null)} />}
       {newFor && (

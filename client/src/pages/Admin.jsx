@@ -253,7 +253,7 @@ function AuditTab() {
 function Modal({ title, children, onClose }) {
   return (
     <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/30 p-4" onClick={onClose}>
-      <div className="w-full max-w-md space-y-3 rounded-2xl bg-white p-6" onClick={(e) => e.stopPropagation()}>
+      <div className="max-h-[85dvh] w-full overflow-y-auto max-w-md space-y-3 rounded-2xl bg-white p-6" onClick={(e) => e.stopPropagation()}>
         <h3 className="font-serif text-lg font-semibold">{title}</h3>
         {children}
       </div>

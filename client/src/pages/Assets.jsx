@@ -104,7 +104,7 @@ function AddAssetModal({ onClose }) {
   });
   return (
     <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/30 p-4" onClick={onClose}>
-      <div className="w-full max-w-md rounded-2xl bg-white p-6" onClick={(e) => e.stopPropagation()}>
+      <div className="max-h-[85dvh] w-full overflow-y-auto max-w-md rounded-2xl bg-white p-6" onClick={(e) => e.stopPropagation()}>
         <h3 className="font-serif text-lg font-semibold">Add asset</h3>
         <div className="mt-4 grid grid-cols-2 gap-3">
           <label className="block text-sm"><span className="text-ink-soft">Type</span>

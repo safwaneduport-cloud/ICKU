@@ -24,7 +24,7 @@ export default function Knowledge() {
 
   return (
     <div className="space-y-5">
-      <div className="flex items-center justify-between">
+      <div className="flex flex-wrap items-center justify-between gap-2">
         <h1 className="font-serif text-3xl font-bold text-pine">Knowledge Base</h1>
         {meta.data?.canCreate && (
           <button onClick={() => setShowNew(true)} className="rounded-lg bg-pine px-4 py-2 text-sm font-medium text-white">+ New document</button>
@@ -33,7 +33,7 @@ export default function Knowledge() {
 
       <div className="flex flex-wrap items-center gap-2">
         <input value={q} onChange={(e) => setQ(e.target.value)} placeholder="Search title, body, tags…"
-          className="w-64 rounded-lg border border-line px-3 py-2 text-sm outline-none focus:border-pine" />
+          className="w-full rounded-lg border border-line px-3 py-2 text-sm outline-none focus:border-pine sm:w-64" />
         {types.map((t) => (
           <button key={t} onClick={() => setType(t)}
             className={`rounded-full px-3 py-1 text-sm ${type === t ? 'bg-pine text-white' : 'border border-line bg-white text-ink-soft'}`}>

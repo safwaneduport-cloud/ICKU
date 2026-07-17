@@ -18,7 +18,7 @@ export default function Announcements() {
 
   return (
     <div className="space-y-5">
-      <div className="flex items-center justify-between">
+      <div className="flex flex-wrap items-center justify-between gap-2">
         <h1 className="font-serif text-3xl font-bold text-pine">Announcements</h1>
         {meta.data?.canPost && (
           <button onClick={() => setShowNew(true)} className="rounded-lg bg-pine px-4 py-2 text-sm font-medium text-white">+ New announcement</button>
@@ -73,7 +73,7 @@ function NewAnnouncementModal({ scopes, onClose }) {
   });
   return (
     <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/30 p-4" onClick={onClose}>
-      <div className="w-full max-w-md rounded-2xl bg-white p-6" onClick={(e) => e.stopPropagation()}>
+      <div className="max-h-[85dvh] w-full overflow-y-auto max-w-md rounded-2xl bg-white p-6" onClick={(e) => e.stopPropagation()}>
         <h3 className="font-serif text-lg font-semibold">New announcement</h3>
         <label className="mt-4 block text-sm"><span className="text-ink-soft">Scope</span>
           <select value={scope} onChange={(e) => setScope(e.target.value)} className="inp mt-1">{scopes.map((s) => <option key={s}>{s}</option>)}</select>

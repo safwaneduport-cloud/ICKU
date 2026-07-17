@@ -102,7 +102,8 @@ function CategoriesPanel() {
     <div className="space-y-4">
       <Panel title="Asset Categories" sub="Broad classes; the code appears in Asset IDs. Each carries a default GL ledger.">
         {err && <p className="mb-2 rounded bg-brick/5 px-3 py-1.5 text-sm text-brick">{err}</p>}
-        <table className="w-full text-left text-sm">
+        <div className="overflow-x-auto">
+        <table className="w-full min-w-[32rem] text-left text-sm">
           <thead className="text-xs uppercase tracking-wide text-ink-soft">
             <tr><th className="py-1.5 pr-3">Code</th><th className="py-1.5 pr-3">Name</th><th className="py-1.5 pr-3">Default GL</th><th className="py-1.5 pr-3">Status</th><th /></tr>
           </thead>
@@ -144,11 +145,13 @@ function CategoriesPanel() {
             </tr>
           </tbody>
         </table>
+        </div>
       </Panel>
 
       {cat && (
         <Panel title={`Sub-categories · ${cat.name}`} sub="Each carries the default GST rate and ITC eligibility that flow to assets.">
-          <table className="w-full text-left text-sm">
+          <div className="overflow-x-auto">
+          <table className="w-full min-w-[42rem] text-left text-sm">
             <thead className="text-xs uppercase tracking-wide text-ink-soft">
               <tr><th className="py-1.5 pr-3">Code</th><th className="py-1.5 pr-3">Name</th><th className="py-1.5 pr-3">GST %</th><th className="py-1.5 pr-3">ITC</th><th className="py-1.5 pr-3">Block reason</th><th className="py-1.5 pr-3">Status</th><th /></tr>
             </thead>
@@ -201,6 +204,7 @@ function CategoriesPanel() {
               </tr>
             </tbody>
           </table>
+          </div>
         </Panel>
       )}
     </div>
@@ -323,7 +327,8 @@ function VendorsPanel() {
   return (
     <Panel title="Vendors" sub="Basic vendor list. Operations can also add a vendor on the fly during asset entry.">
       {err && <p className="mb-2 rounded bg-brick/5 px-3 py-1.5 text-sm text-brick">{err}</p>}
-      <table className="w-full text-left text-sm">
+      <div className="overflow-x-auto">
+      <table className="w-full min-w-[44rem] text-left text-sm">
         <thead className="text-xs uppercase tracking-wide text-ink-soft">
           <tr><th className="py-1.5 pr-3">Code</th><th className="py-1.5 pr-3">Name</th><th className="py-1.5 pr-3">GSTIN</th><th className="py-1.5 pr-3">PAN</th><th className="py-1.5 pr-3">Contact</th><th className="py-1.5 pr-3">Status</th><th /></tr>
         </thead>
@@ -354,6 +359,7 @@ function VendorsPanel() {
           </tr>
         </tbody>
       </table>
+      </div>
     </Panel>
   );
 }
@@ -371,7 +377,8 @@ function GlPanel() {
   return (
     <Panel title="GL Codes" sub="Finance-only ledger codes. Operations never sees these.">
       {err && <p className="mb-2 rounded bg-brick/5 px-3 py-1.5 text-sm text-brick">{err}</p>}
-      <table className="w-full max-w-xl text-left text-sm">
+      <div className="overflow-x-auto">
+      <table className="w-full min-w-[26rem] max-w-xl text-left text-sm">
         <thead className="text-xs uppercase tracking-wide text-ink-soft">
           <tr><th className="py-1.5 pr-3">Code</th><th className="py-1.5 pr-3">Ledger name</th><th className="py-1.5 pr-3">Status</th><th /></tr>
         </thead>
@@ -395,6 +402,7 @@ function GlPanel() {
           </tr>
         </tbody>
       </table>
+      </div>
     </Panel>
   );
 }

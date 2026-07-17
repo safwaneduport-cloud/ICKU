@@ -21,7 +21,7 @@ export default function Events() {
 
   return (
     <div className="space-y-5">
-      <div className="flex items-center justify-between">
+      <div className="flex flex-wrap items-center justify-between gap-2">
         <h1 className="font-serif text-3xl font-bold text-pine">Tasks &amp; Events</h1>
         <button onClick={() => setShowNew(true)} className="rounded-lg bg-pine px-4 py-2 text-sm font-medium text-white hover:opacity-90">+ New event</button>
       </div>
@@ -42,14 +42,19 @@ export default function Events() {
         {q.isLoading && <p className="px-4 py-6 text-ink-soft">Loading…</p>}
         {!q.isLoading && rows.length === 0 && <p className="px-4 py-6 text-ink-soft">No events match this filter.</p>}
         {rows.map((e) => (
+          // Phone: date and state ride above the name so the title gets the full
+          // width. From sm up it's the original three-column row.
           <button key={e.id} onClick={() => setOpenId(e.id)}
-            className="flex w-full items-center gap-4 border-b border-line/60 px-4 py-3 text-left last:border-0 hover:bg-paper">
-            <div className="w-16 shrink-0 font-mono text-xs text-ink-soft">{triggerLabel(e)}</div>
-            <div className="flex-1">
+            className="flex w-full flex-col gap-1 border-b border-line/60 px-4 py-3 text-left last:border-0 hover:bg-paper sm:flex-row sm:items-center sm:gap-4">
+            <div className="flex items-center gap-2 sm:contents">
+              <div className="font-mono text-xs text-ink-soft sm:w-16 sm:shrink-0">{triggerLabel(e)}</div>
+              <div className="ml-auto sm:hidden"><Badge state={e.state} /></div>
+            </div>
+            <div className="min-w-0 flex-1">
               <div className="font-medium">{e.name}{e.approval === 'pending' && <span className="ml-2 rounded bg-ochre-tint px-1.5 py-0.5 text-[10px] font-medium text-ochre">pending</span>}</div>
               <div className="text-xs text-ink-soft">Owner · {e.owner?.name || '—'}{e.tasksTotal ? ` · ${e.tasksDone}/${e.tasksTotal} tasks` : ''}</div>
             </div>
-            <Badge state={e.state} />
+            <div className="hidden sm:block"><Badge state={e.state} /></div>
           </button>
         ))}
       </div>

@@ -135,7 +135,7 @@ function GiveKudosModal({ onClose }) {
 
   return (
     <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/30 p-4" onClick={onClose}>
-      <div className="w-full max-w-md rounded-2xl bg-white p-6" onClick={(e) => e.stopPropagation()}>
+      <div className="max-h-[85dvh] w-full overflow-y-auto max-w-md rounded-2xl bg-white p-6" onClick={(e) => e.stopPropagation()}>
         <h3 className="font-serif text-lg font-semibold">Give kudos</h3>
         <label className="mt-4 block text-sm"><span className="text-ink-soft">To</span>
           <select value={toId} onChange={(e) => setToId(e.target.value)} className="mt-1 w-full rounded-lg border border-line px-3 py-2">

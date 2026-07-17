@@ -79,7 +79,7 @@ export default function MonthLogs({ userId }) {
       </div>
 
       <div className="overflow-x-auto rounded-2xl border border-line bg-white">
-        <table className="w-full text-left text-sm">
+        <table className="w-full min-w-[34rem] text-left text-sm">
           <thead className="border-b border-line text-xs uppercase tracking-wide text-ink-soft">
             <tr>
               <th className="px-4 py-3">Date</th>

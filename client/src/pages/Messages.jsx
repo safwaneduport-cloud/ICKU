@@ -54,9 +54,11 @@ export default function Messages() {
   }, [selectedId]); // eslint-disable-line
 
   return (
-    <div className="flex h-[calc(100vh-9rem)] gap-4">
+    // On phones this is one pane at a time: the rail, or the open conversation.
+    // From lg up it's the classic rail + chat + thread layout.
+    <div className="flex h-[calc(100dvh-8.5rem)] gap-4 sm:h-[calc(100dvh-10rem)]">
       {/* ── Left rail (Slack-style dark channel list) ── */}
-      <aside className="flex w-64 shrink-0 flex-col overflow-hidden rounded-2xl bg-pine text-white">
+      <aside className={`w-full shrink-0 flex-col overflow-hidden rounded-2xl bg-pine text-white lg:flex lg:w-64 ${selectedId ? 'hidden lg:flex' : 'flex'}`}>
         <div className="flex items-center justify-between border-b border-white/10 px-4 py-3">
           <h1 className="font-serif text-lg font-bold text-white">Messages</h1>
         </div>
@@ -93,7 +95,7 @@ export default function Messages() {
       </aside>
 
       {/* ── Chat pane ── */}
-      <section className="relative flex min-w-0 flex-1 flex-col rounded-2xl border border-line bg-white">
+      <section className={`relative min-w-0 flex-1 flex-col rounded-2xl border border-line bg-white lg:flex ${selectedId ? 'flex' : 'hidden lg:flex'}`}>
         {!selectedId ? (
           <div className="flex flex-1 flex-col items-center justify-center text-center text-ink-soft">
             <div className="text-4xl">💬</div>
@@ -106,6 +108,7 @@ export default function Messages() {
             users={userOpts}
             onOpenThread={setThread}
             onOpenProfile={openProfile}
+            onBack={() => setSelectedId(null)}
           />
         )}
       </section>
@@ -169,7 +172,7 @@ function RailSection({ title, onAdd, items, selectedId, onSelect, renderIcon, em
   );
 }
 
-function ChatPane({ conversationId, users, onOpenThread, onOpenProfile }) {
+function ChatPane({ conversationId, users, onOpenThread, onOpenProfile, onBack }) {
   const qc = useQueryClient();
   const [addOpen, setAddOpen] = useState(false);
   const [toast, setToast] = useState('');
@@ -192,8 +195,11 @@ function ChatPane({ conversationId, users, onOpenThread, onOpenProfile }) {
   return (
     <>
       {/* header */}
-      <div className="flex items-center justify-between border-b border-line px-4 py-3">
-        <div className="min-w-0">
+      <div className="flex items-center gap-2 border-b border-line px-4 py-3">
+        {onBack && (
+          <button onClick={onBack} className="-ml-1 shrink-0 rounded-lg p-1 text-ink-soft hover:bg-paper lg:hidden" aria-label="Back to conversations">←</button>
+        )}
+        <div className="min-w-0 flex-1">
           <div className="truncate font-serif text-lg font-semibold text-pine">
             {c?.type === 'group' ? '# ' : c?.type === 'event' ? '🗓 ' : ''}{c?.name || '…'}
           </div>
@@ -263,7 +269,8 @@ function ThreadPanel({ conversationId, parent, users, onClose, onOpenProfile }) 
   });
 
   return (
-    <aside className="flex w-80 shrink-0 flex-col rounded-2xl border border-line bg-white">
+    // Full-screen over the chat on phones; a side panel from lg up.
+    <aside className="fixed inset-0 z-40 flex flex-col bg-white lg:static lg:z-auto lg:w-80 lg:shrink-0 lg:rounded-2xl lg:border lg:border-line">
       <div className="flex items-center justify-between border-b border-line px-4 py-3">
         <span className="font-serif text-sm font-bold text-pine">Thread</span>
         <button onClick={onClose} className="text-ink-soft hover:text-brick" aria-label="Close">✕</button>

@@ -1,4 +1,5 @@
-import { NavLink, Outlet } from 'react-router-dom';
+import { useEffect, useState } from 'react';
+import { NavLink, Outlet, useLocation } from 'react-router-dom';
 import { useAuth } from '../store/AuthContext.jsx';
 import { ProfileProvider, useProfile } from '../store/ProfileContext.jsx';
 import NotificationBell from '../features/notifications/NotificationBell.jsx';
@@ -58,6 +59,10 @@ function initials(name = '') {
 function Shell() {
   const { user, logout } = useAuth();
   const { openProfile } = useProfile();
+  const location = useLocation();
+  // Off-canvas nav on phones; a static sidebar from lg up.
+  const [navOpen, setNavOpen] = useState(false);
+  useEffect(() => { setNavOpen(false); }, [location.pathname]); // close after navigating
   const isAdmin = user?.id === 'ceo' || user?.role === 'HR Head';
   const isReports = isAdmin || user?.tier === 'Leadership';
   const adminItems = [
@@ -75,13 +80,19 @@ function Shell() {
 
   return (
     <div className="flex min-h-screen">
-      {/* Sidebar */}
-      <aside className="flex max-h-screen w-60 flex-col border-r border-line bg-white">
-        <div className="px-5 py-5">
-          <div className="text-[10px] font-mono uppercase tracking-widest text-ochre">
-            Company OS
+      {/* Backdrop behind the mobile nav */}
+      {navOpen && <div className="fixed inset-0 z-30 bg-ink/40 lg:hidden" onClick={() => setNavOpen(false)} aria-hidden="true" />}
+
+      {/* Sidebar — a slide-in drawer on phones, static from lg up */}
+      <aside className={`fixed inset-y-0 left-0 z-40 flex w-64 max-w-[85vw] flex-col border-r border-line bg-white transition-transform duration-200 lg:static lg:z-auto lg:max-h-screen lg:w-60 lg:translate-x-0 ${navOpen ? 'translate-x-0' : '-translate-x-full'}`}>
+        <div className="flex items-start justify-between px-5 py-5">
+          <div>
+            <div className="text-[10px] font-mono uppercase tracking-widest text-ochre">
+              Company OS
+            </div>
+            <div className="font-serif text-2xl font-bold text-pine">ICKU</div>
           </div>
-          <div className="font-serif text-2xl font-bold text-pine">ICKU</div>
+          <button onClick={() => setNavOpen(false)} className="-mr-1 rounded-lg p-1 text-ink-soft hover:bg-paper lg:hidden" aria-label="Close menu">✕</button>
         </div>
         <nav className="flex flex-1 flex-col overflow-y-auto px-3 pb-4">
           {groups.map((group, gi) => (
@@ -138,15 +149,21 @@ function Shell() {
         </div>
       </aside>
 
-      {/* Main */}
-      <div className="flex-1">
-        <header className="flex items-center justify-between border-b border-line bg-white/60 px-8 py-4">
-          <div className="text-[11px] font-mono uppercase tracking-widest text-ochre">
-            Signed in as {user?.name} · {user?.role}
+      {/* Main — min-w-0 so wide children (tables, calendars) can scroll instead
+          of stretching the page sideways on a phone. */}
+      <div className="flex min-w-0 flex-1 flex-col">
+        <header className="sticky top-0 z-20 flex items-center gap-3 border-b border-line bg-paper/90 px-4 py-3 backdrop-blur sm:px-8 sm:py-4">
+          <button onClick={() => setNavOpen(true)} className="-ml-1 rounded-lg p-1.5 text-pine hover:bg-pine-tint lg:hidden" aria-label="Open menu">
+            <svg width="20" height="20" viewBox="0 0 20 20" fill="none" stroke="currentColor" strokeWidth="1.75" strokeLinecap="round">
+              <path d="M3 5h14M3 10h14M3 15h14" />
+            </svg>
+          </button>
+          <div className="min-w-0 truncate text-[11px] font-mono uppercase tracking-widest text-ochre">
+            <span className="hidden sm:inline">Signed in as </span>{user?.name}<span className="hidden sm:inline"> · {user?.role}</span>
           </div>
-          <NotificationBell />
+          <div className="ml-auto shrink-0"><NotificationBell /></div>
         </header>
-        <main className="px-8 py-8">
+        <main className="min-w-0 px-4 py-5 sm:px-8 sm:py-8">
           <Outlet />
         </main>
       </div>

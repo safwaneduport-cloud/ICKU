@@ -95,8 +95,8 @@ export default function Credentials() {
         className="w-full max-w-md rounded-lg border border-line px-3 py-2 text-sm outline-none focus:border-pine" />
 
       <div className="overflow-hidden rounded-2xl border border-line bg-white">
-        <div className="max-h-[65vh] overflow-y-auto">
-          <table className="w-full text-left text-sm">
+        <div className="max-h-[65vh] overflow-auto">
+          <table className="w-full min-w-[40rem] text-left text-sm">
             <thead className="sticky top-0 border-b border-line bg-white text-xs uppercase tracking-wide text-ink-soft">
               <tr>
                 <th className="px-4 py-2.5">Emp No</th>

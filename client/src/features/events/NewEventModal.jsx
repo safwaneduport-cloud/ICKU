@@ -113,9 +113,9 @@ export default function NewEventModal({ onClose, onCreated, initialMonth, initia
                     value={t.name}
                     onChange={(e) => setTask(i, { name: e.target.value })}
                     onKeyDown={(e) => { if (e.key === 'Enter') { e.preventDefault(); if (t.name.trim() && i === tasks.length - 1) addTask(); } }}
-                    placeholder="What needs doing?" className="rounded-lg border border-line bg-white px-3 py-2" />
+                    placeholder="What needs doing?" className="min-w-0 rounded-lg border border-line bg-white px-3 py-2" />
                   {dated && (
-                    <div className="flex items-center gap-1 rounded-lg border border-line bg-white px-2 text-xs text-ink-soft">
+                    <div className="flex items-center gap-1 whitespace-nowrap rounded-lg border border-line bg-white px-2 text-xs text-ink-soft">
                       Due +
                       <input
                         // Deliberately type=text: for type=number React compares the DOM

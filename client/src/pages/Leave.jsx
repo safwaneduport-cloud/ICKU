@@ -28,7 +28,7 @@ export default function Leave() {
 
   return (
     <div className="space-y-6">
-      <div className="flex items-center justify-between">
+      <div className="flex flex-wrap items-center justify-between gap-2">
         <h1 className="font-serif text-3xl font-bold text-pine">Leave</h1>
         <button onClick={() => setShowApply(true)} className="rounded-lg bg-pine px-4 py-2 text-sm font-medium text-white hover:opacity-90">
           + Apply leave
@@ -82,7 +82,7 @@ function MeView() {
       </div>
 
       <div className="overflow-x-auto rounded-2xl border border-line bg-white">
-        <table className="w-full text-left text-sm">
+        <table className="w-full min-w-[40rem] text-left text-sm">
           <thead className="border-b border-line text-xs uppercase tracking-wide text-ink-soft">
             <tr>
               <th className="px-4 py-3">Type</th><th className="px-4 py-3">Dates</th>
@@ -154,7 +154,7 @@ function TeamView() {
       )}
 
       <div className="overflow-x-auto rounded-2xl border border-line bg-white">
-        <table className="w-full text-left text-sm">
+        <table className="w-full min-w-[40rem] text-left text-sm">
           <thead className="border-b border-line text-xs uppercase tracking-wide text-ink-soft">
             <tr>
               <th className="px-4 py-3">Employee</th><th className="px-4 py-3">Type</th>

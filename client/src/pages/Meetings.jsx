@@ -128,7 +128,34 @@ function MonthCalendar({ year, month, rows, onOpen, onNewOn }) {
 
   return (
     <div className="grid gap-4 lg:grid-cols-[1fr_18rem]">
-      <div className="overflow-hidden rounded-2xl border border-line bg-white">
+      {/* Phone grid — titles won't fit in a ~45px cell, so days carry dots and
+          the agenda panel below does the reading. */}
+      <div className="overflow-hidden rounded-2xl border border-line bg-white sm:hidden">
+        <div className="grid grid-cols-7 border-b border-line bg-paper/60">
+          {DOW.map((d) => <div key={d} className="py-1.5 text-center text-[10px] font-semibold uppercase tracking-wide text-ink-soft">{d[0]}</div>)}
+        </div>
+        <div className="grid grid-cols-7">
+          {cells.map((d, i) => {
+            if (!d) return <div key={i} className="aspect-square border-b border-r border-line/50 bg-paper/30" />;
+            const date = `${year}-${pad(month + 1)}-${pad(d)}`;
+            const items = byDay.get(date) || [];
+            const isToday = date === today;
+            return (
+              <button key={i} onClick={() => setSelected(date)}
+                className={`flex aspect-square flex-col items-center justify-center gap-1 border-b border-r border-line/50 ${selected === date ? 'bg-pine-tint/50' : ''}`}>
+                <span className={`flex h-6 w-6 items-center justify-center rounded-full text-xs ${isToday ? 'bg-pine font-bold text-white' : 'text-ink'}`}>{d}</span>
+                <span className="flex h-1.5 items-center gap-0.5">
+                  {items.slice(0, 3).map((r) => (
+                    <span key={r.id} className="h-1.5 w-1.5 rounded-full" style={{ background: SRC[r.kind].c }} />
+                  ))}
+                </span>
+              </button>
+            );
+          })}
+        </div>
+      </div>
+
+      <div className="hidden overflow-hidden rounded-2xl border border-line bg-white sm:block">
         <div className="grid grid-cols-7 border-b border-line bg-paper/60">
           {DOW.map((d) => <div key={d} className="px-2 py-2 text-center text-[11px] font-semibold uppercase tracking-wide text-ink-soft">{d}</div>)}
         </div>
