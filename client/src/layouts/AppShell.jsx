@@ -8,7 +8,7 @@ import NotificationBell from '../features/notifications/NotificationBell.jsx';
 // `stars` marks the areas we want people focused on during the pilot launch
 // (★★ = primary focus, ★ = secondary). Purely a visual cue.
 const NAV_GROUPS = [
-  { items: [{ to: '/', label: 'Overview', end: true, stars: 2 }, { to: '/messages', label: 'Messages', stars: 1 }] },
+  { items: [{ to: '/', label: 'My Day', end: true, stars: 2 }, { to: '/messages', label: 'Messages', stars: 1 }] },
   {
     title: 'Work',
     items: [
