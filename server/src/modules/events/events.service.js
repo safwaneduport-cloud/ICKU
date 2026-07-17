@@ -94,10 +94,15 @@ export async function get(id) {
         orderBy: { createdAt: 'asc' },
         include: { author: { select: { id: true, name: true } } },
       },
+      // Meetings held against this event (tagged from the Meetings module).
+      meetings: {
+        orderBy: [{ date: 'asc' }, { time: 'asc' }],
+        select: { id: true, title: true, date: true, time: true, mode: true, minutes: true, minutesFileUrl: true, owner: { select: { name: true } } },
+      },
     },
   });
   if (!e) throw new ApiError(404, 'Event not found');
-  return { ...shape(e), attachments: e.attachments, comments: e.comments };
+  return { ...shape(e), attachments: e.attachments, comments: e.comments, meetings: e.meetings };
 }
 
 export async function create(creator, payload) {

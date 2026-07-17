@@ -205,7 +205,7 @@ export async function listCalendar(userId, from, to) {
 // Create a real Teams meeting on the owner's Outlook calendar and invite the
 // attendees (so it lands in their Outlook too). Returns { id, joinUrl, webLink }.
 // Returns null if the owner isn't connected. Times are IST wall-clock strings.
-export async function createTeamsEvent(ownerId, { subject, startDateTime, endDateTime, attendees = [], bodyText = '', recurrence = null }) {
+export async function createTeamsEvent(ownerId, { subject, startDateTime, endDateTime, attendees = [], bodyText = '', recurrence = null, location = null }) {
   const token = await accessTokenFor(ownerId);
   if (!token) return null;
 
@@ -217,6 +217,7 @@ export async function createTeamsEvent(ownerId, { subject, startDateTime, endDat
     onlineMeetingProvider: 'teamsForBusiness',
     body: bodyText ? { contentType: 'text', content: bodyText } : undefined,
     recurrence: recurrence || undefined,
+    location: location ? { displayName: location } : undefined,
     attendees: attendees
       .filter((a) => a.email)
       .map((a) => ({ emailAddress: { address: a.email, name: a.name || a.email }, type: 'required' })),
@@ -235,7 +236,7 @@ export async function createTeamsEvent(ownerId, { subject, startDateTime, endDat
 }
 
 // Update a Teams meeting we created (re-issues invites/updates for attendees).
-export async function updateTeamsEvent(ownerId, eventId, { subject, startDateTime, endDateTime, attendees = [], bodyText = '', recurrence = null }) {
+export async function updateTeamsEvent(ownerId, eventId, { subject, startDateTime, endDateTime, attendees = [], bodyText = '', recurrence = null, location = null }) {
   const token = await accessTokenFor(ownerId);
   if (!token || !eventId) return null;
   const payload = {
@@ -244,6 +245,7 @@ export async function updateTeamsEvent(ownerId, eventId, { subject, startDateTim
     end: { dateTime: endDateTime, timeZone: IST },
     body: bodyText ? { contentType: 'text', content: bodyText } : undefined,
     recurrence: recurrence || null, // null clears an existing recurrence
+    location: { displayName: location || '' },
     attendees: attendees
       .filter((a) => a.email)
       .map((a) => ({ emailAddress: { address: a.email, name: a.name || a.email }, type: 'required' })),

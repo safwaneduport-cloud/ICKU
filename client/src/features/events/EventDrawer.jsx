@@ -3,6 +3,8 @@ import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query';
 import { useAuth } from '../../store/AuthContext.jsx';
 import { getEvent, toggleTask, updateEventSop } from '../../api/events.api.js';
 import { STATE, triggerLabel } from './meta.js';
+
+const triggerLabelDate = (d) => (d ? new Date(`${d}T00:00:00`).toLocaleDateString(undefined, { day: 'numeric', month: 'short' }) : '');
 import EventChat from '../messages/EventChat.jsx';
 import SopFields from './SopFields.jsx';
 
@@ -41,6 +43,29 @@ export default function EventDrawer({ id, onClose }) {
             </div>
 
             <SopSection e={e} canEdit={canEditSop} onSaved={() => qc.invalidateQueries()} />
+
+            {e.meetings?.length > 0 && (
+              <section className="mt-4 rounded-2xl border border-line bg-white p-4">
+                <div className="text-xs font-semibold uppercase tracking-wide text-ink-soft">Meetings held · {e.meetings.length}</div>
+                <div className="mt-2 space-y-1.5">
+                  {e.meetings.map((mt) => (
+                    <div key={mt.id} className="rounded-lg border border-line px-3 py-2">
+                      <div className="flex items-center justify-between gap-2">
+                        <span className="truncate text-sm font-medium text-ink">{mt.title}</span>
+                        <span className="shrink-0 text-xs text-ink-soft">{triggerLabelDate(mt.date)} · {mt.time}</span>
+                      </div>
+                      <div className="text-xs text-ink-soft">{mt.owner?.name} · chair</div>
+                      {(mt.minutes || mt.minutesFileUrl) && (
+                        <div className="mt-1 flex items-center gap-2">
+                          {mt.minutes && <p className="line-clamp-2 flex-1 text-xs text-ink-soft">{mt.minutes}</p>}
+                          {mt.minutesFileUrl && <a href={mt.minutesFileUrl} target="_blank" rel="noreferrer" className="shrink-0 text-xs text-pine hover:underline">📄 Minutes</a>}
+                        </div>
+                      )}
+                    </div>
+                  ))}
+                </div>
+              </section>
+            )}
 
             <section className="mt-4 rounded-2xl border border-line bg-white p-4">
               <div className="text-xs font-semibold uppercase tracking-wide text-ink-soft">Tasks · {e.tasksDone}/{e.tasksTotal}</div>

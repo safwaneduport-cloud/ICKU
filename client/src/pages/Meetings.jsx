@@ -8,6 +8,9 @@ import {
   updateMinutes, addMeetingAction, toggleMeetingAction,
 } from '../api/collab.api.js';
 import { getMicrosoftCalendar, getMicrosoftStatus } from '../api/integrations.api.js';
+import { getEvents } from '../api/events.api.js';
+import { triggerLabel } from '../features/events/meta.js';
+import { uploadFile } from '../api/files.api.js';
 import AssignPicker from '../features/events/AssignPicker.jsx';
 
 const initials = (n = '') => n.split(' ').map((w) => w[0]).slice(0, 2).join('').toUpperCase();
@@ -102,7 +105,7 @@ export default function Meetings() {
         : <MeetingList rows={rows} loading={list.isLoading} onOpen={open} />}
 
       {openId && <MeetingDrawer id={openId} onClose={() => setOpenId(null)} onEdit={(m) => { setOpenId(null); setModal({ meeting: m }); }} />}
-      {modal && <MeetingModal recurrences={meta.data?.recurrences || []} meeting={modal.meeting} initialDate={modal.initialDate} onClose={() => setModal(null)} />}
+      {modal && <MeetingModal recurrences={meta.data?.recurrences || []} rooms={meta.data?.rooms || []} meeting={modal.meeting} initialDate={modal.initialDate} onClose={() => setModal(null)} />}
     </div>
   );
 }
@@ -265,10 +268,16 @@ function MeetingDrawer({ id, onClose, onEdit }) {
             <div className="mt-1 flex flex-wrap gap-3 text-sm text-ink-soft">
               <span>{fmtDate(m.date)}</span><span>{m.time}</span>
               {m.durationMin && <span>{durLabel(m.durationMin)}</span>}
+              {m.roomLabel && <span>📍 {m.roomLabel}</span>}
               <span>{m.owner.name} · chair</span>
               {m.recurring !== 'One-off' && m.recurEnd === 'until' && <span>until {m.recurUntil}</span>}
               {m.recurring !== 'One-off' && m.recurEnd === 'count' && <span>{m.recurCount}× occurrences</span>}
             </div>
+            {m.event && (
+              <a href="/events" className="mt-2 inline-flex items-center gap-1 rounded-lg bg-steel-tint px-2 py-1 text-xs font-medium text-steel hover:underline">
+                🏷 {m.event.name}
+              </a>
+            )}
             {m.meetingLink && (
               <a href={m.meetingLink} target="_blank" rel="noreferrer"
                 className="mt-3 flex w-fit items-center gap-2 rounded-lg bg-pine px-4 py-2 text-sm font-medium text-white hover:opacity-90">🔗 Join meeting</a>
@@ -294,14 +303,31 @@ function MeetingDrawer({ id, onClose, onEdit }) {
               </section>
             )}
 
-            <section className="mt-5">
-              <div className="text-xs font-semibold uppercase tracking-wide text-ink-soft">Minutes</div>
-              {participant ? (
-                <textarea defaultValue={m.minutes} rows={3} placeholder="Add meeting minutes…"
-                  onBlur={(e) => { if (e.target.value !== m.minutes) saveMinutes.mutate(e.target.value); }}
-                  className="mt-2 w-full rounded-lg border border-line bg-white px-3 py-2 text-sm outline-none focus:border-pine" />
-              ) : <p className="mt-2 text-sm text-ink-soft">{m.minutes || 'No minutes yet.'}</p>}
-            </section>
+            {/* Minutes only open up once the meeting has started. */}
+            {m.started ? (
+              <section className="mt-5">
+                <div className="text-xs font-semibold uppercase tracking-wide text-ink-soft">Minutes</div>
+                {participant ? (
+                  <>
+                    <textarea defaultValue={m.minutes} rows={3} placeholder="Write up the meeting…"
+                      onBlur={(e) => { if (e.target.value !== m.minutes) saveMinutes.mutate({ minutes: e.target.value }); }}
+                      className="mt-2 w-full rounded-lg border border-line bg-white px-3 py-2 text-sm outline-none focus:border-pine" />
+                    <MinutesFile m={m} onSave={(p) => saveMinutes.mutate(p)} />
+                  </>
+                ) : (
+                  <>
+                    <p className="mt-2 whitespace-pre-wrap text-sm text-ink-soft">{m.minutes || 'No minutes yet.'}</p>
+                    {m.minutesFileUrl && (
+                      <a href={m.minutesFileUrl} target="_blank" rel="noreferrer" className="mt-2 inline-block rounded-lg border border-line bg-white px-3 py-1.5 text-xs hover:border-pine">📄 {m.minutesFileName || 'Minutes PDF'}</a>
+                    )}
+                  </>
+                )}
+              </section>
+            ) : (
+              <section className="mt-5 rounded-xl border border-dashed border-line p-3 text-center">
+                <p className="text-xs text-ink-soft">Minutes can be added once the meeting starts.</p>
+              </section>
+            )}
 
             <section className="mt-5">
               <div className="text-xs font-semibold uppercase tracking-wide text-ink-soft">Action items</div>
@@ -331,19 +357,98 @@ function MeetingDrawer({ id, onClose, onEdit }) {
   );
 }
 
+// Optional minutes PDF, alongside the write-up.
+function MinutesFile({ m, onSave }) {
+  const [busy, setBusy] = useState(false);
+  const [err, setErr] = useState('');
+
+  async function onFile(e) {
+    const file = e.target.files?.[0];
+    e.target.value = '';
+    if (!file) return;
+    if (file.size > 10 * 1024 * 1024) { setErr(`"${file.name}" is over 10MB`); return; }
+    const dataUrl = await new Promise((res, rej) => { const r = new FileReader(); r.onload = () => res(r.result); r.onerror = rej; r.readAsDataURL(file); });
+    setBusy(true);
+    try { const up = await uploadFile(dataUrl, file.name); onSave({ fileUrl: up.url, fileName: file.name }); setErr(''); }
+    catch (ex) { setErr(`Upload failed: ${ex.response?.data?.error?.message || ex.message}`); }
+    finally { setBusy(false); }
+  }
+
+  return (
+    <div className="mt-2">
+      {m.minutesFileUrl ? (
+        <div className="flex items-center gap-2">
+          <a href={m.minutesFileUrl} target="_blank" rel="noreferrer" className="rounded-lg border border-line bg-white px-3 py-1.5 text-xs hover:border-pine">📄 {m.minutesFileName || 'Minutes PDF'}</a>
+          <button onClick={() => onSave({ fileUrl: '', fileName: '' })} className="text-xs text-ink-soft hover:text-brick">Remove</button>
+        </div>
+      ) : (
+        <label className={`inline-flex cursor-pointer items-center gap-2 rounded-lg border px-3 py-1.5 text-xs ${busy ? 'opacity-60' : 'border-line hover:border-pine'}`}>
+          📄 {busy ? 'Uploading…' : 'Attach minutes PDF'}
+          <input type="file" accept=".pdf,application/pdf,.doc,.docx" onChange={onFile} className="hidden" disabled={busy} />
+        </label>
+      )}
+      {err && <p className="mt-1 text-xs text-brick">{err}</p>}
+    </div>
+  );
+}
+
+// Type-to-search picker for tagging one institutional event to a meeting.
+function EventTagPicker({ value, onChange }) {
+  const [q, setQ] = useState('');
+  const [open, setOpen] = useState(false);
+  const events = useQuery({ queryKey: ['events', 'all', false], queryFn: () => getEvents('all', false), retry: false });
+  const all = events.data || [];
+  const selected = all.find((e) => e.id === value);
+
+  const matches = q.trim()
+    ? all.filter((e) => e.name.toLowerCase().includes(q.trim().toLowerCase())).slice(0, 8)
+    : all.slice(0, 8);
+
+  if (selected) {
+    return (
+      <div className="flex items-center justify-between rounded-lg border border-pine/40 bg-pine-tint/40 px-3 py-2">
+        <span className="min-w-0 truncate text-sm text-pine">🏷 {selected.name}</span>
+        <button type="button" onClick={() => { onChange(''); setQ(''); }} className="shrink-0 text-xs text-ink-soft hover:text-brick">Remove</button>
+      </div>
+    );
+  }
+
+  return (
+    <div>
+      <input
+        value={q} onChange={(e) => { setQ(e.target.value); setOpen(true); }} onFocus={() => setOpen(true)}
+        placeholder="Search events by keyword…" className="inp" />
+      {open && (
+        <div className="mt-1 max-h-44 overflow-y-auto rounded-lg border border-line bg-white">
+          {matches.length === 0 && <p className="px-3 py-2 text-xs text-ink-soft">No matching events.</p>}
+          {matches.map((e) => (
+            <button key={e.id} type="button" onClick={() => { onChange(e.id); setOpen(false); }}
+              className="block w-full px-3 py-1.5 text-left text-sm hover:bg-pine-tint">
+              {e.name}
+              <span className="ml-1 text-[11px] text-ink-soft">{triggerLabel(e)}</span>
+            </button>
+          ))}
+        </div>
+      )}
+    </div>
+  );
+}
+
 // ── Create / edit modal ─────────────────────────────────────────────
-function MeetingModal({ recurrences, meeting, initialDate, onClose }) {
+function MeetingModal({ recurrences, rooms = [], meeting, initialDate, onClose }) {
   const qc = useQueryClient();
   const editing = !!meeting;
   const [f, setF] = useState(() => meeting ? {
     title: meeting.title, date: meeting.date, time: meeting.time, durationMin: meeting.durationMin || 60,
     recurring: meeting.recurring, recurEnd: meeting.recurEnd || 'never', recurUntil: meeting.recurUntil || '', recurCount: meeting.recurCount || 5,
     mode: meeting.mode, meetingLink: meeting.msEventId ? '' : (meeting.meetingLink || ''), // hide auto Teams link so edit re-syncs it
+    room: meeting.room || '', roomOther: meeting.roomOther || '', eventId: meeting.eventId || '',
     attendeeIds: meeting.attendees.map((a) => a.id), agenda: (meeting.agenda || []).join('\n'),
   } : {
     title: '', date: initialDate || '', time: '10:00', durationMin: 60,
     recurring: 'One-off', recurEnd: 'never', recurUntil: '', recurCount: 5,
-    mode: 'offline', meetingLink: '', attendeeIds: [], agenda: '',
+    mode: 'offline', meetingLink: '', room: '', roomOther: '', eventId: '',
+    attendeeIds: [], agenda: '',
   });
   const [note, setNote] = useState('');
   const set = (k, v) => setF((s) => ({ ...s, [k]: v }));
@@ -419,6 +524,30 @@ function MeetingModal({ recurrences, meeting, initialDate, onClose }) {
                   : null}
             </label>
           )}
+          {f.mode !== 'online' && (
+            <div className="mt-3 text-sm">
+              <span className="text-ink-soft">Meeting room</span>
+              <div className="mt-1 grid gap-1.5">
+                {rooms.map((r) => (
+                  <button key={r.id} type="button" onClick={() => set('room', f.room === r.id ? '' : r.id)}
+                    className={`rounded-lg border px-3 py-2 text-left ${f.room === r.id ? 'border-pine bg-pine-tint/50' : 'border-line hover:border-pine'}`}>
+                    <div className="text-sm font-medium text-ink">{r.id}</div>
+                    <div className="text-[11px] text-ink-soft">{r.hint}</div>
+                  </button>
+                ))}
+              </div>
+              {f.room === 'Others' && (
+                <input value={f.roomOther} onChange={(e) => set('roomOther', e.target.value)} placeholder="Which room?"
+                  className="inp mt-1.5" />
+              )}
+            </div>
+          )}
+
+          <div className="mt-3 text-sm">
+            <span className="text-ink-soft">Tag an event <span className="text-xs">(optional)</span></span>
+            <div className="mt-1"><EventTagPicker value={f.eventId} onChange={(id) => set('eventId', id)} /></div>
+          </div>
+
           <div className="mt-3 text-sm"><span className="text-ink-soft">Attendees</span>
             <div className="mt-1"><AssignPicker value={f.attendeeIds} onChange={(arr) => set('attendeeIds', arr)} /></div>
           </div>

@@ -401,6 +401,7 @@ model Event {
   attachments  Attachment[]
   comments     EventComment[]
   conversation Conversation? // Stage 2: the event's chat thread (Messages)
+  meetings     Meeting[] // meetings tagged to this event
 
   createdAt DateTime @default(now())
   updatedAt DateTime @updatedAt
@@ -539,8 +540,19 @@ model Meeting {
   mode      String            @default("offline") // offline | online | hybrid
   meetingLink String?         // Zoom/Teams/Meet link (for online/hybrid)
   msEventId String?           // Graph event id when we created a real Teams meeting
+
+  // Physical room (offline/hybrid only)
+  room      String? // Prana | Collab | Synergy | Others
+  roomOther String? // free text when room = Others
+
+  // Optional link to an institutional event (one per meeting)
+  eventId String?
+  event   Event?  @relation(fields: [eventId], references: [id], onDelete: SetNull)
+
   agenda    String[]          @default([])
   minutes   String            @default("")
+  minutesFileUrl  String? // optional minutes PDF
+  minutesFileName String?
   attendees MeetingAttendee[]
   actions   MeetingAction[]
   createdAt DateTime          @default(now())

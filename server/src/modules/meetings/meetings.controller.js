@@ -4,7 +4,7 @@ import { ApiError } from '../../middleware/errorHandler.js';
 const canCreate = (user) => user?.tier !== 'Employee';
 
 export function getMeta(req, res) {
-  res.json({ data: { canCreate: canCreate(req.user), recurrences: ['One-off', 'Daily', 'Weekly', 'Monthly'] }, error: null });
+  res.json({ data: { canCreate: canCreate(req.user), recurrences: ['One-off', 'Daily', 'Weekly', 'Monthly'], rooms: service.ROOMS }, error: null });
 }
 
 export async function list(req, res, next) {
@@ -44,7 +44,7 @@ async function requireParticipant(req) {
 export async function updateMinutes(req, res, next) {
   try {
     await requireParticipant(req);
-    res.json({ data: await service.updateMinutes(req.params.id, req.body?.minutes ?? ''), error: null });
+    res.json({ data: await service.updateMinutes(req.params.id, req.body || {}), error: null });
   } catch (e) { next(e); }
 }
 

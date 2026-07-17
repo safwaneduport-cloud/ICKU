@@ -32,6 +32,16 @@ function graphRecurrence(m) {
   return { pattern, range };
 }
 
+// The bookable rooms. `Others` lets people name a room we don't list.
+export const ROOMS = [
+  { id: 'Prana', hint: 'Deep Work Room · 1–2 people' },
+  { id: 'Collab', hint: 'Brainstorming, quick syncs · 2–3 people' },
+  { id: 'Synergy', hint: 'Strategy & planning · 3+ people, cross-functional' },
+  { id: 'Others', hint: 'Any other room' },
+];
+const ROOM_IDS = ROOMS.map((r) => r.id);
+export const roomLabel = (m) => (!m.room ? null : m.room === 'Others' ? (m.roomOther || 'Other room') : m.room);
+
 // Build the Graph event body for a meeting (attendee emails resolved here).
 async function teamsPayload(m, ownerId) {
   const invitees = await prisma.user.findMany({
@@ -43,9 +53,22 @@ async function teamsPayload(m, ownerId) {
     subject: m.title,
     startDateTime, endDateTime,
     recurrence: graphRecurrence(m),
+    location: roomLabel(m), // hybrid meetings carry the physical room into Outlook
     attendees: invitees.map((u) => ({ email: u.email, name: u.name })),
     bodyText: (m.agenda || []).length ? `Agenda:\n- ${m.agenda.join('\n- ')}` : '',
   };
+}
+
+// Room only applies to offline/hybrid; a tagged event must exist.
+function roomFields(mode, { room, roomOther }) {
+  if (mode === 'online' || !ROOM_IDS.includes(room)) return { room: null, roomOther: null };
+  return { room, roomOther: room === 'Others' ? (roomOther || '').trim() || null : null };
+}
+async function cleanEventId(eventId) {
+  if (!eventId) return null;
+  const e = await prisma.event.findUnique({ where: { id: eventId }, select: { id: true } });
+  if (!e) throw new ApiError(400, 'That event no longer exists');
+  return e.id;
 }
 
 const cleanRecurring = (r) => (['One-off', 'Daily', 'Weekly', 'Monthly'].includes(r) ? r : 'One-off');
@@ -61,6 +84,7 @@ const detailInclude = {
   owner: { select: { id: true, name: true } },
   attendees: { include: { user: { select: { id: true, name: true, departmentId: true } } } },
   actions: { orderBy: { sort: 'asc' } },
+  event: { select: { id: true, name: true } }, // tagged institutional event
 };
 
 export async function list(userId, scope) {
@@ -78,6 +102,8 @@ export async function get(id) {
   if (!m) throw new ApiError(404, 'Meeting not found');
   return {
     ...m,
+    roomLabel: roomLabel(m),
+    started: hasStarted(m),
     attendees: m.attendees.map((a) => ({ id: a.user.id, name: a.user.name, departmentId: a.user.departmentId })),
   };
 }
@@ -95,6 +121,8 @@ export async function create(ownerId, body) {
     data: {
       title: title.trim(), date, time: time || '10:00', recurring: cleanRecurring(body.recurring), durationMin: cleanDur(body.durationMin),
       ...rec, mode: cleanMode, meetingLink: cleanMode === 'offline' ? null : manualLink,
+      ...roomFields(cleanMode, body),
+      eventId: await cleanEventId(body.eventId),
       ownerId, agenda: cleanAgenda,
       attendees: { create: uniqueAttendees.map((userId) => ({ userId })) },
     },
@@ -149,6 +177,8 @@ export async function update(user, id, body) {
       ...rec,
       mode: cleanMode,
       meetingLink: cleanMode === 'offline' ? null : manualLink,
+      ...roomFields(cleanMode, { room: body.room ?? existing.room, roomOther: body.roomOther ?? existing.roomOther }),
+      eventId: body.eventId === undefined ? existing.eventId : await cleanEventId(body.eventId),
       agenda: Array.isArray(body.agenda) ? body.agenda.filter((a) => a.trim()) : existing.agenda,
       attendees: { create: attendeeIds.map((userId) => ({ userId })) },
     },
@@ -190,8 +220,28 @@ export async function remove(user, id) {
   return { ok: true };
 }
 
-export async function updateMinutes(id, minutes) {
-  await prisma.meeting.update({ where: { id }, data: { minutes } }).catch(() => { throw new ApiError(404, 'Meeting not found'); });
+// Minutes only open up once the meeting has actually started — you can't write
+// up a meeting that hasn't happened. Mirrors the UI, which hides the section.
+export function hasStarted(m) {
+  const { startDateTime } = istWindow(m.date, m.time, m.durationMin);
+  // startDateTime is IST wall-clock — turn it into a real instant (IST = UTC+5:30)
+  // so this is correct whatever timezone the server runs in.
+  const startUtcMs = Date.parse(`${startDateTime}Z`) - 330 * 60000;
+  return Date.now() >= startUtcMs;
+}
+
+export async function updateMinutes(id, { minutes, fileUrl, fileName } = {}) {
+  const m = await prisma.meeting.findUnique({ where: { id } });
+  if (!m) throw new ApiError(404, 'Meeting not found');
+  if (!hasStarted(m)) throw new ApiError(400, 'Minutes can be added once the meeting has started');
+  await prisma.meeting.update({
+    where: { id },
+    data: {
+      minutes: minutes ?? m.minutes,
+      minutesFileUrl: fileUrl === undefined ? undefined : fileUrl || null,
+      minutesFileName: fileName === undefined ? undefined : fileName || null,
+    },
+  });
   return get(id);
 }
 
