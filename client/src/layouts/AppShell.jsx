@@ -5,17 +5,19 @@ import NotificationBell from '../features/notifications/NotificationBell.jsx';
 
 // Sidebar navigation, grouped into labeled sections. A group with no `title`
 // renders its items without a header (used for the standalone Overview link).
+// `stars` marks the areas we want people focused on during the pilot launch
+// (★★ = primary focus, ★ = secondary). Purely a visual cue.
 const NAV_GROUPS = [
-  { items: [{ to: '/', label: 'Overview', end: true }, { to: '/messages', label: 'Messages' }] },
+  { items: [{ to: '/', label: 'Overview', end: true, stars: 2 }, { to: '/messages', label: 'Messages', stars: 1 }] },
   {
     title: 'Work',
     items: [
-      { to: '/events', label: 'Tasks & Events' },
-      { to: '/calendar', label: 'Institutional Calendar' },
-      { to: '/okrs', label: 'OKRs & Checklists' },
-      { to: '/meetings', label: 'Meetings' },
-      { to: '/approvals', label: 'Approvals' },
-      { to: '/workspaces', label: 'Workspaces' },
+      { to: '/events', label: 'Tasks & Events', stars: 2 },
+      { to: '/calendar', label: 'Institutional Calendar', stars: 2 },
+      { to: '/okrs', label: 'OKRs & Checklists', stars: 2 },
+      { to: '/meetings', label: 'Meetings', stars: 1 },
+      { to: '/approvals', label: 'Approvals', stars: 1 },
+      { to: '/workspaces', label: 'Workspaces', stars: 1 },
     ],
   },
   {
@@ -32,17 +34,17 @@ const NAV_GROUPS = [
   {
     title: 'Services',
     items: [
-      { to: '/expenses', label: 'Expenses' },
-      { to: '/assethub', label: 'AssetHub' },
-      { to: '/assets', label: 'IT Devices' },
-      { to: '/helpdesk', label: 'Helpdesk' },
+      { to: '/expenses', label: 'Expenses', stars: 1 },
+      { to: '/assethub', label: 'AssetHub', stars: 1 },
+      { to: '/assets', label: 'IT Devices', stars: 1 },
+      { to: '/helpdesk', label: 'Helpdesk', stars: 1 },
     ],
   },
   {
     title: 'Company',
     items: [
-      { to: '/org', label: 'Organization' },
-      { to: '/knowledge', label: 'Knowledge Base' },
+      { to: '/org', label: 'Organization', stars: 1 },
+      { to: '/knowledge', label: 'Knowledge Base', stars: 1 },
       { to: '/announcements', label: 'Announcements' },
       { to: '/engagement', label: 'Engagement' },
     ],
@@ -102,6 +104,11 @@ function Shell() {
                     }
                   >
                     {n.label}
+                    {n.stars > 0 && (
+                      <span className="ml-1 align-super text-[9px] leading-none text-[#E9C46A]" aria-hidden="true">
+                        {'★'.repeat(n.stars)}
+                      </span>
+                    )}
                   </NavLink>
                 ))}
               </div>
