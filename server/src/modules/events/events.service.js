@@ -57,7 +57,7 @@ const eventInclude = {
 // Shape a raw event row into an API payload (adds computed state + task summary).
 function shape(e) {
   const tasks = (e.tasks || []).map((t) => ({
-    id: t.id, name: t.name, dueOffset: t.dueOffset, completed: t.completed, completedLate: t.completedLate,
+    id: t.id, name: t.name, dueOffset: t.dueOffset, dueTime: t.dueTime, completed: t.completed, completedLate: t.completedLate,
     assignees: t.assignees.map((a) => ({ id: a.user.id, name: a.user.name })),
   }));
   const done = tasks.filter((t) => t.completed).length;
@@ -131,7 +131,7 @@ export async function create(creator, payload) {
       attachments: { create: sopAttachments(attachments) },
       tasks: {
         create: tasks.map((t, i) => ({
-          name: t.name, dueOffset: t.dueOffset ?? null, sort: i,
+          name: t.name, dueOffset: t.dueOffset ?? null, dueTime: t.dueTime ?? null, sort: i,
           assignees: { create: (t.assignees || []).map((uid) => ({ userId: uid })) },
         })),
       },

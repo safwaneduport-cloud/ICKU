@@ -2,6 +2,7 @@ import { prisma } from '../../config/prisma.js';
 import { ApiError } from '../../middleware/errorHandler.js';
 import { createTeamsEvent, updateTeamsEvent, deleteTeamsEvent } from '../integrations/microsoft.service.js';
 import { canAdmin } from '../../lib/access.js';
+import { sendMeetingInvites } from './invites.js';
 
 // Build the IST wall-clock start/end for a Teams event. UTC math is used purely
 // for arithmetic (IST has no DST); the timeZone is sent to Graph separately.
@@ -43,18 +44,18 @@ const ROOM_IDS = ROOMS.map((r) => r.id);
 export const roomLabel = (m) => (!m.room ? null : m.room === 'Others' ? (m.roomOther || 'Other room') : m.room);
 
 // Build the Graph event body for a meeting (attendee emails resolved here).
-async function teamsPayload(m, ownerId) {
-  const invitees = await prisma.user.findMany({
-    where: { id: { in: (m.attendeeIds || []).filter((id) => id !== ownerId) } },
-    select: { name: true, email: true },
-  });
+// Graph event body for the meeting. No attendees are forwarded to Outlook:
+// ICKU sends the calendar invites itself (see invites.js), routed to each
+// person's real mailbox, so nobody is double-invited and Gmail-only staff are
+// reached too. This event just mints the Teams link on the owner's own calendar.
+function teamsPayload(m) {
   const { startDateTime, endDateTime } = istWindow(m.date, m.time, m.durationMin);
   return {
     subject: m.title,
     startDateTime, endDateTime,
     recurrence: graphRecurrence(m),
-    location: roomLabel(m), // hybrid meetings carry the physical room into Outlook
-    attendees: invitees.map((u) => ({ email: u.email, name: u.name })),
+    location: roomLabel(m),
+    attendees: [],
     bodyText: (m.agenda || []).length ? `Agenda:\n- ${m.agenda.join('\n- ')}` : '',
   };
 }
@@ -135,7 +136,7 @@ export async function create(ownerId, body) {
   if (cleanMode !== 'offline' && !manualLink) {
     try {
       const full = await prisma.meeting.findUnique({ where: { id: m.id } });
-      const teams = await createTeamsEvent(ownerId, await teamsPayload({ ...full, attendeeIds: uniqueAttendees }, ownerId));
+      const teams = await createTeamsEvent(ownerId, teamsPayload(full));
       if (teams?.joinUrl) {
         await prisma.meeting.update({ where: { id: m.id }, data: { meetingLink: teams.joinUrl, msEventId: teams.id } });
       } else {
@@ -146,8 +147,11 @@ export async function create(ownerId, body) {
     }
   }
 
+  // Email the calendar invite to every attendee (Outlook or Google Calendar).
+  const invited = await sendMeetingInvites(m.id).catch((e) => { console.error('[invites] create', e.message); return null; });
+
   const shaped = await get(m.id);
-  return teamsWarning ? { ...shaped, teamsWarning } : shaped;
+  return { ...shaped, ...(teamsWarning ? { teamsWarning } : {}), ...(invited ? { invited } : {}) };
 }
 
 const canManage = (meeting, user) => meeting.ownerId === user.id || canAdmin(user);
@@ -164,11 +168,12 @@ export async function update(user, id, body) {
   const attendeeIds = [...new Set([existing.ownerId, ...(body.attendeeIds || existing.attendees.map((a) => a.userId))])];
   const rec = recurEndFields({ recurring: body.recurring ?? existing.recurring, recurEnd: body.recurEnd, recurUntil: body.recurUntil, recurCount: body.recurCount });
 
-  // Replace attendee set.
+  // Replace attendee set. Bump the invite SEQUENCE so calendars accept the edit.
   await prisma.meetingAttendee.deleteMany({ where: { meetingId: id } });
   await prisma.meeting.update({
     where: { id },
     data: {
+      inviteSeq: { increment: 1 },
       title: (body.title ?? existing.title).trim() || existing.title,
       date: body.date ?? existing.date,
       time: body.time ?? existing.time,
@@ -191,7 +196,7 @@ export async function update(user, id, body) {
       // No auto-Teams needed now — cancel any event we'd created.
       if (existing.msEventId) { await deleteTeamsEvent(existing.ownerId, existing.msEventId); await prisma.meeting.update({ where: { id }, data: { msEventId: null } }); }
     } else {
-      const payload = await teamsPayload({ ...m, attendeeIds }, existing.ownerId);
+      const payload = teamsPayload(m);
       if (existing.msEventId) {
         const t = await updateTeamsEvent(existing.ownerId, existing.msEventId, payload);
         if (t?.joinUrl) await prisma.meeting.update({ where: { id }, data: { meetingLink: t.joinUrl } });
@@ -205,8 +210,11 @@ export async function update(user, id, body) {
     teamsWarning = e.message || 'Could not update the Teams meeting.';
   }
 
+  // Re-send the invite (bumped SEQUENCE) so attendees' calendars pick up the edit.
+  const invited = await sendMeetingInvites(id).catch((e) => { console.error('[invites] update', e.message); return null; });
+
   const shaped = await get(id);
-  return teamsWarning ? { ...shaped, teamsWarning } : shaped;
+  return { ...shaped, ...(teamsWarning ? { teamsWarning } : {}), ...(invited ? { invited } : {}) };
 }
 
 // Cancel a meeting — deletes the Teams event (sending cancellations) then the
@@ -215,6 +223,8 @@ export async function remove(user, id) {
   const m = await prisma.meeting.findUnique({ where: { id } });
   if (!m) throw new ApiError(404, 'Meeting not found');
   if (!canManage(m, user)) throw new ApiError(403, 'Only the chair (or an admin) can cancel this meeting');
+  // Send calendar cancellations before deleting (needs the attendees still on record).
+  await sendMeetingInvites(id, { method: 'CANCEL' }).catch((e) => console.error('[invites] cancel', e.message));
   if (m.msEventId) await deleteTeamsEvent(m.ownerId, m.msEventId);
   await prisma.meeting.delete({ where: { id } });
   return { ok: true };

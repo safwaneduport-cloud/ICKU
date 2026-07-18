@@ -10,15 +10,20 @@ import { changeOwnPassword } from '../api/credentials.api.js';
 import { getMicrosoftStatus, getMicrosoftConnectUrl, disconnectMicrosoft } from '../api/integrations.api.js';
 import { groupByDept } from '../lib/orgGroups.js';
 
+// Mirrors COMPLETION_FIELDS on the server. eduportEmail is absent on purpose —
+// only ~14 staff have a mailbox, so requiring it would strand everyone else.
 const COMPLETION_KEYS = new Set([
-  'mobilePhone', 'personalEmail', 'dateOfBirth', 'gender', 'maritalStatus', 'bloodGroup', 'nationality',
+  'mobilePhone', 'googleEmail', 'dateOfBirth', 'gender', 'maritalStatus', 'bloodGroup', 'nationality',
   'currentAddrLine1', 'currentAddrCity', 'currentAddrState', 'currentAddrZip', 'fatherName', 'motherName',
 ]);
 
 const GROUPS = [
   { title: 'Contact', fields: [
     { k: 'mobilePhone', label: 'Mobile Phone' }, { k: 'workPhone', label: 'Work Phone' },
-    { k: 'homePhone', label: 'Home Phone' }, { k: 'personalEmail', label: 'Personal Email', type: 'email' },
+    { k: 'homePhone', label: 'Home Phone' },
+    // Notifications go to the Eduport address when there is one, otherwise Google.
+    { k: 'eduportEmail', label: 'Eduport Email ID', type: 'email', readOnly: true, hint: 'Set by HR · blank if you have no Eduport mailbox' },
+    { k: 'googleEmail', label: 'Google Mail ID', type: 'email', hint: 'Where ICKU emails you if you have no Eduport address' },
   ] },
   { title: 'Personal', fields: [
     { k: 'dateOfBirth', label: 'Date of Birth', type: 'date' }, { k: 'gender', label: 'Gender', master: 'gender' },
@@ -44,7 +49,9 @@ const GROUPS = [
     { k: 'pfNumber', label: 'PF Number' }, { k: 'uanNumber', label: 'UAN Number' },
   ] },
 ];
-const SELF_KEYS = GROUPS.flatMap((g) => g.fields.map((f) => f.k));
+// readOnly fields are displayed here but HR-owned, so they must never be sent
+// up as a self-edit — the server would reject them anyway.
+const SELF_KEYS = GROUPS.flatMap((g) => g.fields.filter((f) => !f.readOnly).map((f) => f.k));
 
 const LOCKED = [
   ['employeeNumber', 'Employee Number'], ['jobTitle', 'Job Title'], ['tier', 'Tier'],
@@ -173,15 +180,23 @@ export default function Profile() {
               const pending = empty && COMPLETION_KEYS.has(f.k);
               return (
                 <label key={f.k} className="block text-sm">
-                  <span className="text-ink-soft">{f.label}{COMPLETION_KEYS.has(f.k) && <span className="text-brick"> *</span>}</span>
+                  <span className="text-ink-soft">
+                    {f.label}
+                    {COMPLETION_KEYS.has(f.k) && <span className="text-brick"> *</span>}
+                    {f.readOnly && <span className="ml-1 text-[10px] text-ink-soft/70">🔒</span>}
+                  </span>
                   <div className="mt-1">
                     {f.master || f.options ? (
                       <MiniSelect field={f} value={form[f.k]} onChange={(v) => set(f.k, v)} invalid={pending} />
+                    ) : f.readOnly ? (
+                      <input type="text" value={form[f.k] || '—'} readOnly disabled
+                        className="w-full cursor-not-allowed rounded-lg border border-line bg-paper px-3 py-2 text-sm text-ink-soft" />
                     ) : (
                       <input type={f.type || 'text'} value={form[f.k] || ''} onChange={(e) => set(f.k, e.target.value)}
                         className={`w-full rounded-lg border px-3 py-2 text-sm outline-none focus:border-pine ${pending ? 'border-brick bg-brick/5' : 'border-line'}`} />
                     )}
                   </div>
+                  {f.hint && <span className="mt-0.5 block text-[10px] leading-tight text-ink-soft/70">{f.hint}</span>}
                 </label>
               );
             })}
@@ -255,13 +270,13 @@ export default function Profile() {
         </button>
       </div>
 
-      {viewingSelf && <Connections />}
+      {viewingSelf && <Connections googleEmail={form.googleEmail} />}
       {viewingSelf && <ChangePassword />}
     </div>
   );
 }
 
-function Connections() {
+function Connections({ googleEmail }) {
   const qc = useQueryClient();
   const [params, setParams] = useSearchParams();
   const [busy, setBusy] = useState(false);
@@ -323,8 +338,24 @@ function Connections() {
         )}
       </div>
 
+      {/* Google needs no sign-in: ICKU emails a calendar invite to your Google
+          Mail ID and it adds itself to Google Calendar. This is how the ~656
+          staff without a Microsoft mailbox get their meetings. */}
+      <div className="mt-3 flex flex-wrap items-center justify-between gap-3 rounded-xl border border-line p-3">
+        <div className="flex items-center gap-3">
+          <span className="flex h-9 w-9 items-center justify-center rounded-lg bg-[#FCE8E6] text-lg">📆</span>
+          <div>
+            <div className="text-sm font-medium text-ink">Google Calendar</div>
+            {googleEmail
+              ? <div className="text-xs text-sage">Invites sent to {googleEmail}</div>
+              : <div className="text-xs text-ochre">Add your Google Mail ID in Contact above to receive invites</div>}
+          </div>
+        </div>
+        <span className="text-xs text-ink-soft">No sign-in needed</span>
+      </div>
+
       {note && <p className="mt-2 text-sm text-ink-soft">{note}</p>}
-      <p className="mt-2 text-[11px] text-ink-soft">You sign in on Microsoft’s own page — ICKU never sees your password, only calendar access you can revoke anytime.</p>
+      <p className="mt-2 text-[11px] text-ink-soft">You sign in on Microsoft’s own page — ICKU never sees your password, only calendar access you can revoke anytime. Meeting invites are emailed to your Eduport mailbox if you have one, otherwise your Google Mail ID.</p>
     </section>
   );
 }

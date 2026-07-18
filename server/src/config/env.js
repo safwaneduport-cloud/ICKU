@@ -34,4 +34,12 @@ export const env = {
     // Optional override; otherwise derived from the request host at runtime.
     redirectUri: process.env.MS_REDIRECT_URI || '',
   },
+  // Outbound email via Microsoft Graph (application Mail.Send). Sends from a real
+  // Eduport mailbox so meeting invites reach Gmail users' Google Calendars as
+  // .ics. Reuses the Microsoft app credentials above (client-credentials flow).
+  mail: {
+    sender: process.env.MAIL_SENDER || 'hr@eduport.app',
+  },
+  // Public base URL, used to build absolute links inside emails.
+  appBaseUrl: process.env.APP_BASE_URL || 'https://icku.onrender.com',
 };

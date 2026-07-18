@@ -8,7 +8,9 @@ import { canAdmin } from '../../lib/access.js';
 // (Employee Number, Department, Job Title, Tier, Reporting Manager, policies)
 // are deliberately excluded.
 export const SELF_EDITABLE = [
-  'mobilePhone', 'workPhone', 'homePhone', 'personalEmail', 'dateOfBirth', 'gender', 'maritalStatus',
+  // googleEmail is self-service (people know their own gmail); eduportEmail is
+  // HR-managed below, since it mirrors the real mailbox only ~14 staff have.
+  'mobilePhone', 'workPhone', 'homePhone', 'googleEmail', 'dateOfBirth', 'gender', 'maritalStatus',
   'marriageDate', 'bloodGroup', 'physicallyHandicapped', 'nationality',
   'currentAddrLine1', 'currentAddrLine2', 'currentAddrCity', 'currentAddrState', 'currentAddrZip', 'currentAddrCountry',
   'permanentAddrLine1', 'permanentAddrLine2', 'permanentAddrCity', 'permanentAddrState', 'permanentAddrZip', 'permanentAddrCountry',
@@ -16,14 +18,17 @@ export const SELF_EDITABLE = [
 ];
 // Extra fields only HR may change (plain columns; department/reportsTo handled separately).
 const HR_EDITABLE = [
+  'eduportEmail',
   'firstName', 'middleName', 'lastName', 'displayName', 'secondaryJobTitle', 'subDepartment',
   'location', 'country', 'dottedLineManager', 'leavePlan', 'band', 'payGrade', 'timeType', 'workerType',
   'shiftPolicy', 'weeklyOffPolicy', 'attendanceTrackingPolicy', 'attendanceCaptureScheme', 'holidayList',
   'expensePolicy', 'noticePeriod', 'employmentStatus',
 ];
 // The set a "complete" profile should have (drives the completion %).
+// eduportEmail is deliberately absent — only ~14 staff have one, so requiring it
+// would leave everyone else permanently "incomplete".
 const COMPLETION_FIELDS = [
-  ['mobilePhone', 'Mobile Phone'], ['personalEmail', 'Personal Email'], ['dateOfBirth', 'Date of Birth'],
+  ['mobilePhone', 'Mobile Phone'], ['googleEmail', 'Google Mail ID'], ['dateOfBirth', 'Date of Birth'],
   ['gender', 'Gender'], ['maritalStatus', 'Marital Status'], ['bloodGroup', 'Blood Group'], ['nationality', 'Nationality'],
   ['currentAddrLine1', 'Current Address'], ['currentAddrCity', 'City'], ['currentAddrState', 'State'], ['currentAddrZip', 'PIN Code'],
   ['fatherName', "Father's Name"], ['motherName', "Mother's Name"],

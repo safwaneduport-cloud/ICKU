@@ -150,7 +150,13 @@ model User {
   mobilePhone           String?
   workPhone             String?
   homePhone             String?
-  personalEmail         String?
+  personalEmail         String? // legacy: superseded by googleEmail/eduportEmail below; kept as the backfill source
+  // Where ICKU actually mails this person. `email` above is the account identity
+  // (unique, drives the username) and is a mix of domains, so it can't be trusted
+  // as a mailbox. eduportEmail is HR-managed and only ~14 staff have one;
+  // googleEmail is self-service. Delivery = eduportEmail || googleEmail.
+  eduportEmail          String?
+  googleEmail           String?
   currentAddrLine1      String?
   currentAddrLine2      String?
   currentAddrCity       String?
@@ -416,6 +422,7 @@ model EventTask {
   event         Event          @relation(fields: [eventId], references: [id], onDelete: Cascade)
   name          String
   dueOffset     Int? // days after the event trigger date
+  dueTime       String? // "HH:MM" 24h time-of-day for the due date; null = legacy (midnight)
   completed     Boolean        @default(false)
   completedLate Boolean        @default(false)
   sort          Int            @default(0)
@@ -540,6 +547,7 @@ model Meeting {
   mode      String            @default("offline") // offline | online | hybrid
   meetingLink String?         // Zoom/Teams/Meet link (for online/hybrid)
   msEventId String?           // Graph event id when we created a real Teams meeting
+  inviteSeq Int    @default(0) // .ics SEQUENCE; bumped each edit so calendars accept the update
 
   // Physical room (offline/hybrid only)
   room      String? // Prana | Collab | Synergy | Others

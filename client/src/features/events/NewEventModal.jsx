@@ -1,9 +1,10 @@
 import { useRef, useState } from 'react';
 import { useMutation, useQueryClient } from '@tanstack/react-query';
 import { createEvent } from '../../api/events.api.js';
-import { MONTHS } from './meta.js';
+import { MONTHS, anchorDate } from './meta.js';
 import AssignPicker from './AssignPicker.jsx';
 import SopFields from './SopFields.jsx';
+import DueDatePicker from './DueDatePicker.jsx';
 
 // Shared by Tasks & Events and the Institutional Calendar (which prefills the
 // date from the clicked day). The footer is sticky so Create is always reachable,
@@ -16,12 +17,12 @@ export default function NewEventModal({ onClose, onCreated, initialMonth, initia
   const [day, setDay] = useState(initialDay ?? 1);
   const [writeup, setWriteup] = useState('');
   const [sop, setSop] = useState([]); // SOP PDFs + links -> event attachments
-  const [tasks, setTasks] = useState([{ name: '', assignees: [], dueOffset: 0 }]);
+  const [tasks, setTasks] = useState([{ name: '', assignees: [], dueOffset: null, dueTime: null }]);
   const taskRefs = useRef([]);
 
   const setTask = (i, patch) => setTasks((ts) => ts.map((t, idx) => (idx === i ? { ...t, ...patch } : t)));
   const addTask = (focusIt = true) => {
-    setTasks((ts) => [...ts, { name: '', assignees: [], dueOffset: 0 }]);
+    setTasks((ts) => [...ts, { name: '', assignees: [], dueOffset: null, dueTime: null }]);
     if (focusIt) setTimeout(() => taskRefs.current[tasks.length]?.focus(), 0);
   };
 
@@ -34,10 +35,13 @@ export default function NewEventModal({ onClose, onCreated, initialMonth, initia
       triggerDay: dated ? Math.min(31, Math.max(1, parseInt(day, 10) || 1)) : null,
       writeup: writeup.trim(),
       attachments: sop,
-      // dueOffset may be '' while the field is being edited — settle it to a number here.
+      // Due date is stored as an offset from the trigger date (+ optional time),
+      // so a yearly event's tasks still land correctly next cycle. TBD events
+      // have no anchor, so their tasks carry no due date.
       tasks: tasks.filter((t) => t.name.trim()).map((t) => ({
         name: t.name.trim(), assignees: t.assignees,
-        dueOffset: dated ? (parseInt(t.dueOffset, 10) || 0) : null,
+        dueOffset: dated ? (t.dueOffset ?? null) : null,
+        dueTime: dated ? (t.dueTime ?? null) : null,
       })),
     }),
     onSuccess: () => { qc.invalidateQueries(); onCreated?.(); onClose(); },
@@ -107,29 +111,21 @@ export default function NewEventModal({ onClose, onCreated, initialMonth, initia
                       className="text-xs text-ink-soft hover:text-brick">Remove</button>
                   )}
                 </div>
-                <div className="grid grid-cols-[1fr_auto] gap-2">
-                  <input
-                    ref={(el) => { taskRefs.current[i] = el; }}
-                    value={t.name}
-                    onChange={(e) => setTask(i, { name: e.target.value })}
-                    onKeyDown={(e) => { if (e.key === 'Enter') { e.preventDefault(); if (t.name.trim() && i === tasks.length - 1) addTask(); } }}
-                    placeholder="What needs doing?" className="min-w-0 rounded-lg border border-line bg-white px-3 py-2" />
-                  {dated && (
-                    <div className="flex items-center gap-1 whitespace-nowrap rounded-lg border border-line bg-white px-2 text-xs text-ink-soft">
-                      Due +
-                      <input
-                        // Deliberately type=text: for type=number React compares the DOM
-                        // value to state with loose equality ("012" == 12), so it skips the
-                        // rewrite and the stray leading zero sticks. Text compares strictly,
-                        // so state and the field can never drift apart.
-                        type="text" inputMode="numeric" value={t.dueOffset}
-                        onChange={(e) => setTask(i, { dueOffset: e.target.value.replace(/\D/g, '').replace(/^0+(?=\d)/, '') })}
-                        onFocus={(e) => e.target.select()}
-                        onBlur={() => { if (t.dueOffset === '') setTask(i, { dueOffset: '0' }); }}
-                        className="w-10 border-none bg-transparent text-center outline-none" /> d
-                    </div>
-                  )}
-                </div>
+                <input
+                  ref={(el) => { taskRefs.current[i] = el; }}
+                  value={t.name}
+                  onChange={(e) => setTask(i, { name: e.target.value })}
+                  onKeyDown={(e) => { if (e.key === 'Enter') { e.preventDefault(); if (t.name.trim() && i === tasks.length - 1) addTask(); } }}
+                  placeholder="What needs doing?" className="w-full rounded-lg border border-line bg-white px-3 py-2" />
+                {dated && (
+                  <div className="mt-2">
+                    <DueDatePicker
+                      anchor={anchorDate(month, Math.min(31, Math.max(1, parseInt(day, 10) || 1)))}
+                      value={{ dueOffset: t.dueOffset, dueTime: t.dueTime }}
+                      onChange={(patch) => setTask(i, patch)}
+                    />
+                  </div>
+                )}
                 <div className="mt-2"><AssignPicker value={t.assignees} onChange={(arr) => setTask(i, { assignees: arr })} /></div>
               </div>
             ))}

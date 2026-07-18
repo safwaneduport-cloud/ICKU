@@ -10,8 +10,20 @@ export function triggerDate(e) {
   return new Date(yr, e.triggerMonth - 1, e.triggerDay);
 }
 
-const effectiveDue = (task, trig) =>
-  trig ? new Date(trig.getTime() + (task.dueOffset || 0) * 86400000) : null;
+// The absolute Date a task is due: trigger date + offset days, at dueTime.
+// dueTime is null for legacy tasks — those keep the old midnight semantics so
+// their overdue state doesn't shift under them.
+export function effectiveDue(task, trig) {
+  // null offset = no due date set → not deadline-tracked. 0 = due on the event
+  // day (a real deadline), so the two must stay distinct.
+  if (!trig || task.dueOffset == null) return null;
+  const d = new Date(trig.getTime() + task.dueOffset * 86400000);
+  if (task.dueTime && /^\d{1,2}:\d{2}$/.test(task.dueTime)) {
+    const [h, m] = task.dueTime.split(':').map(Number);
+    d.setHours(h, m, 0, 0);
+  }
+  return d;
+}
 
 export const isTaskPastDue = (task, trig, today) => {
   const d = effectiveDue(task, trig);

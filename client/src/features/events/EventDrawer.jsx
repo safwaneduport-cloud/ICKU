@@ -2,7 +2,7 @@ import { useState } from 'react';
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query';
 import { useAuth } from '../../store/AuthContext.jsx';
 import { getEvent, toggleTask, updateEventSop } from '../../api/events.api.js';
-import { STATE, triggerLabel } from './meta.js';
+import { STATE, triggerLabel, dueLabel } from './meta.js';
 
 const triggerLabelDate = (d) => (d ? new Date(`${d}T00:00:00`).toLocaleDateString(undefined, { day: 'numeric', month: 'short' }) : '');
 import EventChat from '../messages/EventChat.jsx';
@@ -81,7 +81,7 @@ export default function EventDrawer({ id, onClose }) {
                         <div className={`text-sm ${t.completed ? 'text-ink-soft line-through' : ''}`}>{t.name}</div>
                         <div className="text-xs text-ink-soft">
                           {t.assignees.map((a) => a.name).join(', ') || 'Unassigned'}
-                          {t.dueOffset != null ? ` · due +${t.dueOffset}d` : ''}
+                          {dueLabel(e, t) ? ` · due ${dueLabel(e, t)}` : ''}
                           {t.completedLate ? ' · completed late' : ''}
                         </div>
                       </div>
