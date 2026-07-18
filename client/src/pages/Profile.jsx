@@ -22,7 +22,8 @@ const GROUPS = [
     { k: 'mobilePhone', label: 'Mobile Phone' }, { k: 'workPhone', label: 'Work Phone' },
     { k: 'homePhone', label: 'Home Phone' },
     // Notifications go to the Eduport address when there is one, otherwise Google.
-    { k: 'eduportEmail', label: 'Eduport Email ID', type: 'email', readOnly: true, hint: 'Set by HR · blank if you have no Eduport mailbox' },
+    // HR-set (hrOnly): editable when HR views the profile, read-only to the employee.
+    { k: 'eduportEmail', label: 'Eduport Email ID', type: 'email', hrOnly: true, hint: 'Set by HR · blank if you have no Eduport mailbox' },
     { k: 'googleEmail', label: 'Google Mail ID', type: 'email', hint: 'Where ICKU emails you if you have no Eduport address' },
   ] },
   { title: 'Personal', fields: [
@@ -49,9 +50,12 @@ const GROUPS = [
     { k: 'pfNumber', label: 'PF Number' }, { k: 'uanNumber', label: 'UAN Number' },
   ] },
 ];
-// readOnly fields are displayed here but HR-owned, so they must never be sent
-// up as a self-edit — the server would reject them anyway.
-const SELF_KEYS = GROUPS.flatMap((g) => g.fields.filter((f) => !f.readOnly).map((f) => f.k));
+// readOnly / hrOnly fields are shown here but not self-editable, so they must
+// never be sent up as a self-edit — the server would reject them anyway.
+const SELF_KEYS = GROUPS.flatMap((g) => g.fields.filter((f) => !f.readOnly && !f.hrOnly).map((f) => f.k));
+// Fields inside the self-facing groups that only HR may change (e.g. Eduport
+// Email ID). Included in the form + editable only when an HR user is viewing.
+const GROUP_HR_KEYS = GROUPS.flatMap((g) => g.fields.filter((f) => f.hrOnly).map((f) => f.k));
 
 const LOCKED = [
   ['employeeNumber', 'Employee Number'], ['jobTitle', 'Job Title'], ['tier', 'Tier'],
@@ -121,6 +125,7 @@ export default function Profile() {
       const init = {};
       for (const k of SELF_KEYS) init[k] = p.user[k] || '';
       if (isHr) {
+        for (const k of GROUP_HR_KEYS) init[k] = p.user[k] || '';
         for (const k of HR_KEYS) {
           if (k === 'department') init[k] = p.user.department?.name || '';
           else if (k === 'reportsToId') init[k] = p.user.reportsTo?.id || '';
@@ -178,18 +183,21 @@ export default function Profile() {
             {g.fields.map((f) => {
               const empty = !form[f.k];
               const pending = empty && COMPLETION_KEYS.has(f.k);
+              // hrOnly fields are editable to HR, locked to the employee.
+              const locked = f.readOnly || (f.hrOnly && !isHr);
               return (
                 <label key={f.k} className="block text-sm">
                   <span className="text-ink-soft">
                     {f.label}
                     {COMPLETION_KEYS.has(f.k) && <span className="text-brick"> *</span>}
-                    {f.readOnly && <span className="ml-1 text-[10px] text-ink-soft/70">🔒</span>}
+                    {locked && <span className="ml-1 text-[10px] text-ink-soft/70">🔒</span>}
+                    {f.hrOnly && isHr && <span className="ml-1 rounded bg-ochre-tint px-1.5 py-0.5 text-[9px] text-ochre">HR</span>}
                   </span>
                   <div className="mt-1">
                     {f.master || f.options ? (
                       <MiniSelect field={f} value={form[f.k]} onChange={(v) => set(f.k, v)} invalid={pending} />
-                    ) : f.readOnly ? (
-                      <input type="text" value={form[f.k] || '—'} readOnly disabled
+                    ) : locked ? (
+                      <input type="text" value={form[f.k] || p.user[f.k] || '—'} readOnly disabled
                         className="w-full cursor-not-allowed rounded-lg border border-line bg-paper px-3 py-2 text-sm text-ink-soft" />
                     ) : (
                       <input type={f.type || 'text'} value={form[f.k] || ''} onChange={(e) => set(f.k, e.target.value)}
