@@ -26,10 +26,13 @@ const msTime = (s) => (s ? s.slice(11, 16) : '');
 
 // One shape for both sources so the calendar + list treat them uniformly.
 function normalize(icku, ms) {
+  // Drop the Outlook copy of any meeting ICKU created in Teams — it's already
+  // in the icku list, so showing the mirror too would double it on the calendar.
+  const ickuMsIds = new Set(icku.map((m) => m.msEventId).filter(Boolean));
   const rows = [
     ...icku.map((m) => ({ kind: 'icku', id: m.id, date: m.date, time: m.time || '00:00', title: m.title,
       sub: `${m.owner.name} · ${m.attendeeCount} attendee${m.attendeeCount === 1 ? '' : 's'}`, tag: m.recurring, m })),
-    ...ms.map((e) => ({ kind: e.isOnlineMeeting ? 'teams' : 'outlook', id: e.id, date: (e.start || '').slice(0, 10),
+    ...ms.filter((e) => !ickuMsIds.has(e.id)).map((e) => ({ kind: e.isOnlineMeeting ? 'teams' : 'outlook', id: e.id, date: (e.start || '').slice(0, 10),
       time: e.allDay ? '00:00' : msTime(e.start), title: e.subject, allDay: e.allDay,
       sub: e.organizer || e.location || 'Outlook', link: e.joinUrl || e.webLink || '#', e })),
   ];

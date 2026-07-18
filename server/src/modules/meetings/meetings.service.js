@@ -102,7 +102,9 @@ export async function list(userId, scope) {
   });
   return meetings
     .filter((m) => scope !== 'mine' || m.ownerId === userId || m.attendees.some((a) => a.userId === userId))
-    .map((m) => ({ id: m.id, title: m.title, date: m.date, time: m.time, durationMin: m.durationMin, recurring: m.recurring, mode: m.mode, meetingLink: m.meetingLink, owner: m.owner, attendeeCount: m._count.attendees }));
+    // msEventId lets the calendar view drop the Outlook mirror of a meeting ICKU
+    // itself created in Teams, so it isn't shown twice.
+    .map((m) => ({ id: m.id, title: m.title, date: m.date, time: m.time, durationMin: m.durationMin, recurring: m.recurring, mode: m.mode, meetingLink: m.meetingLink, msEventId: m.msEventId, owner: m.owner, attendeeCount: m._count.attendees }));
 }
 
 export async function get(id) {
