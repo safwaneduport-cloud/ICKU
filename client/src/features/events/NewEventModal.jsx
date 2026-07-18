@@ -54,12 +54,12 @@ export default function NewEventModal({ onClose, onCreated, initialMonth, initia
       {/* header / scrolling body / footer — so the footer can never cover the form */}
       <div className="flex max-h-[90vh] w-full max-w-lg flex-col overflow-hidden rounded-2xl bg-white" onClick={(e) => e.stopPropagation()}>
         <div className="shrink-0 border-b border-line px-6 pb-3 pt-6">
-          <h3 className="font-serif text-lg font-semibold">New event</h3>
+          <h3 className="font-serif text-lg font-semibold">New project</h3>
           <p className="mt-1 text-xs text-ink-soft">Unless you're the CEO, this is sent to your reporting manager for approval.</p>
         </div>
 
         <div className="flex-1 overflow-y-auto px-6 py-4">
-        <label className="block text-sm"><span className="text-ink-soft">Event name</span>
+        <label className="block text-sm"><span className="text-ink-soft">Project name</span>
           <input value={name} autoFocus onChange={(e) => setName(e.target.value)}
             onKeyDown={(e) => { if (e.key === 'Enter') { e.preventDefault(); taskRefs.current[0]?.focus(); } }}
             className="mt-1 w-full rounded-lg border border-line px-3 py-2" placeholder="e.g. Orientation Day" />
@@ -142,7 +142,7 @@ export default function NewEventModal({ onClose, onCreated, initialMonth, initia
         <div className="flex shrink-0 items-center justify-end gap-2 border-t border-line bg-white px-6 py-3">
           <button onClick={onClose} className="rounded-lg border border-line px-4 py-2 text-sm">Cancel</button>
           <button onClick={() => mut.mutate()} disabled={!canSave} className="rounded-lg bg-pine px-4 py-2 text-sm font-medium text-white disabled:opacity-60">
-            {mut.isPending ? 'Creating…' : 'Create event'}
+            {mut.isPending ? 'Creating…' : 'Create project'}
           </button>
         </div>
       </div>

@@ -22,8 +22,8 @@ export default function Events() {
   return (
     <div className="space-y-5">
       <div className="flex flex-wrap items-center justify-between gap-2">
-        <h1 className="font-serif text-3xl font-bold text-pine">Tasks &amp; Events</h1>
-        <button onClick={() => setShowNew(true)} className="rounded-lg bg-pine px-4 py-2 text-sm font-medium text-white hover:opacity-90">+ New event</button>
+        <h1 className="font-serif text-3xl font-bold text-pine">Projects and Tasks</h1>
+        <button onClick={() => setShowNew(true)} className="rounded-lg bg-pine px-4 py-2 text-sm font-medium text-white hover:opacity-90">+ New project</button>
       </div>
 
       <div className="flex flex-wrap items-center gap-2">
@@ -40,7 +40,7 @@ export default function Events() {
 
       <div className="overflow-hidden rounded-2xl border border-line bg-white">
         {q.isLoading && <p className="px-4 py-6 text-ink-soft">Loading…</p>}
-        {!q.isLoading && rows.length === 0 && <p className="px-4 py-6 text-ink-soft">No events match this filter.</p>}
+        {!q.isLoading && rows.length === 0 && <p className="px-4 py-6 text-ink-soft">No projects match this filter.</p>}
         {rows.map((e) => (
           // Phone: date and state ride above the name so the title gets the full
           // width. From sm up it's the original three-column row.

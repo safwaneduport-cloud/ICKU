@@ -42,7 +42,7 @@ export default function Overview() {
         <h2 className="mb-2 text-xs font-semibold uppercase tracking-wide text-ink-soft">Needs your attention</h2>
         <div className="grid grid-cols-2 gap-3 sm:grid-cols-3 lg:grid-cols-5">
           <AttentionCard value={a.myOverdueTasks} label="Overdue tasks" to="/events" accent />
-          <AttentionCard value={a.eventsToApprove} label="Events to approve" to="/approvals" accent />
+          <AttentionCard value={a.eventsToApprove} label="Projects to approve" to="/approvals" accent />
           {a.hasReports && <AttentionCard value={a.leaveToApprove} label="Leave to approve" to="/leave" accent />}
           {a.hasReports && <AttentionCard value={a.expensesToApprove} label="Expenses to approve" to="/expenses" accent />}
           <AttentionCard
@@ -103,7 +103,7 @@ export default function Overview() {
         <h2 className="font-serif text-lg font-semibold">Upcoming</h2>
         <div className="mt-3 grid gap-4 sm:grid-cols-2">
           <div>
-            <div className="text-xs font-semibold uppercase tracking-wide text-ink-soft">Events · next 30 days</div>
+            <div className="text-xs font-semibold uppercase tracking-wide text-ink-soft">Projects · next 30 days</div>
             <div className="mt-2 space-y-1.5">
               {d.upcoming.eventsNext30.length === 0 && <p className="text-sm text-ink-soft">Nothing scheduled.</p>}
               {d.upcoming.eventsNext30.map((e) => (

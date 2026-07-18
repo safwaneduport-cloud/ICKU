@@ -13,7 +13,7 @@ const NAV_GROUPS = [
   {
     title: 'Work',
     items: [
-      { to: '/events', label: 'Tasks & Events', stars: 2 },
+      { to: '/events', label: 'Projects and Tasks', stars: 2 },
       { to: '/calendar', label: 'Institutional Calendar', stars: 2 },
       { to: '/okrs', label: 'OKRs & Checklists', stars: 2 },
       { to: '/meetings', label: 'Meetings', stars: 1 },

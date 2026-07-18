@@ -16,7 +16,7 @@ export default function Approvals() {
   return (
     <div className="space-y-5">
       <h1 className="font-serif text-3xl font-bold text-pine">Approvals</h1>
-      <p className="text-sm text-ink-soft">Events created by your team, waiting for your sign-off.</p>
+      <p className="text-sm text-ink-soft">Projects created by your team, waiting for your sign-off.</p>
 
       {q.isLoading && <p className="text-ink-soft">Loading…</p>}
       {!q.isLoading && rows.length === 0 && (

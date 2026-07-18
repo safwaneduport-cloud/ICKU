@@ -462,10 +462,10 @@ function EventTagPicker({ value, onChange }) {
     <div>
       <input
         value={q} onChange={(e) => { setQ(e.target.value); setOpen(true); }} onFocus={() => setOpen(true)}
-        placeholder="Search events by keyword…" className="inp" />
+        placeholder="Search projects by keyword…" className="inp" />
       {open && (
         <div className="mt-1 max-h-44 overflow-y-auto rounded-lg border border-line bg-white">
-          {matches.length === 0 && <p className="px-3 py-2 text-xs text-ink-soft">No matching events.</p>}
+          {matches.length === 0 && <p className="px-3 py-2 text-xs text-ink-soft">No matching projects.</p>}
           {matches.map((e) => (
             <button key={e.id} type="button" onClick={() => { onChange(e.id); setOpen(false); }}
               className="block w-full px-3 py-1.5 text-left text-sm hover:bg-pine-tint">
@@ -595,7 +595,7 @@ function MeetingModal({ recurrences, rooms = [], meeting, initialDate, onClose, 
           )}
 
           <div className="mt-3 text-sm">
-            <span className="text-ink-soft">Tag an event <span className="text-xs">(optional)</span></span>
+            <span className="text-ink-soft">Tag a project <span className="text-xs">(optional)</span></span>
             <div className="mt-1"><EventTagPicker value={f.eventId} onChange={(id) => set('eventId', id)} /></div>
           </div>
 

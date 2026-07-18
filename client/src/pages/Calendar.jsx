@@ -54,7 +54,7 @@ export default function Calendar() {
       <div className="flex flex-wrap items-center justify-between gap-3">
         <div>
           <h1 className="font-serif text-3xl font-bold text-pine">Institutional Calendar</h1>
-          <p className="text-sm text-ink-soft">Every event on its trigger date across the {CYCLE_START}–{String(CYCLE_START + 1).slice(2)} academic year. Click any day to plan a new event.</p>
+          <p className="text-sm text-ink-soft">Every project on its trigger date across the {CYCLE_START}–{String(CYCLE_START + 1).slice(2)} academic year. Click any day to plan a new project.</p>
         </div>
         <div className="flex items-center gap-1">
           <button onClick={() => setIdx((i) => Math.max(0, i - 1))} disabled={idx === 0}
@@ -73,7 +73,7 @@ export default function Calendar() {
             <span className="h-2.5 w-2.5 rounded-full" style={{ background: m.c }} />{m.label}
           </span>
         ))}
-        <span className="ml-auto text-ink-soft">{monthCount} event{monthCount === 1 ? '' : 's'} this month</span>
+        <span className="ml-auto text-ink-soft">{monthCount} project{monthCount === 1 ? '' : 's'} this month</span>
       </div>
 
       <div className="grid gap-4 lg:grid-cols-[1fr_16rem]">
@@ -116,7 +116,7 @@ export default function Calendar() {
               const list = byDay.get(ymd(date)) || [];
               const isToday = date.toDateString() === today.toDateString();
               return (
-                <button key={i} onClick={() => setNewFor({ month, day: d })} title="Add an event on this day"
+                <button key={i} onClick={() => setNewFor({ month, day: d })} title="Add a project on this day"
                   className="group min-h-[6.5rem] border-b border-r border-line/50 p-1.5 text-left align-top hover:bg-pine-tint/40">
                   <div className="flex items-center justify-between">
                     <span className={`flex h-6 w-6 items-center justify-center rounded-full text-xs ${isToday ? 'bg-pine font-bold text-white' : 'text-ink-soft'}`}>{d}</span>
@@ -190,7 +190,7 @@ export default function Calendar() {
             </div>
             <button onClick={() => { setNewFor({ month, day: dayFor }); setDayFor(null); }}
               className="mt-3 w-full rounded-lg bg-pine py-2.5 text-sm font-medium text-white">
-              ＋ New event on this day
+              ＋ New project on this day
             </button>
           </div>
         </div>

@@ -55,7 +55,7 @@ export default function EventChat({ eventId }) {
       </div>
       {cid && (
         <div className="mt-3">
-          <MessageComposer onSend={(p) => send.mutateAsync(p)} users={userOpts} placeholder="Message this event…" />
+          <MessageComposer onSend={(p) => send.mutateAsync(p)} users={userOpts} placeholder="Message this project…" />
         </div>
       )}
     </section>

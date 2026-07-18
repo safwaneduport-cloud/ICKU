@@ -23,7 +23,7 @@ function Grid({ onOpen }) {
   return (
     <div className="space-y-5">
       <h1 className="font-serif text-3xl font-bold text-pine">Workspaces</h1>
-      <p className="text-sm text-ink-soft">Each department's people, events and knowledge in one place.</p>
+      <p className="text-sm text-ink-soft">Each department's people, projects and knowledge in one place.</p>
       <div className="grid grid-cols-1 gap-3 sm:grid-cols-2 lg:grid-cols-3">
         {(q.data || []).map((w) => (
           <button key={w.id} onClick={() => onOpen(w.id)} className="rounded-2xl border border-line bg-white p-5 text-left hover:border-pine">
@@ -33,7 +33,7 @@ function Grid({ onOpen }) {
             </div>
             <div className="mt-3 flex gap-4 text-sm text-ink-soft">
               <span><strong className="text-ink">{w.members}</strong> people</span>
-              <span><strong className="text-ink">{w.events}</strong> events</span>
+              <span><strong className="text-ink">{w.events}</strong> projects</span>
               <span><strong className="text-ink">{w.docs}</strong> docs</span>
             </div>
           </button>
@@ -71,9 +71,9 @@ function Hub({ deptId, onBack }) {
         </section>
 
         <section className="rounded-2xl border border-line bg-white p-5">
-          <div className="text-xs font-semibold uppercase tracking-wide text-ink-soft">Events · {w.events.length}</div>
+          <div className="text-xs font-semibold uppercase tracking-wide text-ink-soft">Projects · {w.events.length}</div>
           <div className="mt-3 space-y-2">
-            {w.events.length === 0 && <p className="text-sm text-ink-soft">No events.</p>}
+            {w.events.length === 0 && <p className="text-sm text-ink-soft">No projects.</p>}
             {w.events.map((e) => {
               const s = STATE[e.state] || STATE.upcoming;
               return (

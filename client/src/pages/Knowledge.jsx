@@ -91,7 +91,7 @@ function DocDrawer({ id, onClose }) {
               <a href={d.link} target="_blank" rel="noreferrer" className="mt-4 block rounded-lg border border-line bg-white px-3 py-2 text-sm hover:border-pine">🔗 {d.link}</a>
             )}
             {d.linkedEvent && (
-              <div className="mt-4 rounded-lg bg-pine-tint px-3 py-2 text-sm text-pine">Linked event · {d.linkedEvent.name}</div>
+              <div className="mt-4 rounded-lg bg-pine-tint px-3 py-2 text-sm text-pine">Linked project · {d.linkedEvent.name}</div>
             )}
             {Array.isArray(d.attachments) && d.attachments.length > 0 && (
               <div className="mt-4">

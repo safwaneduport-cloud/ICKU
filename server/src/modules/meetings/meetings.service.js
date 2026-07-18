@@ -75,7 +75,7 @@ function roomFields(mode, { room, roomOther }) {
 async function cleanEventId(eventId) {
   if (!eventId) return null;
   const e = await prisma.event.findUnique({ where: { id: eventId }, select: { id: true } });
-  if (!e) throw new ApiError(400, 'That event no longer exists');
+  if (!e) throw new ApiError(400, 'That project no longer exists');
   return e.id;
 }
 

@@ -70,7 +70,7 @@ export async function list(user) {
 
   events.forEach((e) => {
     items.push({ id: `event-${e.id}`, kind: 'approval', actionable: true, at: e.createdAt,
-      title: `Approve event: ${e.name}`, sub: `Raised by ${e.owner?.name || '—'}`, link: '/approvals' });
+      title: `Approve project: ${e.name}`, sub: `Raised by ${e.owner?.name || '—'}`, link: '/approvals' });
   });
 
   leaves.forEach((l) => {

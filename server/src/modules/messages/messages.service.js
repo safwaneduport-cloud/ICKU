@@ -367,7 +367,7 @@ export async function openEventConversation(userId, eventId) {
     where: { id: eventId },
     include: { tasks: { include: { assignees: { select: { userId: true } } } } },
   });
-  if (!event) throw new ApiError(404, 'Event not found');
+  if (!event) throw new ApiError(404, 'Project not found');
 
   const existing = await prisma.conversation.findUnique({ where: { eventId }, select: { id: true } });
   if (existing) return existing;

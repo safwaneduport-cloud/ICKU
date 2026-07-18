@@ -84,7 +84,7 @@ export default function DueDatePicker({ anchor, value, onChange }) {
                     isSel ? 'bg-pine font-semibold text-white'
                       : isAnchor ? 'bg-pine-tint text-pine' : 'text-ink hover:bg-paper'
                   }`}
-                  title={isAnchor ? 'Event date' : undefined}
+                  title={isAnchor ? 'Project date' : undefined}
                 >
                   {d}
                 </button>

@@ -84,12 +84,12 @@ export default function Messages() {
             empty="No direct messages yet"
           />
           <RailSection
-            title="Event messages"
+            title="Project messages"
             items={events}
             selectedId={selectedId}
             onSelect={setSelectedId}
             renderIcon={() => <span>🗓</span>}
-            empty="No event chats yet — join one from any event."
+            empty="No project chats yet — join one from any project."
           />
         </div>
       </aside>
@@ -205,7 +205,7 @@ function ChatPane({ conversationId, users, onOpenThread, onOpenProfile, onBack }
           </div>
           {c && (
             <div className="truncate text-xs text-ink-soft">
-              {c.type === 'dm' ? 'Direct message' : c.type === 'event' ? `Event chat · ${c.members.length} people` : `${c.members.length} members`}
+              {c.type === 'dm' ? 'Direct message' : c.type === 'event' ? `Project chat · ${c.members.length} people` : `${c.members.length} members`}
             </div>
           )}
         </div>

@@ -101,7 +101,7 @@ export async function get(id) {
       },
     },
   });
-  if (!e) throw new ApiError(404, 'Event not found');
+  if (!e) throw new ApiError(404, 'Project not found');
   return { ...shape(e), attachments: e.attachments, comments: e.comments, meetings: e.meetings };
 }
 
@@ -144,9 +144,9 @@ export async function create(creator, payload) {
 // Edit an event's SOP after the fact — write-up, PDF and link. Owner/creator/admin.
 export async function updateSop(actor, id, { writeup, attachments } = {}) {
   const e = await prisma.event.findUnique({ where: { id }, select: { id: true, ownerId: true, createdById: true } });
-  if (!e) throw new ApiError(404, 'Event not found');
+  if (!e) throw new ApiError(404, 'Project not found');
   if (e.ownerId !== actor.id && e.createdById !== actor.id && !canAdmin(actor)) {
-    throw new ApiError(403, 'Only the event owner (or an admin) can edit its SOP');
+    throw new ApiError(403, 'Only the project owner (or an admin) can edit its SOP');
   }
 
   if (writeup !== undefined) {
@@ -164,15 +164,15 @@ export async function updateSop(actor, id, { writeup, attachments } = {}) {
 
 export async function decide(id, approverId, decision) {
   const e = await prisma.event.findUnique({ where: { id } });
-  if (!e) throw new ApiError(404, 'Event not found');
-  if (e.approval !== 'pending') throw new ApiError(409, 'Event is not pending approval');
+  if (!e) throw new ApiError(404, 'Project not found');
+  if (e.approval !== 'pending') throw new ApiError(409, 'Project is not pending approval');
   if (e.approverId !== approverId) throw new ApiError(403, 'Only the assigned approver can decide this');
   return prisma.event.update({ where: { id }, data: { approval: decision } });
 }
 
 export async function changeOwner(id, approverId, ownerId) {
   const e = await prisma.event.findUnique({ where: { id } });
-  if (!e) throw new ApiError(404, 'Event not found');
+  if (!e) throw new ApiError(404, 'Project not found');
   if (e.approverId !== approverId && e.ownerId !== approverId) {
     throw new ApiError(403, 'Only the approver or current owner can reassign');
   }
@@ -194,7 +194,7 @@ export async function toggleTask(taskId, userId) {
   if (!task) throw new ApiError(404, 'Task not found');
   const isAssignee = task.assignees.some((a) => a.userId === userId);
   const isOwner = task.event.ownerId === userId;
-  if (!isAssignee && !isOwner) throw new ApiError(403, 'Only assignees or the event owner can update this task');
+  if (!isAssignee && !isOwner) throw new ApiError(403, 'Only assignees or the project owner can update this task');
 
   const nowCompleted = !task.completed;
   const trig = triggerDate(task.event);
@@ -207,7 +207,7 @@ export async function toggleTask(taskId, userId) {
 
 export async function addComment(eventId, authorId, body, parentId) {
   if (!body?.trim()) throw new ApiError(400, 'Comment cannot be empty');
-  await prisma.event.findUniqueOrThrow({ where: { id: eventId } }).catch(() => { throw new ApiError(404, 'Event not found'); });
+  await prisma.event.findUniqueOrThrow({ where: { id: eventId } }).catch(() => { throw new ApiError(404, 'Project not found'); });
   return prisma.eventComment.create({
     data: { eventId, authorId, body: body.trim(), parentId: parentId || null },
     include: { author: { select: { id: true, name: true } } },

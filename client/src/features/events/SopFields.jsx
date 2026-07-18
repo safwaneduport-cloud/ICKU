@@ -44,7 +44,7 @@ export default function SopFields({ writeup, onWriteup, attachments = [], onAtta
   return (
     <div>
       <textarea rows={2} value={writeup} onChange={(e) => onWriteup(e.target.value)}
-        className="w-full rounded-lg border border-line px-3 py-2" placeholder="How this event is run…" />
+        className="w-full rounded-lg border border-line px-3 py-2" placeholder="How this project is run…" />
 
       <div className="mt-2 flex flex-wrap items-center gap-2">
         <label className={`inline-flex cursor-pointer items-center gap-2 rounded-lg border px-3 py-1.5 text-sm ${busy ? 'opacity-60' : 'border-line hover:border-pine'}`}>
@@ -75,7 +75,7 @@ export default function SopFields({ writeup, onWriteup, attachments = [], onAtta
       )}
 
       {err && <p className="mt-1 text-xs text-brick">{err}</p>}
-      <p className="mt-1 text-[11px] text-ink-soft">Anything attached here also appears in the Knowledge Base as an SOP linked to this event.</p>
+      <p className="mt-1 text-[11px] text-ink-soft">Anything attached here also appears in the Knowledge Base as an SOP linked to this project.</p>
     </div>
   );
 }
