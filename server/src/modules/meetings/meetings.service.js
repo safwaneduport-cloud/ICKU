@@ -3,6 +3,7 @@ import { ApiError } from '../../middleware/errorHandler.js';
 import { createTeamsEvent, updateTeamsEvent, deleteTeamsEvent } from '../integrations/microsoft.service.js';
 import { canAdmin } from '../../lib/access.js';
 import { sendMeetingInvites } from './invites.js';
+import { deliveryAddressFor, MAIL_FIELDS } from '../../lib/mail-address.js';
 
 // Build the IST wall-clock start/end for a Teams event. UTC math is used purely
 // for arithmetic (IST has no DST); the timeZone is sent to Graph separately.
@@ -43,19 +44,25 @@ export const ROOMS = [
 const ROOM_IDS = ROOMS.map((r) => r.id);
 export const roomLabel = (m) => (!m.room ? null : m.room === 'Others' ? (m.roomOther || 'Other room') : m.room);
 
-// Build the Graph event body for a meeting (attendee emails resolved here).
-// Graph event body for the meeting. No attendees are forwarded to Outlook:
-// ICKU sends the calendar invites itself (see invites.js), routed to each
-// person's real mailbox, so nobody is double-invited and Gmail-only staff are
-// reached too. This event just mints the Teams link on the owner's own calendar.
-function teamsPayload(m) {
+// Build the Graph event body for a meeting, WITH its attendees — so Exchange
+// sends the invitations natively. That's reliable for both internal Outlook/Teams
+// mailboxes and external Gmail (iMIP), which a fabricated .ics is not. Each
+// attendee is invited at their real delivery address (eduport, else google).
+// ICKU only sends its own .ics when NO Teams event exists (see create/update).
+async function teamsPayload(m) {
+  const invitees = await prisma.user.findMany({
+    where: { id: { in: (m.attendeeIds || []).filter((id) => id !== m.ownerId) } },
+    select: MAIL_FIELDS,
+  });
   const { startDateTime, endDateTime } = istWindow(m.date, m.time, m.durationMin);
   return {
     subject: m.title,
     startDateTime, endDateTime,
     recurrence: graphRecurrence(m),
     location: roomLabel(m),
-    attendees: [],
+    attendees: invitees
+      .map((u) => ({ email: deliveryAddressFor(u), name: u.name }))
+      .filter((a) => a.email),
     bodyText: (m.agenda || []).length ? `Agenda:\n- ${m.agenda.join('\n- ')}` : '',
   };
 }
@@ -129,16 +136,18 @@ export async function create(ownerId, body) {
     },
   });
 
-  // Online/hybrid with no manually-pasted link → try to make a real Teams meeting
-  // on the owner's Outlook (and invite attendees). Non-fatal: the ICKU meeting
-  // stands even if the owner isn't connected or Graph errors — we just flag it.
+  // Online/hybrid with no manually-pasted link → make a real Teams meeting on the
+  // owner's Outlook WITH the attendees, so Exchange sends the invites. Non-fatal:
+  // the ICKU meeting stands even if the owner isn't connected or Graph errors.
   let teamsWarning = null;
+  let teamsCreated = false;
   if (cleanMode !== 'offline' && !manualLink) {
     try {
       const full = await prisma.meeting.findUnique({ where: { id: m.id } });
-      const teams = await createTeamsEvent(ownerId, teamsPayload(full));
+      const teams = await createTeamsEvent(ownerId, await teamsPayload({ ...full, attendeeIds: uniqueAttendees }));
       if (teams?.joinUrl) {
         await prisma.meeting.update({ where: { id: m.id }, data: { meetingLink: teams.joinUrl, msEventId: teams.id } });
+        teamsCreated = true;
       } else {
         teamsWarning = 'Connect your Microsoft account in Profile to auto-create a Teams link.';
       }
@@ -147,8 +156,12 @@ export async function create(ownerId, body) {
     }
   }
 
-  // Email the calendar invite to every attendee (Outlook or Google Calendar).
-  const invited = await sendMeetingInvites(m.id).catch((e) => { console.error('[invites] create', e.message); return null; });
+  // If a Teams event was created, Exchange already invited the attendees — don't
+  // also send an ICKU .ics (that would double-invite). Only ICKU-invite when
+  // there's no Teams event: offline meetings, pasted links, or an unconnected owner.
+  const invited = teamsCreated
+    ? { sent: uniqueAttendees.filter((id) => id !== ownerId).length, via: 'outlook' }
+    : await sendMeetingInvites(m.id).catch((e) => { console.error('[invites] create', e.message); return null; });
 
   const shaped = await get(m.id);
   return { ...shaped, ...(teamsWarning ? { teamsWarning } : {}), ...(invited ? { invited } : {}) };
@@ -191,18 +204,20 @@ export async function update(user, id, body) {
 
   const m = await prisma.meeting.findUnique({ where: { id } });
   let teamsWarning = null;
+  let teamsLive = false; // is there a Teams event now (so Exchange handles invites)?
   try {
     if (cleanMode === 'offline' || manualLink) {
-      // No auto-Teams needed now — cancel any event we'd created.
+      // No auto-Teams needed now — cancel any event we'd created (sends cancellations).
       if (existing.msEventId) { await deleteTeamsEvent(existing.ownerId, existing.msEventId); await prisma.meeting.update({ where: { id }, data: { msEventId: null } }); }
     } else {
-      const payload = teamsPayload(m);
+      const payload = await teamsPayload({ ...m, attendeeIds });
       if (existing.msEventId) {
         const t = await updateTeamsEvent(existing.ownerId, existing.msEventId, payload);
         if (t?.joinUrl) await prisma.meeting.update({ where: { id }, data: { meetingLink: t.joinUrl } });
+        teamsLive = true;
       } else {
         const t = await createTeamsEvent(existing.ownerId, payload);
-        if (t?.joinUrl) await prisma.meeting.update({ where: { id }, data: { meetingLink: t.joinUrl, msEventId: t.id } });
+        if (t?.joinUrl) { await prisma.meeting.update({ where: { id }, data: { meetingLink: t.joinUrl, msEventId: t.id } }); teamsLive = true; }
         else teamsWarning = 'Connect Microsoft in Profile to auto-create a Teams link.';
       }
     }
@@ -210,8 +225,11 @@ export async function update(user, id, body) {
     teamsWarning = e.message || 'Could not update the Teams meeting.';
   }
 
-  // Re-send the invite (bumped SEQUENCE) so attendees' calendars pick up the edit.
-  const invited = await sendMeetingInvites(id).catch((e) => { console.error('[invites] update', e.message); return null; });
+  // Exchange re-issues invites when the Teams event was updated; only ICKU-invite
+  // (bumped SEQUENCE) when there's no Teams event to carry the change.
+  const invited = teamsLive
+    ? { sent: attendeeIds.filter((uid) => uid !== existing.ownerId).length, via: 'outlook' }
+    : await sendMeetingInvites(id).catch((e) => { console.error('[invites] update', e.message); return null; });
 
   const shaped = await get(id);
   return { ...shaped, ...(teamsWarning ? { teamsWarning } : {}), ...(invited ? { invited } : {}) };
@@ -223,9 +241,13 @@ export async function remove(user, id) {
   const m = await prisma.meeting.findUnique({ where: { id } });
   if (!m) throw new ApiError(404, 'Meeting not found');
   if (!canManage(m, user)) throw new ApiError(403, 'Only the chair (or an admin) can cancel this meeting');
-  // Send calendar cancellations before deleting (needs the attendees still on record).
-  await sendMeetingInvites(id, { method: 'CANCEL' }).catch((e) => console.error('[invites] cancel', e.message));
-  if (m.msEventId) await deleteTeamsEvent(m.ownerId, m.msEventId);
+  // Deleting the Teams event makes Exchange send the cancellations. Only send our
+  // own .ics CANCEL when there's no Teams event (else attendees get two).
+  if (m.msEventId) {
+    await deleteTeamsEvent(m.ownerId, m.msEventId).catch((e) => console.error('[teams] cancel', e.message));
+  } else {
+    await sendMeetingInvites(id, { method: 'CANCEL' }).catch((e) => console.error('[invites] cancel', e.message));
+  }
   await prisma.meeting.delete({ where: { id } });
   return { ok: true };
 }
