@@ -1,4 +1,4 @@
-import { useMemo, useState } from 'react';
+import { useEffect, useMemo, useState } from 'react';
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query';
 import { useAuth } from '../store/AuthContext.jsx';
 import { useProfile } from '../store/ProfileContext.jsx';
@@ -50,6 +50,8 @@ export default function Meetings() {
   const [cursor, setCursor] = useState(() => { const d = new Date(); return new Date(d.getFullYear(), d.getMonth(), 1); });
   const [openId, setOpenId] = useState(null);
   const [modal, setModal] = useState(null); // { meeting } for edit, { initialDate } for new, or {} for new
+  const [toast, setToast] = useState('');
+  useEffect(() => { if (!toast) return; const t = setTimeout(() => setToast(''), 3500); return () => clearTimeout(t); }, [toast]);
 
   const y = cursor.getFullYear(); const mo = cursor.getMonth();
   const list = useQuery({ queryKey: ['meetings', scope], queryFn: () => getMeetings(scope), retry: false });
@@ -105,9 +107,22 @@ export default function Meetings() {
         : <MeetingList rows={rows} loading={list.isLoading} onOpen={open} />}
 
       {openId && <MeetingDrawer id={openId} onClose={() => setOpenId(null)} onEdit={(m) => { setOpenId(null); setModal({ meeting: m }); }} />}
-      {modal && <MeetingModal recurrences={meta.data?.recurrences || []} rooms={meta.data?.rooms || []} meeting={modal.meeting} initialDate={modal.initialDate} onClose={() => setModal(null)} />}
+      {modal && <MeetingModal recurrences={meta.data?.recurrences || []} rooms={meta.data?.rooms || []} meeting={modal.meeting} initialDate={modal.initialDate} onClose={() => setModal(null)} onToast={setToast} />}
+
+      {toast && <div className="fixed bottom-6 left-1/2 z-[60] -translate-x-1/2 rounded-full bg-pine px-5 py-2.5 text-sm text-white shadow-lg">{toast}</div>}
     </div>
   );
+}
+
+// Human-readable tally of who got a calendar invite when a meeting was saved.
+function inviteSummary(invited) {
+  if (!invited) return '';
+  const { sent = 0, failed = 0, skipped = 0 } = invited;
+  if (!sent && !failed && !skipped) return '';
+  const bits = [sent ? `📧 Invited ${sent} ${sent === 1 ? 'person' : 'people'}` : 'No invites emailed'];
+  if (failed) bits.push(`${failed} couldn’t be emailed`);
+  if (skipped) bits.push(`${skipped} without an email address`);
+  return bits.join(' · ');
 }
 
 // ── Month calendar ──────────────────────────────────────────────────
@@ -462,7 +477,7 @@ function EventTagPicker({ value, onChange }) {
 }
 
 // ── Create / edit modal ─────────────────────────────────────────────
-function MeetingModal({ recurrences, rooms = [], meeting, initialDate, onClose }) {
+function MeetingModal({ recurrences, rooms = [], meeting, initialDate, onClose, onToast }) {
   const qc = useQueryClient();
   const editing = !!meeting;
   const [f, setF] = useState(() => meeting ? {
@@ -491,8 +506,14 @@ function MeetingModal({ recurrences, rooms = [], meeting, initialDate, onClose }
       qc.invalidateQueries({ queryKey: ['meetings'] });
       qc.invalidateQueries({ queryKey: ['ms-calendar'] });
       if (editing) qc.invalidateQueries({ queryKey: ['meeting', meeting.id] });
-      if (data?.teamsWarning) setNote(data.teamsWarning);
-      else onClose();
+      const summary = inviteSummary(data?.invited);
+      if (data?.teamsWarning) {
+        // Stay open — the warning needs attention; fold the invite tally in too.
+        setNote([data.teamsWarning, summary].filter(Boolean).join(' · '));
+      } else {
+        if (summary) onToast?.(summary);
+        onClose();
+      }
     },
   });
 
