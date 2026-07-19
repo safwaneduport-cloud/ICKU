@@ -58,7 +58,9 @@ const eventInclude = {
 function shape(e) {
   const tasks = (e.tasks || []).map((t) => ({
     id: t.id, name: t.name, dueOffset: t.dueOffset, dueTime: t.dueTime, completed: t.completed, completedLate: t.completedLate,
-    assignees: t.assignees.map((a) => ({ id: a.user.id, name: a.user.name })),
+    assignees: t.assignees.map((a) => ({ id: a.user.id, name: a.user.name, status: a.status, rejectedReason: a.rejectedReason })),
+    // A pending deadline-extension request awaiting the owner's decision.
+    ext: t.extReqStatus === 'pending' ? { offset: t.extReqOffset, time: t.extReqTime, byId: t.extReqById } : null,
   }));
   const done = tasks.filter((t) => t.completed).length;
   return {
@@ -72,6 +74,11 @@ function shape(e) {
 export async function list({ filter = 'all', mine = false, userId } = {}) {
   const events = await prisma.event.findMany({ where: { approval: { not: 'rejected' } }, include: eventInclude });
   let shaped = events.map(shape);
+  // A pending project is visible only to its creator/owner and the approver —
+  // assignees don't see it (or get its tasks) until the manager approves it.
+  if (userId) {
+    shaped = shaped.filter((e) => e.approval !== 'pending' || e.ownerId === userId || e.approverId === userId);
+  }
   if (mine && userId) {
     shaped = shaped.filter(
       (e) => e.ownerId === userId || e.tasks.some((t) => t.assignees.some((a) => a.id === userId))
@@ -107,17 +114,16 @@ export async function get(id) {
 
 export async function create(creator, payload) {
   const { name, status, triggerMonth, triggerDay, writeup, tasks = [], attachments = [] } = payload;
-  if (!name?.trim()) throw new ApiError(400, 'Event name is required');
+  if (!name?.trim()) throw new ApiError(400, 'Project name is required');
 
-  // Approval routing: CEO auto-approves; everyone else routes to their manager.
-  // The JWT only carries id/role/tier, so look up the reporting manager here.
+  // Approval routing depends on the creator's mode (set by their manager): auto
+  // → goes live immediately; manual → pending their manager's approval, and its
+  // tasks stay hidden from assignees until approved (see list()). CEO auto.
   const isCeo = creator.id === 'ceo';
-  const approval = isCeo ? 'approved' : 'pending';
-  let approverId = null;
-  if (!isCeo) {
-    const u = await prisma.user.findUnique({ where: { id: creator.id }, select: { reportsToId: true } });
-    approverId = u?.reportsToId || 'ceo';
-  }
+  const u = await prisma.user.findUnique({ where: { id: creator.id }, select: { reportsToId: true, autoApproveProjects: true } });
+  const autoApprove = isCeo || u?.autoApproveProjects !== false;
+  const approval = autoApprove ? 'approved' : 'pending';
+  const approverId = autoApprove ? null : (u?.reportsToId || 'ceo');
 
   const event = await prisma.event.create({
     data: {
@@ -203,6 +209,67 @@ export async function toggleTask(taskId, userId) {
     where: { id: taskId },
     data: { completed: nowCompleted, completedLate: nowCompleted ? late : false },
   });
+}
+
+// Is `managerId` the reporting manager of `userId`?
+async function isManagerOf(managerId, userId) {
+  const u = await prisma.user.findUnique({ where: { id: userId }, select: { reportsToId: true } });
+  return u?.reportsToId === managerId;
+}
+
+// An assignee — or their reporting manager — rejects that person's assignment.
+// The task stays for the other assignees; the owner is notified to reassign it.
+export async function rejectAssignment(actor, taskId, { forUserId, reason } = {}) {
+  const target = forUserId || actor.id;
+  const link = await prisma.taskAssignee.findUnique({ where: { taskId_userId: { taskId, userId: target } } });
+  if (!link) throw new ApiError(404, 'That person is not assigned to this task');
+  if (target !== actor.id && !(await isManagerOf(actor.id, target)) && !canAdmin(actor)) {
+    throw new ApiError(403, 'Only the assignee or their manager can reject this');
+  }
+  return prisma.taskAssignee.update({
+    where: { taskId_userId: { taskId, userId: target } },
+    data: { status: 'rejected', rejectedReason: (reason || '').trim() || null, rejectedAt: new Date() },
+  });
+}
+
+// An assignee proposes a new deadline (offset from the project trigger + time,
+// same shape as dueOffset/dueTime); it waits for the Project Owner's decision.
+export async function requestExtension(actor, taskId, { dueOffset, dueTime } = {}) {
+  const task = await prisma.eventTask.findUnique({ where: { id: taskId }, include: { assignees: true } });
+  if (!task) throw new ApiError(404, 'Task not found');
+  if (!task.assignees.some((a) => a.userId === actor.id)) throw new ApiError(403, 'Only an assignee can request an extension');
+  return prisma.eventTask.update({
+    where: { id: taskId },
+    data: { extReqOffset: dueOffset ?? null, extReqTime: dueTime ?? null, extReqById: actor.id, extReqStatus: 'pending' },
+  });
+}
+
+// The Project Owner (or admin) approves/rejects a pending extension. On approve
+// the task's due date becomes the proposed one; either way the request clears.
+export async function decideExtension(actor, taskId, decision) {
+  const task = await prisma.eventTask.findUnique({ where: { id: taskId }, include: { event: { select: { ownerId: true } } } });
+  if (!task) throw new ApiError(404, 'Task not found');
+  if (task.extReqStatus !== 'pending') throw new ApiError(409, 'No pending extension request');
+  if (task.event.ownerId !== actor.id && !canAdmin(actor)) throw new ApiError(403, 'Only the project owner can decide extension requests');
+  const clear = { extReqOffset: null, extReqTime: null, extReqById: null, extReqStatus: null };
+  const data = decision === 'approved' ? { dueOffset: task.extReqOffset, dueTime: task.extReqTime, ...clear } : clear;
+  return prisma.eventTask.update({ where: { id: taskId }, data });
+}
+
+// A manager's direct reports + whether each auto-approves the projects they
+// create. Drives the toggle UI in My Team (Phase D).
+export function reportsApprovalModes(managerId) {
+  return prisma.user.findMany({
+    where: { reportsToId: managerId },
+    select: { id: true, name: true, designation: true, autoApproveProjects: true },
+    orderBy: { name: 'asc' },
+  });
+}
+export async function setReportApprovalMode(actor, reportId, autoApprove) {
+  const rep = await prisma.user.findUnique({ where: { id: reportId }, select: { reportsToId: true } });
+  if (!rep) throw new ApiError(404, 'Employee not found');
+  if (rep.reportsToId !== actor.id && !canAdmin(actor)) throw new ApiError(403, "Only this person's manager can change their approval mode");
+  return prisma.user.update({ where: { id: reportId }, data: { autoApproveProjects: !!autoApprove }, select: { id: true, autoApproveProjects: true } });
 }
 
 export async function addComment(eventId, authorId, body, parentId) {

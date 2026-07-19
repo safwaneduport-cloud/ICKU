@@ -48,6 +48,31 @@ export async function toggleTask(req, res, next) {
   catch (e) { next(e); }
 }
 
+export async function rejectAssignment(req, res, next) {
+  try { res.json({ data: await service.rejectAssignment(req.user, req.params.taskId, req.body || {}), error: null }); }
+  catch (e) { next(e); }
+}
+
+export async function requestExtension(req, res, next) {
+  try { res.json({ data: await service.requestExtension(req.user, req.params.taskId, req.body || {}), error: null }); }
+  catch (e) { next(e); }
+}
+
+export async function decideExtension(req, res, next) {
+  try { res.json({ data: await service.decideExtension(req.user, req.params.taskId, req.params.decision), error: null }); }
+  catch (e) { next(e); }
+}
+
+export async function approvalModes(req, res, next) {
+  try { res.json({ data: await service.reportsApprovalModes(req.user.id), error: null }); }
+  catch (e) { next(e); }
+}
+
+export async function setApprovalMode(req, res, next) {
+  try { res.json({ data: await service.setReportApprovalMode(req.user, req.params.reportId, req.body?.autoApprove), error: null }); }
+  catch (e) { next(e); }
+}
+
 export async function addComment(req, res, next) {
   try {
     const { body, parentId } = req.body || {};
