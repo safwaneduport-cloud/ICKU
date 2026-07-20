@@ -1,7 +1,9 @@
 import { useEffect, useState } from 'react';
+import { useQuery } from '@tanstack/react-query';
 import { NavLink, Outlet, useLocation } from 'react-router-dom';
 import { useAuth } from '../store/AuthContext.jsx';
 import { ProfileProvider, useProfile } from '../store/ProfileContext.jsx';
+import { getReports } from '../api/users.api.js';
 import NotificationBell from '../features/notifications/NotificationBell.jsx';
 
 // Sidebar navigation, grouped into labeled sections. A group with no `title`
@@ -65,16 +67,19 @@ function Shell() {
   useEffect(() => { setNavOpen(false); }, [location.pathname]); // close after navigating
   const isAdmin = user?.id === 'ceo' || user?.role === 'HR Head';
   const isReports = isAdmin || user?.tier === 'Leadership';
+  // Managers (anyone with direct reports) get the My Team section.
+  const reportsQ = useQuery({ queryKey: ['my-reports', user?.id], queryFn: () => getReports(user.id), enabled: !!user?.id, retry: false });
+  const isManager = (reportsQ.data?.length || 0) > 0;
   const adminItems = [
     ...(isReports ? [{ to: '/reports', label: 'Reports' }] : []),
     ...(isAdmin ? [{ to: '/admin', label: 'Admin Console' }] : []),
   ];
   const groups = [
-    ...NAV_GROUPS.map((g) =>
-      g.title === 'HR' && isAdmin
-        ? { ...g, items: [...g.items, { to: '/master-data', label: 'Master Data' }, { to: '/credentials', label: 'Credentials' }] }
-        : g
-    ),
+    ...NAV_GROUPS.map((g) => {
+      if (g.title === 'Work' && isManager) return { ...g, items: [...g.items, { to: '/my-team', label: 'My Team', stars: 1 }] };
+      if (g.title === 'HR' && isAdmin) return { ...g, items: [...g.items, { to: '/master-data', label: 'Master Data' }, { to: '/credentials', label: 'Credentials' }] };
+      return g;
+    }),
     ...(adminItems.length ? [{ title: 'Admin', items: adminItems }] : []),
   ];
 

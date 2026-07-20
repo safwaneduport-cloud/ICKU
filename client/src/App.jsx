@@ -23,6 +23,7 @@ import Announcements from './pages/Announcements.jsx';
 import Okrs from './pages/Okrs.jsx';
 import Meetings from './pages/Meetings.jsx';
 import Workspaces from './pages/Workspaces.jsx';
+import MyTeam from './pages/MyTeam.jsx';
 import Messages from './pages/Messages.jsx';
 import MasterData from './pages/MasterData.jsx';
 import Credentials from './pages/Credentials.jsx';
@@ -55,6 +56,7 @@ export default function App() {
         <Route path="okrs" element={<Okrs />} />
         <Route path="meetings" element={<Meetings />} />
         <Route path="workspaces" element={<Workspaces />} />
+        <Route path="my-team" element={<MyTeam />} />
         <Route path="approvals" element={<Approvals />} />
         <Route path="attendance" element={<Attendance />} />
         <Route path="leave" element={<Leave />} />

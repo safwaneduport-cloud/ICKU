@@ -8,6 +8,7 @@ router.get('/approvals', ctrl.approvals);
 // Specific GETs before the '/:id' catch-all, or '/:id' swallows them.
 router.get('/approval-modes', ctrl.approvalModes);
 router.patch('/approval-modes/:reportId', ctrl.setApprovalMode);
+router.get('/assigned', ctrl.assignedTasks); // ?userId — tasks assigned to a report
 router.post('/', ctrl.create);
 router.get('/:id', ctrl.get);
 router.post('/:id/approve', ctrl.approve);

@@ -265,6 +265,36 @@ export function reportsApprovalModes(managerId) {
     orderBy: { name: 'asc' },
   });
 }
+// All tasks assigned to one person (for a manager's My Team view). Each carries
+// the project it belongs to and who owns it, so the UI can split "assigned by
+// me" (owner === viewer) from "assigned by others", and flag overdue ones.
+// Pending/rejected projects are excluded — their tasks aren't live yet.
+export async function assignedTasksFor(targetUserId) {
+  const links = await prisma.taskAssignee.findMany({
+    where: { userId: targetUserId },
+    include: {
+      task: {
+        include: {
+          event: { select: { id: true, name: true, ownerId: true, approval: true, status: true, triggerMonth: true, triggerDay: true, owner: { select: { name: true } } } },
+        },
+      },
+    },
+  });
+  const now = new Date();
+  return links
+    .filter((l) => !['pending', 'rejected'].includes(l.task.event.approval))
+    .map(({ task: t, status }) => {
+      const e = t.event;
+      return {
+        taskId: t.id, name: t.name, status,
+        projectId: e.id, projectName: e.name, ownerId: e.ownerId, ownerName: e.owner?.name,
+        completed: t.completed, overdue: !t.completed && isTaskPastDue(t, triggerDate(e), now),
+        dueOffset: t.dueOffset, dueTime: t.dueTime,
+        triggerMonth: e.triggerMonth, triggerDay: e.triggerDay, eventStatus: e.status,
+      };
+    });
+}
+
 export async function setReportApprovalMode(actor, reportId, autoApprove) {
   const rep = await prisma.user.findUnique({ where: { id: reportId }, select: { reportsToId: true } });
   if (!rep) throw new ApiError(404, 'Employee not found');

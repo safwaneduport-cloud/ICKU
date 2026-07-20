@@ -1,4 +1,7 @@
 import * as service from './events.service.js';
+import { isManagerOf } from '../../lib/orgTree.js';
+import { canAdmin } from '../../lib/access.js';
+import { ApiError } from '../../middleware/errorHandler.js';
 
 export async function list(req, res, next) {
   try {
@@ -61,6 +64,16 @@ export async function requestExtension(req, res, next) {
 export async function decideExtension(req, res, next) {
   try { res.json({ data: await service.decideExtension(req.user, req.params.taskId, req.params.decision), error: null }); }
   catch (e) { next(e); }
+}
+
+export async function assignedTasks(req, res, next) {
+  try {
+    const t = req.query.userId || req.user.id;
+    if (t !== req.user.id && !canAdmin(req.user) && !(await isManagerOf(req.user.id, t))) {
+      throw new ApiError(403, 'Only their manager can view this');
+    }
+    res.json({ data: await service.assignedTasksFor(t), error: null });
+  } catch (e) { next(e); }
 }
 
 export async function approvalModes(req, res, next) {
