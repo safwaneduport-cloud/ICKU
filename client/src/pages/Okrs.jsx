@@ -5,7 +5,8 @@ import { getReports } from '../api/users.api.js';
 import {
   getDuties, addDuty, deleteDuty,
   getOkrs, addOkr, updateOkr, deleteOkr, approveOkrs,
-  getChecklist, addChecklistItem, deleteChecklistItem, toggleChecklistItem, getPendingChecklist,
+  getChecklist, addChecklistItem, updateChecklistItem, deleteChecklistItem, toggleChecklistItem, getPendingChecklist,
+  getChecklistHistory, restoreChecklistItem,
 } from '../api/personal.api.js';
 
 const MONTHS = ['Jan', 'Feb', 'Mar', 'Apr', 'May', 'Jun', 'Jul', 'Aug', 'Sep', 'Oct', 'Nov', 'Dec'];
@@ -45,8 +46,8 @@ export default function Okrs() {
 
       {tab === 'responsibilities' && <Duties userId={target} isSelf={isSelf} />}
       {tab === 'okrs' && <OkrsTab userId={target} isSelf={isSelf} />}
-      {tab === 'checklist' && <ChecklistTab userId={target} />}
-      {tab === 'pending' && <PendingTab userId={target} />}
+      {tab === 'checklist' && <ChecklistTab userId={target} isSelf={isSelf} />}
+      {tab === 'pending' && <PendingTab userId={target} isSelf={isSelf} />}
     </div>
   );
 }
@@ -150,50 +151,167 @@ function OkrsTab({ userId, isSelf }) {
 }
 
 // ── Checklists (recurring) ──
-function ChecklistTab({ userId }) {
+// Only the item's owner can check/uncheck (isSelf). Both owner and manager can
+// add/edit/delete. Deletion asks for confirmation; a 7-day history panel lets
+// either restore a deleted item.
+function ChecklistTab({ userId, isSelf }) {
   const qc = useQueryClient();
   const q = useQuery({ queryKey: ['checklist', userId], queryFn: () => getChecklist(userId), retry: false });
-  const invalidate = () => qc.invalidateQueries({ queryKey: ['checklist', userId] });
+  const invalidate = () => {
+    qc.invalidateQueries({ queryKey: ['checklist', userId] });
+    qc.invalidateQueries({ queryKey: ['checklist-history', userId] });
+  };
   const toggle = useMutation({ mutationFn: toggleChecklistItem, onSuccess: invalidate });
   const del = useMutation({ mutationFn: deleteChecklistItem, onSuccess: invalidate });
   const add = useMutation({ mutationFn: ({ frequency, text }) => addChecklistItem({ userId, frequency, text }), onSuccess: invalidate });
+  const edit = useMutation({ mutationFn: ({ id, text }) => updateChecklistItem(id, text), onSuccess: invalidate });
   const [drafts, setDrafts] = useState({});
+  const [confirm, setConfirm] = useState(null); // item pending delete confirmation
+  const [showHistory, setShowHistory] = useState(false);
 
   const d = q.data || {};
   return (
-    <div className="grid gap-4 sm:grid-cols-2">
-      {FREQS.map((f) => (
-        <section key={f} className="rounded-2xl border border-line bg-white p-5">
-          <div className="flex items-baseline justify-between">
-            <div className="text-xs font-semibold uppercase tracking-wide text-ink-soft">{f}</div>
-            {(d[f] || [])[0]?.deadline && <div className="text-[11px] text-ink-soft">{(d[f] || [])[0].deadline}</div>}
+    <div className="space-y-4">
+      <div className="flex items-center justify-between">
+        <p className="text-sm text-ink-soft">{isSelf ? 'Tick items as you complete them. Only you can check your own list.' : "You can add, edit or clear items — but only they can tick them off."}</p>
+        <button onClick={() => setShowHistory((v) => !v)} className="shrink-0 text-sm font-medium text-pine hover:underline">{showHistory ? 'Hide history' : 'History'}</button>
+      </div>
+
+      {showHistory && <HistoryPanel userId={userId} onRestored={invalidate} />}
+
+      <div className="grid gap-4 sm:grid-cols-2">
+        {FREQS.map((f) => (
+          <section key={f} className="rounded-2xl border border-line bg-white p-5">
+            <div className="flex items-baseline justify-between">
+              <div className="text-xs font-semibold uppercase tracking-wide text-ink-soft">{f}</div>
+              {(d[f] || [])[0]?.deadline && <div className="text-[11px] text-ink-soft">{(d[f] || [])[0].deadline}</div>}
+            </div>
+            <div className="mt-3 space-y-1.5">
+              {(d[f] || []).map((it) => (
+                <ChecklistRow key={it.id} it={it} isSelf={isSelf} toggle={toggle} edit={edit} onDelete={() => setConfirm(it)} />
+              ))}
+              {(d[f] || []).length === 0 && <p className="py-2 text-sm text-ink-soft">No items.</p>}
+            </div>
+            <div className="mt-3 flex gap-2">
+              <input value={drafts[f] || ''} onChange={(e) => setDrafts((s) => ({ ...s, [f]: e.target.value }))}
+                onKeyDown={(e) => { if (e.key === 'Enter' && (drafts[f] || '').trim()) { add.mutate({ frequency: f, text: drafts[f].trim() }); setDrafts((s) => ({ ...s, [f]: '' })); } }}
+                placeholder={`Add ${f.toLowerCase()} item…`} className="flex-1 rounded-lg border border-line px-2 py-1.5 text-sm" />
+            </div>
+          </section>
+        ))}
+      </div>
+
+      {confirm && (
+        <ConfirmModal title="Delete this checklist item?" body={confirm.text}
+          onCancel={() => setConfirm(null)}
+          onConfirm={() => { del.mutate(confirm.id); setConfirm(null); }} />
+      )}
+    </div>
+  );
+}
+
+// One checklist row. Owner can tick; manager sees a read-only status. Both can
+// edit the text inline and delete (via the parent's confirm).
+function ChecklistRow({ it, isSelf, toggle, edit, onDelete }) {
+  const [editing, setEditing] = useState(false);
+  const [val, setVal] = useState(it.text);
+  const done = it.checked || it.cleared;
+  const mark = it.checked ? '✓' : it.cleared ? '–' : '';
+  const dotClass = it.checked ? 'border-sage bg-sage text-white'
+    : it.cleared ? 'border-steel bg-steel/20 text-steel'
+    : it.overdue ? 'border-brick' : 'border-line';
+
+  const commit = () => { const t = val.trim(); if (t && t !== it.text) edit.mutate({ id: it.id, text: t }); setEditing(false); };
+
+  return (
+    <div className="group flex items-center gap-2">
+      {isSelf ? (
+        <button onClick={() => toggle.mutate(it.id)} title={it.cleared ? 'Cleared by your manager — tick to mark it done yourself' : ''}
+          className={`flex h-4 w-4 shrink-0 items-center justify-center rounded-full border text-[10px] ${dotClass}`}>{mark}</button>
+      ) : (
+        <span title="Only this person can tick their own items"
+          className={`flex h-4 w-4 shrink-0 items-center justify-center rounded-full border text-[10px] ${dotClass} opacity-70`}>{mark}</span>
+      )}
+
+      {editing ? (
+        <input value={val} autoFocus onChange={(e) => setVal(e.target.value)} onBlur={commit}
+          onKeyDown={(e) => { if (e.key === 'Enter') commit(); if (e.key === 'Escape') { setVal(it.text); setEditing(false); } }}
+          className="flex-1 rounded border border-line px-2 py-0.5 text-sm outline-none focus:border-pine" />
+      ) : (
+        <span className={`flex-1 text-sm ${done ? 'text-ink-soft line-through' : it.overdue ? 'text-brick' : ''}`}>{it.text}</span>
+      )}
+
+      {it.cleared && <span className={`shrink-0 text-[10px] ${it.clearedBlackMark ? 'text-brick' : 'text-steel'}`}>{it.clearedBlackMark ? 'cleared · mark' : 'cleared'}</span>}
+      {it.overdue && !done && <span className="shrink-0 text-[10px] font-medium text-brick">overdue</span>}
+      {!editing && (
+        <>
+          <button onClick={() => { setVal(it.text); setEditing(true); }} className="shrink-0 text-xs text-ink-soft opacity-0 hover:text-pine group-hover:opacity-100">edit</button>
+          <button onClick={onDelete} className="shrink-0 text-xs text-ink-soft opacity-0 hover:text-brick group-hover:opacity-100">✕</button>
+        </>
+      )}
+    </div>
+  );
+}
+
+// 7-day checklist activity, grouped by day. Deleted items can be restored.
+function HistoryPanel({ userId, onRestored }) {
+  const qc = useQueryClient();
+  const q = useQuery({ queryKey: ['checklist-history', userId], queryFn: () => getChecklistHistory(userId), retry: false });
+  const restore = useMutation({ mutationFn: restoreChecklistItem, onSuccess: () => { qc.invalidateQueries({ queryKey: ['checklist-history', userId] }); onRestored(); } });
+  const rows = q.data || [];
+
+  const byDay = {};
+  rows.forEach((r) => { const day = new Date(r.at).toLocaleDateString([], { weekday: 'short', month: 'short', day: 'numeric' }); (byDay[day] ||= []).push(r); });
+
+  const ACTION = {
+    added: 'text-sage', edited: 'text-steel', deleted: 'text-brick',
+    checked: 'text-sage', unchecked: 'text-ink-soft', cleared: 'text-ochre', restored: 'text-pine',
+  };
+
+  return (
+    <section className="rounded-2xl border border-line bg-white p-5">
+      <div className="text-xs font-semibold uppercase tracking-wide text-ink-soft">Activity · last 7 days</div>
+      {rows.length === 0 && <p className="mt-3 text-sm text-ink-soft">No activity in the last 7 days.</p>}
+      <div className="mt-3 space-y-3">
+        {Object.entries(byDay).map(([day, items]) => (
+          <div key={day}>
+            <div className="text-[11px] font-semibold text-ink-soft">{day}</div>
+            <div className="mt-1 space-y-1">
+              {items.map((r) => (
+                <div key={r.id} className="flex items-center gap-2 border-b border-line/40 py-1 text-sm last:border-0">
+                  <span className={`w-16 shrink-0 text-[11px] font-medium ${ACTION[r.action] || 'text-ink-soft'}`}>{r.action}</span>
+                  <span className="flex-1 truncate">{r.text}</span>
+                  {r.late && <span className="shrink-0 text-[10px] font-medium text-brick">late</span>}
+                  <span className="shrink-0 text-[11px] text-ink-soft">{r.actorName ? `${r.actorName} · ` : ''}{new Date(r.at).toLocaleTimeString([], { hour: 'numeric', minute: '2-digit' })}</span>
+                  {r.restorable && <button onClick={() => restore.mutate(r.id)} disabled={restore.isPending} className="shrink-0 text-[11px] font-medium text-pine hover:underline disabled:opacity-50">Restore</button>}
+                </div>
+              ))}
+            </div>
           </div>
-          <div className="mt-3 space-y-1.5">
-            {(d[f] || []).map((it) => (
-              <div key={it.id} className="group flex items-center gap-2">
-                <button onClick={() => toggle.mutate(it.id)}
-                  className={`flex h-4 w-4 shrink-0 items-center justify-center rounded-full border ${it.checked ? 'border-sage bg-sage text-white' : it.overdue ? 'border-brick' : 'border-line'}`}>
-                  {it.checked ? '✓' : ''}
-                </button>
-                <span className={`flex-1 text-sm ${it.checked ? 'text-ink-soft line-through' : it.overdue ? 'text-brick' : ''}`}>{it.text}</span>
-                {it.overdue && <span className="text-[10px] font-medium text-brick">overdue</span>}
-                <button onClick={() => del.mutate(it.id)} className="text-xs text-ink-soft opacity-0 hover:text-brick group-hover:opacity-100">✕</button>
-              </div>
-            ))}
-          </div>
-          <div className="mt-3 flex gap-2">
-            <input value={drafts[f] || ''} onChange={(e) => setDrafts((s) => ({ ...s, [f]: e.target.value }))}
-              onKeyDown={(e) => { if (e.key === 'Enter' && (drafts[f] || '').trim()) { add.mutate({ frequency: f, text: drafts[f].trim() }); setDrafts((s) => ({ ...s, [f]: '' })); } }}
-              placeholder={`Add ${f.toLowerCase()} item…`} className="flex-1 rounded-lg border border-line px-2 py-1.5 text-sm" />
-          </div>
-        </section>
-      ))}
+        ))}
+      </div>
+    </section>
+  );
+}
+
+// Small confirmation popup (used for deletes).
+function ConfirmModal({ title, body, confirmLabel = 'Delete', onConfirm, onCancel }) {
+  return (
+    <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/30 p-4" onClick={onCancel}>
+      <div className="w-full max-w-sm rounded-2xl bg-white p-5" onClick={(e) => e.stopPropagation()}>
+        <h3 className="font-serif text-lg font-semibold text-ink">{title}</h3>
+        {body && <p className="mt-1 text-sm text-ink-soft">“{body}”</p>}
+        <div className="mt-4 flex justify-end gap-2">
+          <button onClick={onCancel} className="rounded-lg border border-line px-4 py-2 text-sm">Cancel</button>
+          <button onClick={onConfirm} className="rounded-lg bg-brick px-4 py-2 text-sm font-medium text-white">{confirmLabel}</button>
+        </div>
+      </div>
     </div>
   );
 }
 
 // ── Pending checklists (this period's unchecked items, overdue first) ──
-function PendingTab({ userId }) {
+function PendingTab({ userId, isSelf }) {
   const qc = useQueryClient();
   const q = useQuery({ queryKey: ['checklist-pending', userId], queryFn: () => getPendingChecklist(userId), retry: false });
   const toggle = useMutation({
@@ -213,8 +331,13 @@ function PendingTab({ userId }) {
         {items.length === 0 && <p className="py-6 text-center text-sm text-ink-soft">All caught up 🎉</p>}
         {items.map((it) => (
           <div key={it.id} className="flex items-center gap-2 border-b border-line/60 py-1.5 last:border-0">
-            <button onClick={() => toggle.mutate(it.id)}
-              className={`flex h-4 w-4 shrink-0 items-center justify-center rounded-full border ${it.overdue ? 'border-brick' : 'border-line'}`} />
+            {isSelf ? (
+              <button onClick={() => toggle.mutate(it.id)}
+                className={`flex h-4 w-4 shrink-0 items-center justify-center rounded-full border ${it.overdue ? 'border-brick' : 'border-line'}`} />
+            ) : (
+              <span title="Only this person can tick their own items"
+                className={`flex h-4 w-4 shrink-0 rounded-full border opacity-70 ${it.overdue ? 'border-brick' : 'border-line'}`} />
+            )}
             <span className={`flex-1 text-sm ${it.overdue ? 'text-brick' : ''}`}>{it.text}</span>
             <span className="text-[11px] text-ink-soft">{it.frequency} · {it.deadline || 'no deadline'}</span>
             {it.overdue && <span className="rounded bg-brick/10 px-1.5 py-0.5 text-[10px] font-medium text-brick">overdue</span>}

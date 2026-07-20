@@ -151,16 +151,26 @@ export default function MessageComposer({ onSend, users = [], placeholder = 'Wri
           📎
         </button>
         <input ref={fileRef} type="file" multiple onChange={onFiles} className="hidden" />
-        <textarea
-          ref={taRef}
-          rows={1}
-          value={text}
-          onChange={onChange}
-          onKeyDown={onKeyDown}
-          autoFocus={autoFocus}
-          placeholder={placeholder}
-          className="max-h-32 min-h-[38px] flex-1 resize-none rounded-lg border border-line px-3 py-2 text-sm outline-none focus:border-pine"
-        />
+        {/* Auto-grow via the CSS grid "replicated content" trick: an invisible
+            twin sizes the shared grid cell to the text height (wrapping exactly
+            like the textarea), the textarea fills it, and max-h-40 caps growth
+            then scrolls. No JS measurement — immune to the flex width/timing
+            that made a scrollHeight approach stick tall. */}
+        <div className="grid max-h-40 flex-1">
+          <div aria-hidden className="invisible col-start-1 row-start-1 whitespace-pre-wrap break-words rounded-lg border border-transparent px-3 py-2 text-sm leading-5">
+            {text + ' '}
+          </div>
+          <textarea
+            ref={taRef}
+            rows={1}
+            value={text}
+            onChange={onChange}
+            onKeyDown={onKeyDown}
+            autoFocus={autoFocus}
+            placeholder={placeholder}
+            className="col-start-1 row-start-1 resize-none overflow-y-auto rounded-lg border border-line px-3 py-2 text-sm leading-5 outline-none focus:border-pine"
+          />
+        </div>
         <button
           type="button"
           onClick={send}

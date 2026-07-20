@@ -113,6 +113,14 @@ function periodKey(now, freq) {
   return now.toISOString().slice(0, 10);
 }
 
+// ── Checklist activity log (7-day rolling; powers history + restore) ──
+async function logActivity(userId, { itemId = null, actorId = null, action, text = '', frequency = null, late = false }) {
+  await prisma.checklistActivity.create({ data: { userId, itemId, actorId, action, text, frequency, late } });
+  // No cron here — prune this user's rows older than 7 days on each write.
+  const cutoff = new Date(Date.now() - 7 * 86400000);
+  await prisma.checklistActivity.deleteMany({ where: { userId, createdAt: { lt: cutoff } } });
+}
+
 // ── Checklists ──
 async function ensureChecklist(userId) {
   if ((await prisma.checklistItem.count({ where: { userId } })) === 0) {
@@ -124,37 +132,59 @@ async function ensureChecklist(userId) {
 export async function getChecklist(userId) {
   await ensureChecklist(userId);
   const now = new Date();
-  const [items, cfgs] = await Promise.all([
+  const currentKeys = [...new Set(FREQS.map((f) => periodKey(now, f)))];
+  const [items, cfgs, comps] = await Promise.all([
     prisma.checklistItem.findMany({ where: { userId }, orderBy: [{ sort: 'asc' }, { createdAt: 'asc' }] }),
     prisma.checklistDeadline.findMany({ where: { userId } }),
+    prisma.checklistCompletion.findMany({ where: { userId, periodKey: { in: currentKeys } } }),
   ]);
   const cfgBy = Object.fromEntries(cfgs.map((c) => [c.frequency, c]));
+  const compBy = Object.fromEntries(comps.map((c) => [c.itemId, c]));
   const grouped = Object.fromEntries(FREQS.map((f) => [f, []]));
   for (const it of items) {
-    const checked = samePeriod(it.checkedAt, now, it.frequency);
+    const comp = compBy[it.id];
+    const checked = samePeriod(it.checkedAt, now, it.frequency); // the user ticked it
+    const cleared = !checked && !!comp && comp.clearedById != null; // a manager Cleared it
     const dl = deadlineDate(it.frequency, cfgBy[it.frequency], now);
     grouped[it.frequency]?.push({
-      id: it.id, text: it.text, frequency: it.frequency, checked,
+      id: it.id, text: it.text, frequency: it.frequency, checked, cleared,
+      clearedBlackMark: cleared && comp.late,
       deadline: deadlineLabel(it.frequency, cfgBy[it.frequency]),
-      overdue: !checked && !!dl && now > dl,
+      overdue: !checked && !cleared && !!dl && now > dl,
     });
   }
   return grouped;
 }
 
-// The user's uncompleted items for the current period, overdue first.
+// The user's uncompleted items for the current period, overdue first. Items a
+// manager Cleared count as resolved and drop off the pending list.
 export async function getPendingChecklist(userId) {
   const grouped = await getChecklist(userId);
-  const pending = FREQS.flatMap((f) => grouped[f]).filter((it) => !it.checked);
+  const pending = FREQS.flatMap((f) => grouped[f]).filter((it) => !it.checked && !it.cleared);
   return pending.sort((a, b) => (b.overdue ? 1 : 0) - (a.overdue ? 1 : 0));
 }
-export const addChecklistItem = (userId, frequency, text, by) => {
+export async function addChecklistItem(userId, frequency, text, by) {
   if (!FREQS.includes(frequency)) throw new ApiError(400, 'Invalid frequency');
-  return prisma.checklistItem.create({ data: { userId, frequency, text: text.trim(), createdById: by } });
-};
-export const updateChecklistItem = (id, text) => prisma.checklistItem.update({ where: { id }, data: { text: text.trim() } }).catch(() => { throw new ApiError(404, 'Item not found'); });
-export const deleteChecklistItem = (id) => prisma.checklistItem.delete({ where: { id } }).catch(() => { throw new ApiError(404, 'Item not found'); });
-export async function toggleChecklistItem(id) {
+  const item = await prisma.checklistItem.create({ data: { userId, frequency, text: text.trim(), createdById: by } });
+  await logActivity(userId, { itemId: item.id, actorId: by, action: 'added', text: item.text, frequency });
+  return item;
+}
+export async function updateChecklistItem(id, text, by) {
+  const it = await prisma.checklistItem.findUnique({ where: { id } });
+  if (!it) throw new ApiError(404, 'Item not found');
+  const item = await prisma.checklistItem.update({ where: { id }, data: { text: text.trim() } });
+  await logActivity(it.userId, { itemId: id, actorId: by, action: 'edited', text: item.text, frequency: it.frequency });
+  return item;
+}
+export async function deleteChecklistItem(id, by) {
+  const it = await prisma.checklistItem.findUnique({ where: { id } });
+  if (!it) throw new ApiError(404, 'Item not found');
+  // Snapshot BEFORE delete so it can be restored from history (itemId=null marks
+  // it not-yet-restored; a restore sets it to the new item's id).
+  await logActivity(it.userId, { itemId: null, actorId: by, action: 'deleted', text: it.text, frequency: it.frequency });
+  return prisma.checklistItem.delete({ where: { id } });
+}
+export async function toggleChecklistItem(id, by) {
   const it = await prisma.checklistItem.findUnique({ where: { id } });
   if (!it) throw new ApiError(404, 'Item not found');
   const now = new Date();
@@ -164,18 +194,79 @@ export async function toggleChecklistItem(id) {
   if (wasChecked) {
     // Un-check → drop this period's completion record.
     await prisma.checklistCompletion.deleteMany({ where: { itemId: id, periodKey: key } });
+    await logActivity(it.userId, { itemId: id, actorId: by, action: 'unchecked', text: it.text, frequency: it.frequency });
     return prisma.checklistItem.update({ where: { id }, data: { checkedAt: null } });
   }
-  // Check → log the completion and whether it was after the deadline.
+  // Check → log the completion and whether it was after the deadline. clearedById
+  // is reset to null so a user check always overrides any prior manager Clear.
   const cfg = await prisma.checklistDeadline.findUnique({ where: { userId_frequency: { userId: it.userId, frequency: it.frequency } } });
   const dl = deadlineDate(it.frequency, cfg, now);
   const late = !!(dl && now > dl);
   await prisma.checklistCompletion.upsert({
     where: { itemId_periodKey: { itemId: id, periodKey: key } },
-    create: { itemId: id, userId: it.userId, periodKey: key, completedAt: now, dueAt: dl, late },
-    update: { completedAt: now, dueAt: dl, late },
+    create: { itemId: id, userId: it.userId, periodKey: key, completedAt: now, dueAt: dl, late, clearedById: null },
+    update: { completedAt: now, dueAt: dl, late, clearedById: null },
   });
+  await logActivity(it.userId, { itemId: id, actorId: by, action: 'checked', text: it.text, frequency: it.frequency, late });
   return prisma.checklistItem.update({ where: { id }, data: { checkedAt: now } });
+}
+
+// Manager Clears an employee's currently-pending items for this period. Two
+// modes: blackMark=false is an excused clear (neutral); blackMark=true records a
+// black mark. Either way the items drop off the pending list; the user is never
+// shown as having "checked" them.
+export async function clearAllPending(actorId, userId, blackMark = false) {
+  const now = new Date();
+  const currentKeys = [...new Set(FREQS.map((f) => periodKey(now, f)))];
+  const [items, cfgs, comps] = await Promise.all([
+    prisma.checklistItem.findMany({ where: { userId } }),
+    prisma.checklistDeadline.findMany({ where: { userId } }),
+    prisma.checklistCompletion.findMany({ where: { userId, periodKey: { in: currentKeys } } }),
+  ]);
+  const cfgBy = Object.fromEntries(cfgs.map((c) => [c.frequency, c]));
+  const resolved = new Set(comps.map((c) => c.itemId));
+  let cleared = 0;
+  for (const it of items) {
+    const checked = samePeriod(it.checkedAt, now, it.frequency);
+    if (checked || resolved.has(it.id)) continue; // already done/cleared
+    const key = periodKey(now, it.frequency);
+    const dl = deadlineDate(it.frequency, cfgBy[it.frequency], now);
+    await prisma.checklistCompletion.upsert({
+      where: { itemId_periodKey: { itemId: it.id, periodKey: key } },
+      create: { itemId: it.id, userId, periodKey: key, completedAt: now, dueAt: dl, late: !!blackMark, clearedById: actorId },
+      update: { completedAt: now, dueAt: dl, late: !!blackMark, clearedById: actorId },
+    });
+    await logActivity(userId, { itemId: it.id, actorId, action: 'cleared', text: it.text, frequency: it.frequency, late: !!blackMark });
+    cleared += 1;
+  }
+  return { cleared, blackMark: !!blackMark };
+}
+
+// Last 7 days of checklist activity (newest first) with actor names; a 'deleted'
+// entry is restorable until it's been restored (itemId still null).
+export async function getChecklistHistory(userId) {
+  const since = new Date(Date.now() - 7 * 86400000);
+  const rows = await prisma.checklistActivity.findMany({ where: { userId, createdAt: { gte: since } }, orderBy: { createdAt: 'desc' } });
+  const actorIds = [...new Set(rows.map((r) => r.actorId).filter(Boolean))];
+  const actors = actorIds.length ? await prisma.user.findMany({ where: { id: { in: actorIds } }, select: { id: true, name: true } }) : [];
+  const nameBy = Object.fromEntries(actors.map((a) => [a.id, a.name]));
+  return rows.map((r) => ({
+    id: r.id, action: r.action, text: r.text, frequency: r.frequency, late: r.late,
+    actorName: r.actorId ? nameBy[r.actorId] || '—' : null, at: r.createdAt,
+    restorable: r.action === 'deleted' && r.itemId == null,
+  }));
+}
+
+// Restore a deleted item from its history snapshot. Recreating it, then marking
+// the 'deleted' activity consumed (itemId set) so it can't be restored twice.
+export async function restoreChecklistItem(actorId, activityId) {
+  const a = await prisma.checklistActivity.findUnique({ where: { id: activityId } });
+  if (!a || a.action !== 'deleted') throw new ApiError(404, 'No deleted item to restore');
+  if (a.itemId != null) throw new ApiError(409, 'This item was already restored');
+  const item = await prisma.checklistItem.create({ data: { userId: a.userId, frequency: a.frequency || 'Daily', text: a.text, createdById: actorId } });
+  await prisma.checklistActivity.update({ where: { id: activityId }, data: { itemId: item.id } });
+  await logActivity(a.userId, { itemId: item.id, actorId, action: 'restored', text: a.text, frequency: a.frequency });
+  return item;
 }
 
 // ── Deadline config (a manager sets these for a direct report) ──
@@ -200,17 +291,42 @@ export async function setDeadline(userId, frequency, { time, weekday, dayOfMonth
   });
 }
 
-// Delayed-completion stats for one employee (for My Team reporting, Phase D).
+// Delayed-completion stats for one employee (My Team reporting). blackMarks =
+// late completions (including manager clears marked as a black mark). Excused
+// clears are neutral — excluded from the on-time denominator.
 export async function checklistDelayStats(userId, sinceDays = 30) {
   const since = new Date(Date.now() - sinceDays * 86400000);
-  const [total, late] = await Promise.all([
+  const [total, blackMarks, excused] = await Promise.all([
     prisma.checklistCompletion.count({ where: { userId, completedAt: { gte: since } } }),
     prisma.checklistCompletion.count({ where: { userId, late: true, completedAt: { gte: since } } }),
+    prisma.checklistCompletion.count({ where: { userId, clearedById: { not: null }, late: false, completedAt: { gte: since } } }),
   ]);
-  return { total, late, onTimePct: total ? Math.round(((total - late) / total) * 100) : 100, sinceDays };
+  const effective = total - excused;
+  return {
+    total, blackMarks, excused, sinceDays,
+    onTimePct: effective ? Math.round(((effective - blackMarks) / effective) * 100) : 100,
+    // ≥3 black marks in the window flags a habitual pattern for the manager.
+    habitual: blackMarks >= 3,
+  };
+}
+
+// Recent black marks (late completions) with the item text + when, for the
+// manager's click-through detail.
+export async function checklistBlackMarks(userId, sinceDays = 30) {
+  const since = new Date(Date.now() - sinceDays * 86400000);
+  const rows = await prisma.checklistCompletion.findMany({
+    where: { userId, late: true, completedAt: { gte: since } },
+    orderBy: { completedAt: 'desc' }, take: 50,
+    include: { item: { select: { text: true, frequency: true } } },
+  });
+  return rows.map((r) => ({
+    itemText: r.item?.text || '(deleted item)', frequency: r.item?.frequency,
+    completedAt: r.completedAt, dueAt: r.dueAt, byManager: r.clearedById != null,
+  }));
 }
 
 // Ownership lookups (for authz in the controller).
 export const dutyOwner = (id) => prisma.duty.findUnique({ where: { id }, select: { userId: true } });
 export const okrOwner = (id) => prisma.okr.findUnique({ where: { id }, select: { userId: true } });
 export const checklistOwner = (id) => prisma.checklistItem.findUnique({ where: { id }, select: { userId: true } });
+export const checklistActivityOwner = (id) => prisma.checklistActivity.findUnique({ where: { id }, select: { userId: true } });

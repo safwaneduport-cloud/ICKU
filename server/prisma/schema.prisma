@@ -735,7 +735,10 @@ model ChecklistDeadline {
 }
 
 // One row per checklist item per period once completed — the history behind
-// delayed-completion reporting. `late` = completed after that period's deadline.
+// delayed-completion reporting. `late` = completed after that period's deadline
+// (a "black mark"). `clearedById` is set when a manager Cleared the item for the
+// user instead of the user checking it: with late=false it's an excused clear
+// (neutral, not a black mark), with late=true it's a cleared-as-black-mark.
 model ChecklistCompletion {
   id          String        @id @default(uuid())
   itemId      String
@@ -745,9 +748,27 @@ model ChecklistCompletion {
   completedAt DateTime      @default(now())
   dueAt       DateTime?
   late        Boolean       @default(false)
+  clearedById String? // manager who Cleared it (null = the user checked it)
 
   @@unique([itemId, periodKey])
   @@index([userId, late])
+}
+
+// Rolling activity log for checklists — powers the 7-day history view and the
+// restore-a-deleted-item action. `text`/`frequency` snapshot the item so a
+// deleted one can be recreated. Rows older than 7 days are pruned on write.
+model ChecklistActivity {
+  id        String   @id @default(uuid())
+  userId    String // whose checklist (the owner)
+  itemId    String? // the live item, when it still exists
+  actorId   String? // who performed the action
+  action    String // added | edited | deleted | checked | unchecked | cleared | restored
+  text      String // snapshot of the item text at the time
+  frequency String? // snapshot, so a deleted item can be restored
+  late      Boolean  @default(false) // for checked/cleared: counted as a black mark
+  createdAt DateTime @default(now())
+
+  @@index([userId, createdAt])
 }
 
 // ── Announcements (Step 14) ──────────────────────────────────────

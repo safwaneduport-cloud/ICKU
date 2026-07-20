@@ -98,24 +98,49 @@ export async function updateChecklistItem(req, res, next) {
   try {
     const it = await service.checklistOwner(req.params.id);
     if (!it) throw new ApiError(404, 'Item not found');
-    await assertManage(req.user, it.userId);
-    res.json({ data: await service.updateChecklistItem(req.params.id, req.body?.text || ''), error: null });
+    await assertManage(req.user, it.userId); // user or their manager may edit
+    res.json({ data: await service.updateChecklistItem(req.params.id, req.body?.text || '', req.user.id), error: null });
   } catch (e) { next(e); }
 }
 export async function deleteChecklistItem(req, res, next) {
   try {
     const it = await service.checklistOwner(req.params.id);
     if (!it) throw new ApiError(404, 'Item not found');
-    await assertManage(req.user, it.userId);
-    res.json({ data: await service.deleteChecklistItem(req.params.id), error: null });
+    await assertManage(req.user, it.userId); // user or their manager may delete
+    res.json({ data: await service.deleteChecklistItem(req.params.id, req.user.id), error: null });
   } catch (e) { next(e); }
 }
 export async function toggleChecklistItem(req, res, next) {
   try {
     const it = await service.checklistOwner(req.params.id);
     if (!it) throw new ApiError(404, 'Item not found');
-    await assertManage(req.user, it.userId);
-    res.json({ data: await service.toggleChecklistItem(req.params.id), error: null });
+    // Checking/unchecking is the USER's alone — not their manager, not an admin.
+    if (it.userId !== req.user.id) throw new ApiError(403, 'Only you can check your own checklist items');
+    res.json({ data: await service.toggleChecklistItem(req.params.id, req.user.id), error: null });
+  } catch (e) { next(e); }
+}
+export async function getChecklistHistory(req, res, next) {
+  try { const t = targetOf(req); await assertManage(req.user, t); res.json({ data: await service.getChecklistHistory(t), error: null }); }
+  catch (e) { next(e); }
+}
+export async function checklistBlackMarks(req, res, next) {
+  try { const t = targetOf(req); await assertManage(req.user, t); res.json({ data: await service.checklistBlackMarks(t, Number(req.query.days) || 30), error: null }); }
+  catch (e) { next(e); }
+}
+export async function restoreChecklistItem(req, res, next) {
+  try {
+    const act = await service.checklistActivityOwner(req.params.activityId);
+    if (!act) throw new ApiError(404, 'Activity not found');
+    await assertManage(req.user, act.userId); // user or their manager may restore
+    res.json({ data: await service.restoreChecklistItem(req.user.id, req.params.activityId), error: null });
+  } catch (e) { next(e); }
+}
+export async function clearAllPending(req, res, next) {
+  try {
+    const t = req.body?.userId || req.query.userId;
+    if (!t) throw new ApiError(400, 'userId is required');
+    await assertSupervise(req.user, t); // manager only — NOT the user themselves
+    res.json({ data: await service.clearAllPending(req.user.id, t, !!req.body?.blackMark), error: null });
   } catch (e) { next(e); }
 }
 

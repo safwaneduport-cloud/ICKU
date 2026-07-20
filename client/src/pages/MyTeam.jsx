@@ -3,7 +3,7 @@ import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query';
 import { useAuth } from '../store/AuthContext.jsx';
 import { useProfile } from '../store/ProfileContext.jsx';
 import { getReports } from '../api/users.api.js';
-import { getPendingChecklist, getChecklistDelays, getDeadlines, setDeadline } from '../api/personal.api.js';
+import { getPendingChecklist, getChecklistDelays, getChecklistBlackMarks, clearAllPending, getDeadlines, setDeadline } from '../api/personal.api.js';
 import { getApprovalModes, setApprovalMode, getAssignedTasks } from '../api/events.api.js';
 import { dueLabel } from '../features/events/meta.js';
 
@@ -56,12 +56,8 @@ export default function MyTeam() {
 function ReportDashboard({ report, me }) {
   const uid = report.id;
   const { openProfile } = useProfile();
-  const pendingQ = useQuery({ queryKey: ['team-pending', uid], queryFn: () => getPendingChecklist(uid), retry: false });
-  const delaysQ = useQuery({ queryKey: ['team-delays', uid], queryFn: () => getChecklistDelays(uid), retry: false });
   const tasksQ = useQuery({ queryKey: ['team-tasks', uid], queryFn: () => getAssignedTasks(uid), retry: false });
 
-  const pending = pendingQ.data || [];
-  const delays = delaysQ.data || {};
   const tasks = tasksQ.data || [];
   const byMe = tasks.filter((t) => t.ownerId === me);
   const byOthers = tasks.filter((t) => t.ownerId !== me);
@@ -84,29 +80,11 @@ function ReportDashboard({ report, me }) {
         </div>
       </section>
 
-      {/* Checklist Pending + delay stat */}
-      <section className="rounded-2xl border border-line bg-white p-5">
-        <div className="flex items-baseline justify-between">
-          <h2 className="font-serif text-lg font-semibold text-pine">Checklist pending</h2>
-          <span className="text-xs text-ink-soft">
-            {delays.total ? `${delays.onTimePct}% on-time · ${delays.late} late / ${delays.total} (${delays.sinceDays}d)` : 'no completions yet'}
-          </span>
-        </div>
-        <div className="mt-3 space-y-1.5">
-          {pending.length === 0 && <p className="py-4 text-center text-sm text-ink-soft">Nothing pending 🎉</p>}
-          {pending.map((it) => (
-            <div key={it.id} className="flex items-center gap-2 border-b border-line/60 py-1 text-sm last:border-0">
-              <span className={`h-1.5 w-1.5 shrink-0 rounded-full ${it.overdue ? 'bg-brick' : 'bg-line'}`} />
-              <span className={`flex-1 ${it.overdue ? 'text-brick' : ''}`}>{it.text}</span>
-              <span className="text-[11px] text-ink-soft">{it.frequency} · {it.deadline || '—'}</span>
-              {it.overdue && <span className="rounded bg-brick/10 px-1.5 text-[10px] font-medium text-brick">overdue</span>}
-            </div>
-          ))}
-        </div>
-      </section>
+      {/* Checklist — quick-glance stats, clear-pending, click-through detail */}
+      <ChecklistPanel uid={uid} />
 
       {/* Tasks Pending */}
-      <section className="rounded-2xl border border-line bg-white p-5">
+      <section className="rounded-2xl border border-line bg-white p-5 lg:col-span-2">
         <div className="flex items-baseline justify-between">
           <h2 className="font-serif text-lg font-semibold text-pine">Tasks pending</h2>
           <span className="text-xs text-ink-soft">{overdue.length} overdue</span>
@@ -158,6 +136,111 @@ function TaskRow({ t, showOwner }) {
       {t.status === 'rejected' && <span className="rounded bg-brick/10 px-1.5 text-[10px] text-brick">rejected</span>}
       {t.overdue && <span className="rounded bg-brick/10 px-1.5 text-[10px] font-medium text-brick">overdue</span>}
     </div>
+  );
+}
+
+// Compact stat tile.
+function Tile({ label, value, sub, toneClass = 'text-ink' }) {
+  return (
+    <div className="rounded-xl border border-line bg-paper/40 p-3 text-center">
+      <div className="text-[10px] font-semibold uppercase tracking-wide text-ink-soft">{label}</div>
+      <div className={`mt-0.5 text-2xl font-bold ${toneClass}`}>{value}</div>
+      <div className="text-[10px] text-ink-soft">{sub}</div>
+    </div>
+  );
+}
+
+// Manager's checklist view for a report: three glanceable tiles (pending,
+// black marks / habitual, on-time%), a Clear-pending action with the two-way
+// choice, and click-through detail (pending list + recent black marks).
+function ChecklistPanel({ uid }) {
+  const qc = useQueryClient();
+  const pendingQ = useQuery({ queryKey: ['team-pending', uid], queryFn: () => getPendingChecklist(uid), retry: false });
+  const delaysQ = useQuery({ queryKey: ['team-delays', uid], queryFn: () => getChecklistDelays(uid), retry: false });
+  const marksQ = useQuery({ queryKey: ['team-blackmarks', uid], queryFn: () => getChecklistBlackMarks(uid), retry: false });
+  const [open, setOpen] = useState(false);
+  const [menu, setMenu] = useState(false);
+  const clear = useMutation({
+    mutationFn: (blackMark) => clearAllPending(uid, blackMark),
+    onSuccess: () => {
+      setMenu(false);
+      ['team-pending', 'team-delays', 'team-blackmarks'].forEach((k) => qc.invalidateQueries({ queryKey: [k, uid] }));
+    },
+  });
+
+  const pending = pendingQ.data || [];
+  const delays = delaysQ.data || {};
+  const marks = marksQ.data || [];
+  const overdue = pending.filter((p) => p.overdue).length;
+  const onTime = delays.onTimePct ?? 100;
+  const otClass = onTime >= 90 ? 'text-sage' : onTime >= 70 ? 'text-ochre' : 'text-brick';
+  const bm = delays.blackMarks ?? 0;
+
+  return (
+    <section className="rounded-2xl border border-line bg-white p-5 lg:col-span-2">
+      <div className="flex flex-wrap items-center justify-between gap-3">
+        <h2 className="font-serif text-lg font-semibold text-pine">Checklist</h2>
+        <div className="relative">
+          <button disabled={!pending.length || clear.isPending} onClick={() => setMenu((v) => !v)}
+            className="rounded-lg border border-line px-3 py-1.5 text-sm hover:border-pine disabled:opacity-50">
+            {clear.isPending ? 'Clearing…' : 'Clear pending ▾'}
+          </button>
+          {menu && (
+            <div className="absolute right-0 z-20 mt-1 w-64 overflow-hidden rounded-lg border border-line bg-white shadow-lg">
+              <button onClick={() => clear.mutate(false)} className="block w-full px-3 py-2 text-left text-sm hover:bg-paper">
+                Excuse <span className="text-ink-soft">— clear, no black mark</span>
+              </button>
+              <button onClick={() => clear.mutate(true)} className="block w-full border-t border-line px-3 py-2 text-left text-sm hover:bg-paper">
+                Clear as black mark <span className="text-brick">— counts against them</span>
+              </button>
+            </div>
+          )}
+        </div>
+      </div>
+
+      <div className="mt-3 grid grid-cols-3 gap-3">
+        <Tile label="Pending" value={pending.length} sub={overdue ? `${overdue} overdue` : 'none overdue'} toneClass={overdue ? 'text-brick' : 'text-ink'} />
+        <Tile label="Black marks · 30d" value={bm} sub={delays.habitual ? '⚠ Habitual' : 'last 30 days'} toneClass={delays.habitual ? 'text-brick' : bm ? 'text-ochre' : 'text-ink'} />
+        <Tile label="On-time" value={`${onTime}%`} sub={delays.total ? `${delays.total} done` : 'no data'} toneClass={otClass} />
+      </div>
+
+      <button onClick={() => setOpen((v) => !v)} className="mt-3 text-sm font-medium text-pine hover:underline">
+        {open ? 'Hide details' : 'View details'}
+      </button>
+
+      {open && (
+        <div className="mt-3 grid gap-4 sm:grid-cols-2">
+          <div>
+            <div className="text-xs font-semibold uppercase tracking-wide text-ink-soft">Pending now · {pending.length}</div>
+            <div className="mt-2 space-y-1">
+              {pending.length === 0 && <p className="text-sm text-ink-soft">Nothing pending 🎉</p>}
+              {pending.map((it) => (
+                <div key={it.id} className="flex items-center gap-2 text-sm">
+                  <span className={`h-1.5 w-1.5 shrink-0 rounded-full ${it.overdue ? 'bg-brick' : 'bg-line'}`} />
+                  <span className={`flex-1 ${it.overdue ? 'text-brick' : ''}`}>{it.text}</span>
+                  <span className="text-[11px] text-ink-soft">{it.frequency}</span>
+                </div>
+              ))}
+            </div>
+          </div>
+          <div>
+            <div className="text-xs font-semibold uppercase tracking-wide text-ink-soft">Recent black marks · {marks.length}</div>
+            <div className="mt-2 space-y-1">
+              {marks.length === 0 && <p className="text-sm text-ink-soft">None 🎉</p>}
+              {marks.map((m, i) => (
+                <div key={i} className="flex items-center gap-2 text-sm">
+                  <span className="h-1.5 w-1.5 shrink-0 rounded-full bg-brick" />
+                  <span className="flex-1">{m.itemText} <span className="text-ink-soft">· {m.frequency}</span></span>
+                  <span className="text-[11px] text-ink-soft">
+                    {new Date(m.completedAt).toLocaleDateString([], { month: 'short', day: 'numeric' })}{m.byManager ? ' · mgr' : ''}
+                  </span>
+                </div>
+              ))}
+            </div>
+          </div>
+        </div>
+      )}
+    </section>
   );
 }
 

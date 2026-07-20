@@ -15,9 +15,13 @@ router.patch('/okrs/:id', ctrl.updateOkr);
 router.delete('/okrs/:id', ctrl.deleteOkr);
 router.post('/okrs/approve', ctrl.approveOkrs);
 
-// Checklists
+// Checklists — specific string routes before any '/:id' catch-alls.
 router.get('/checklist', ctrl.getChecklist); // ?userId
-router.get('/checklist/pending', ctrl.getPendingChecklist); // ?userId — before /:id routes
+router.get('/checklist/pending', ctrl.getPendingChecklist); // ?userId
+router.get('/checklist/history', ctrl.getChecklistHistory); // ?userId — 7-day activity
+router.get('/checklist/blackmarks', ctrl.checklistBlackMarks); // ?userId&days
+router.post('/checklist/clear-all', ctrl.clearAllPending); // manager only
+router.post('/checklist/restore/:activityId', ctrl.restoreChecklistItem);
 router.post('/checklist', ctrl.addChecklistItem);
 router.patch('/checklist/:id', ctrl.updateChecklistItem);
 router.delete('/checklist/:id', ctrl.deleteChecklistItem);
