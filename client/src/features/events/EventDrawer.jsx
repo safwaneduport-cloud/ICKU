@@ -1,12 +1,16 @@
 import { useState } from 'react';
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query';
 import { useAuth } from '../../store/AuthContext.jsx';
-import { getEvent, toggleTask, updateEventSop } from '../../api/events.api.js';
-import { STATE, triggerLabel, dueLabel } from './meta.js';
+import { getEvent, toggleTask, updateEventSop, rejectAssignment, requestExtension, decideExtension } from '../../api/events.api.js';
+import { STATE, triggerLabel, dueLabel, anchorDate } from './meta.js';
 
 const triggerLabelDate = (d) => (d ? new Date(`${d}T00:00:00`).toLocaleDateString(undefined, { day: 'numeric', month: 'short' }) : '');
 import EventChat from '../messages/EventChat.jsx';
 import SopFields from './SopFields.jsx';
+import DueDatePicker from './DueDatePicker.jsx';
+
+// A proposed extension offset+time → a human date, using the project's anchor.
+const proposedLabel = (e, ext) => dueLabel(e, { dueOffset: ext.offset, dueTime: ext.time });
 
 function Badge({ state }) {
   const m = STATE[state] || STATE.upcoming;
@@ -18,6 +22,9 @@ export default function EventDrawer({ id, onClose }) {
   const qc = useQueryClient();
   const q = useQuery({ queryKey: ['event', id], queryFn: () => getEvent(id), retry: false });
   const toggle = useMutation({ mutationFn: toggleTask, onSuccess: () => qc.invalidateQueries() });
+  const reject = useMutation({ mutationFn: ({ taskId, reason }) => rejectAssignment(taskId, { reason }), onSuccess: () => qc.invalidateQueries() });
+  const extend = useMutation({ mutationFn: ({ taskId, dueOffset, dueTime }) => requestExtension(taskId, { dueOffset, dueTime }), onSuccess: () => qc.invalidateQueries() });
+  const decideExt = useMutation({ mutationFn: ({ taskId, decision }) => decideExtension(taskId, decision), onSuccess: () => qc.invalidateQueries() });
 
   const e = q.data;
   const isAdmin = user?.id === 'ceo' || user?.id === 'EP002' || user?.role === 'HR Head';
@@ -71,29 +78,104 @@ export default function EventDrawer({ id, onClose }) {
               <div className="text-xs font-semibold uppercase tracking-wide text-ink-soft">Tasks · {e.tasksDone}/{e.tasksTotal}</div>
               <div className="mt-3 space-y-2">
                 {e.tasks.length === 0 && <p className="text-sm text-ink-soft">No tasks.</p>}
-                {e.tasks.map((t) => {
-                  const canToggle = t.assignees.some((a) => a.id === user?.id) || e.ownerId === user?.id;
-                  return (
-                    <div key={t.id} className="flex items-start gap-3 border-b border-line/60 pb-2 last:border-0">
-                      <input type="checkbox" checked={t.completed} disabled={!canToggle || toggle.isPending}
-                        onChange={() => toggle.mutate(t.id)} className="mt-1" />
-                      <div className="flex-1">
-                        <div className={`text-sm ${t.completed ? 'text-ink-soft line-through' : ''}`}>{t.name}</div>
-                        <div className="text-xs text-ink-soft">
-                          {t.assignees.map((a) => a.name).join(', ') || 'Unassigned'}
-                          {dueLabel(e, t) ? ` · due ${dueLabel(e, t)}` : ''}
-                          {t.completedLate ? ' · completed late' : ''}
-                        </div>
-                      </div>
-                    </div>
-                  );
-                })}
+                {e.tasks.map((t) => (
+                  <TaskItem key={t.id} e={e} t={t} user={user} toggle={toggle} reject={reject} extend={extend} decideExt={decideExt} />
+                ))}
               </div>
             </section>
 
             <EventChat eventId={id} />
           </>
         )}
+      </div>
+    </div>
+  );
+}
+
+// One task row: completion + assignee statuses, plus the assignee's reject /
+// request-extension controls and the owner's approve-extension controls.
+function TaskItem({ e, t, user, toggle, reject, extend, decideExt }) {
+  const [rejecting, setRejecting] = useState(false);
+  const [reason, setReason] = useState('');
+  const [extending, setExtending] = useState(false);
+  const [propose, setPropose] = useState({ dueOffset: t.dueOffset ?? 0, dueTime: t.dueTime || null });
+
+  const mine = t.assignees.find((a) => a.id === user?.id);
+  const isAccepted = !!mine && mine.status !== 'rejected';
+  const isOwner = e.ownerId === user?.id;
+  const dated = e.status === 'confirmed' && !!e.triggerMonth;
+  const rejected = t.assignees.filter((a) => a.status === 'rejected');
+  const busy = reject.isPending || extend.isPending || decideExt.isPending || toggle.isPending;
+
+  return (
+    <div className="border-b border-line/60 pb-2 last:border-0">
+      <div className="flex items-start gap-3">
+        <input type="checkbox" checked={t.completed} disabled={!(isAccepted || isOwner) || busy}
+          onChange={() => toggle.mutate(t.id)} className="mt-1" />
+        <div className="min-w-0 flex-1">
+          <div className={`text-sm ${t.completed ? 'text-ink-soft line-through' : ''}`}>{t.name}</div>
+          <div className="text-xs text-ink-soft">
+            {t.assignees.length === 0 ? 'Unassigned' : t.assignees.map((a, i) => (
+              <span key={a.id}>{i > 0 && ', '}
+                <span className={a.status === 'rejected' ? 'text-brick line-through' : ''}>{a.name}</span>
+              </span>
+            ))}
+            {dueLabel(e, t) ? ` · due ${dueLabel(e, t)}` : ''}
+            {t.completedLate ? ' · completed late' : ''}
+          </div>
+
+          {/* rejection reasons (visible to everyone on the task) */}
+          {rejected.map((a) => (
+            <div key={a.id} className="mt-0.5 text-[11px] text-brick">✕ {a.name} rejected{a.rejectedReason ? `: ${a.rejectedReason}` : ''}</div>
+          ))}
+
+          {/* pending extension — the owner decides */}
+          {t.ext && (
+            <div className="mt-1.5 rounded-lg border border-ochre/40 bg-ochre-tint/40 px-2.5 py-1.5 text-xs">
+              <span className="text-ochre">⏳ Extension requested → {proposedLabel(e, t.ext)}</span>
+              {isOwner && (
+                <div className="mt-1 flex gap-2">
+                  <button disabled={busy} onClick={() => decideExt.mutate({ taskId: t.id, decision: 'approved' })}
+                    className="rounded bg-pine px-2 py-0.5 font-medium text-white disabled:opacity-50">Approve</button>
+                  <button disabled={busy} onClick={() => decideExt.mutate({ taskId: t.id, decision: 'rejected' })}
+                    className="rounded border border-line px-2 py-0.5 hover:border-brick hover:text-brick disabled:opacity-50">Decline</button>
+                </div>
+              )}
+            </div>
+          )}
+
+          {/* assignee actions */}
+          {isAccepted && !t.completed && !rejecting && !extending && (
+            <div className="mt-1.5 flex gap-3 text-[11px]">
+              <button onClick={() => setRejecting(true)} className="text-ink-soft hover:text-brick">Reject</button>
+              {dated && !t.ext && <button onClick={() => setExtending(true)} className="text-ink-soft hover:text-pine">Request extension</button>}
+            </div>
+          )}
+
+          {rejecting && (
+            <div className="mt-1.5 space-y-1.5">
+              <input value={reason} onChange={(ev) => setReason(ev.target.value)} placeholder="Reason (optional)"
+                className="w-full rounded-lg border border-line px-2 py-1 text-xs outline-none focus:border-pine" />
+              <div className="flex gap-2 text-[11px]">
+                <button disabled={busy} onClick={() => reject.mutate({ taskId: t.id, reason })}
+                  className="rounded bg-brick px-2 py-0.5 font-medium text-white disabled:opacity-50">Confirm reject</button>
+                <button onClick={() => { setRejecting(false); setReason(''); }} className="text-ink-soft">Cancel</button>
+              </div>
+            </div>
+          )}
+
+          {extending && dated && (
+            <div className="mt-1.5 space-y-1.5">
+              <span className="text-[11px] text-ink-soft">Propose a new deadline:</span>
+              <DueDatePicker anchor={anchorDate(e.triggerMonth, e.triggerDay)} value={propose} onChange={setPropose} />
+              <div className="flex gap-2 text-[11px]">
+                <button disabled={busy || propose.dueOffset == null} onClick={() => extend.mutate({ taskId: t.id, dueOffset: propose.dueOffset, dueTime: propose.dueTime })}
+                  className="rounded bg-pine px-2 py-0.5 font-medium text-white disabled:opacity-50">Send request</button>
+                <button onClick={() => setExtending(false)} className="text-ink-soft">Cancel</button>
+              </div>
+            </div>
+          )}
+        </div>
       </div>
     </div>
   );
