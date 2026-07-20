@@ -81,20 +81,36 @@ const ordinal = (n) => { const s = ['th', 'st', 'nd', 'rd']; const v = n % 100; 
 
 const cfgFor = (freq, cfg) => (freq === 'Yearly' ? null : { ...DEFAULT_DEADLINE[freq], ...(cfg || {}) });
 
-// The current period's deadline DateTime for a user's checklist of `freq`.
-function deadlineDate(freq, cfg, now) {
+// Deadline times are wall-clock IST (the company is India-only; IST has no DST).
+// The server may run in UTC (Render does), so deadline instants are computed
+// explicitly at UTC+5:30 — NOT via local setHours, which would read "6 PM" as
+// 6 PM *server* time (11:30 PM IST) and miss genuinely-late completions. This
+// math is server-timezone-independent, so it's correct on Render and in dev.
+const IST_OFFSET_MS = 330 * 60000;
+const istParts = (now) => {
+  const s = new Date(now.getTime() + IST_OFFSET_MS); // shift, then read via UTC getters
+  return { y: s.getUTCFullYear(), mo: s.getUTCMonth(), d: s.getUTCDate(), dow: s.getUTCDay() };
+};
+// Absolute instant of a given IST wall-clock date + time.
+const istInstant = (y, mo, d, h, mi) => new Date(Date.UTC(y, mo, d, h, mi, 0) - IST_OFFSET_MS);
+
+// The current period's deadline DateTime for a user's checklist of `freq` (IST).
+// Exported for timezone tests.
+export function deadlineDate(freq, cfg, now) {
   const c = cfgFor(freq, cfg);
   if (!c) return null;
   const [h, m] = (c.time || '18:00').split(':').map(Number);
-  if (freq === 'Daily') { const d = new Date(now); d.setHours(h, m, 0, 0); return d; }
+  const p = istParts(now);
+  if (freq === 'Daily') return istInstant(p.y, p.mo, p.d, h, m);
   if (freq === 'Weekly') {
-    const ws = weekStart(now); // Monday 00:00
-    const offset = ((c.weekday ?? 5) + 6) % 7; // Mon=0 … Sun=6
-    const d = new Date(ws); d.setDate(ws.getDate() + offset); d.setHours(h, m, 0, 0); return d;
+    // config weekday 0=Sun..6=Sat → its date within the current IST week (Mon-start)
+    const monIdx = (dow) => (dow + 6) % 7;
+    const delta = monIdx(c.weekday ?? 5) - monIdx(p.dow);
+    return istInstant(p.y, p.mo, p.d + delta, h, m); // Date.UTC normalises over/underflow
   }
   if (freq === 'Monthly') {
-    const last = new Date(now.getFullYear(), now.getMonth() + 1, 0).getDate();
-    return new Date(now.getFullYear(), now.getMonth(), Math.min(c.dayOfMonth ?? last, last), h, m, 0, 0);
+    const last = new Date(Date.UTC(p.y, p.mo + 1, 0)).getUTCDate(); // last day of the IST month
+    return istInstant(p.y, p.mo, Math.min(c.dayOfMonth ?? last, last), h, m);
   }
   return null;
 }
