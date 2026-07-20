@@ -160,24 +160,32 @@ function TaskRow({ t, showOwner }) {
   );
 }
 
-// Auto/manual approval toggle for this report's created projects.
+// Auto/manual approval toggles for this report's created projects AND tasks.
 function ApprovalToggle({ uid }) {
   const qc = useQueryClient();
   const q = useQuery({ queryKey: ['approval-modes'], queryFn: getApprovalModes, retry: false });
   const mode = (q.data || []).find((r) => r.id === uid);
-  const auto = mode?.autoApproveProjects !== false;
   const mut = useMutation({
-    mutationFn: (next) => setApprovalMode(uid, next),
+    mutationFn: (patch) => setApprovalMode(uid, patch),
     onSuccess: () => qc.invalidateQueries({ queryKey: ['approval-modes'] }),
   });
+  const Row = ({ label, field }) => {
+    const auto = mode?.[field] !== false;
+    return (
+      <label className="flex items-center gap-2 text-sm">
+        <span className="text-ink-soft">{label}:</span>
+        <button onClick={() => mut.mutate({ [field]: !auto })} disabled={mut.isPending}
+          className={`rounded-full px-3 py-1 text-xs font-medium ${auto ? 'bg-pine text-white' : 'border border-line text-ink-soft'}`}>
+          {auto ? 'Auto-approve' : 'Needs my approval'}
+        </button>
+      </label>
+    );
+  };
   return (
-    <label className="flex cursor-pointer items-center gap-2 text-sm">
-      <span className="text-ink-soft">Projects go live:</span>
-      <button onClick={() => mut.mutate(!auto)} disabled={mut.isPending}
-        className={`rounded-full px-3 py-1 text-xs font-medium ${auto ? 'bg-pine text-white' : 'border border-line text-ink-soft'}`}>
-        {auto ? 'Auto-approve' : 'Needs my approval'}
-      </button>
-    </label>
+    <div className="flex flex-col gap-1.5">
+      <Row label="Projects go live" field="autoApproveProjects" />
+      <Row label="Tasks go live" field="autoApproveTasks" />
+    </div>
   );
 }
 

@@ -1,20 +1,31 @@
 import { useState } from 'react';
-import { useQuery } from '@tanstack/react-query';
+import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query';
 import { getEvents } from '../api/events.api.js';
+import { getMyTasks, getTasksIAssigned, toggleDirectTask, rejectDirectAssignment, deleteDirectTask } from '../api/directTasks.api.js';
+import { useAuth } from '../store/AuthContext.jsx';
 import { STATE, FILTERS, triggerLabel } from '../features/events/meta.js';
 import EventDrawer from '../features/events/EventDrawer.jsx';
 import NewEventModal from '../features/events/NewEventModal.jsx';
+import AssignTaskModal from '../features/tasks/AssignTaskModal.jsx';
 
 function Badge({ state }) {
   const m = STATE[state] || STATE.upcoming;
   return <span className="rounded px-2 py-0.5 text-xs font-medium" style={{ color: m.c, background: m.b }}>{m.label}</span>;
 }
 
+const taskDueLabel = (t) => {
+  if (!t.dueDate) return '';
+  const d = new Date(`${t.dueDate}T${t.dueTime || '00:00'}:00`);
+  const date = d.toLocaleDateString([], { month: 'short', day: 'numeric' });
+  return t.dueTime ? `${date}, ${d.toLocaleTimeString([], { hour: 'numeric', minute: '2-digit' })}` : date;
+};
+
 export default function Events() {
   const [filter, setFilter] = useState('all');
   const [mine, setMine] = useState(false);
   const [openId, setOpenId] = useState(null);
   const [showNew, setShowNew] = useState(false);
+  const [showNewTask, setShowNewTask] = useState(false);
 
   const q = useQuery({ queryKey: ['events', filter, mine], queryFn: () => getEvents(filter, mine), retry: false });
   const rows = q.data || [];
@@ -23,8 +34,13 @@ export default function Events() {
     <div className="space-y-5">
       <div className="flex flex-wrap items-center justify-between gap-2">
         <h1 className="font-serif text-3xl font-bold text-pine">Projects and Tasks</h1>
-        <button onClick={() => setShowNew(true)} className="rounded-lg bg-pine px-4 py-2 text-sm font-medium text-white hover:opacity-90">+ New project</button>
+        <div className="flex gap-2">
+          <button onClick={() => setShowNewTask(true)} className="rounded-lg border border-pine px-4 py-2 text-sm font-medium text-pine hover:bg-pine-tint">+ New task</button>
+          <button onClick={() => setShowNew(true)} className="rounded-lg bg-pine px-4 py-2 text-sm font-medium text-white hover:opacity-90">+ New project</button>
+        </div>
       </div>
+
+      <DirectTasks />
 
       <div className="flex flex-wrap items-center gap-2">
         {FILTERS.map(([f, label]) => (
@@ -61,6 +77,64 @@ export default function Events() {
 
       {openId && <EventDrawer id={openId} onClose={() => setOpenId(null)} />}
       {showNew && <NewEventModal onClose={() => setShowNew(false)} />}
+      {showNewTask && <AssignTaskModal onClose={() => setShowNewTask(false)} />}
+    </div>
+  );
+}
+
+// Standalone (ad-hoc) tasks — assigned to me, plus a peek at ones I assigned.
+function DirectTasks() {
+  const { user } = useAuth();
+  const qc = useQueryClient();
+  const mineQ = useQuery({ queryKey: ['direct-tasks-mine'], queryFn: getMyTasks, retry: false });
+  const assignedQ = useQuery({ queryKey: ['direct-tasks-assigned'], queryFn: getTasksIAssigned, retry: false });
+  const invalidate = () => { qc.invalidateQueries({ queryKey: ['direct-tasks-mine'] }); qc.invalidateQueries({ queryKey: ['direct-tasks-assigned'] }); };
+  const toggle = useMutation({ mutationFn: toggleDirectTask, onSuccess: invalidate });
+  const reject = useMutation({ mutationFn: (id) => rejectDirectAssignment(id, {}), onSuccess: invalidate });
+  const del = useMutation({ mutationFn: deleteDirectTask, onSuccess: invalidate });
+
+  const mine = (mineQ.data || []).filter((t) => (t.assignees.find((a) => a.id === user?.id) || {}).status !== 'rejected');
+  const iAssigned = assignedQ.data || [];
+  const pendingMine = iAssigned.filter((t) => t.approval === 'pending');
+  if (!mine.length && !iAssigned.length) return null;
+
+  return (
+    <div className="grid gap-4 sm:grid-cols-2">
+      <section className="rounded-2xl border border-line bg-white p-4">
+        <div className="text-xs font-semibold uppercase tracking-wide text-ink-soft">My tasks · {mine.length}</div>
+        <div className="mt-2 space-y-1.5">
+          {mine.length === 0 && <p className="text-sm text-ink-soft">No tasks assigned to you.</p>}
+          {mine.map((t) => (
+            <div key={t.id} className="group flex items-center gap-2 border-b border-line/60 py-1 text-sm last:border-0">
+              <button onClick={() => toggle.mutate(t.id)}
+                className={`flex h-4 w-4 shrink-0 items-center justify-center rounded-full border ${t.completed ? 'border-sage bg-sage text-white' : t.overdue ? 'border-brick' : 'border-line'}`}>
+                {t.completed ? '✓' : ''}
+              </button>
+              <span className={`flex-1 ${t.completed ? 'text-ink-soft line-through' : t.overdue ? 'text-brick' : ''}`}>{t.title}</span>
+              {taskDueLabel(t) && <span className="text-[11px] text-ink-soft">due {taskDueLabel(t)}</span>}
+              <span className="text-[11px] text-ink-soft">by {t.assignerName}</span>
+              {!t.completed && <button onClick={() => reject.mutate(t.id)} className="text-[11px] text-ink-soft opacity-0 hover:text-brick group-hover:opacity-100">reject</button>}
+            </div>
+          ))}
+        </div>
+      </section>
+
+      <section className="rounded-2xl border border-line bg-white p-4">
+        <div className="text-xs font-semibold uppercase tracking-wide text-ink-soft">I assigned · {iAssigned.length}{pendingMine.length ? ` · ${pendingMine.length} pending approval` : ''}</div>
+        <div className="mt-2 space-y-1.5">
+          {iAssigned.length === 0 && <p className="text-sm text-ink-soft">You haven't assigned any tasks.</p>}
+          {iAssigned.map((t) => (
+            <div key={t.id} className="group flex items-center gap-2 border-b border-line/60 py-1 text-sm last:border-0">
+              <span className={`flex-1 ${t.completed ? 'text-ink-soft line-through' : ''}`}>{t.title}</span>
+              <span className="text-[11px] text-ink-soft">{t.assignees.map((a) => a.name).join(', ')}</span>
+              {t.approval === 'pending' && <span className="rounded bg-ochre-tint px-1.5 text-[10px] text-ochre">pending approval</span>}
+              {t.approval === 'rejected' && <span className="rounded bg-brick/10 px-1.5 text-[10px] text-brick">rejected</span>}
+              {t.completed && <span className="rounded bg-sage/15 px-1.5 text-[10px] text-sage">done</span>}
+              <button onClick={() => del.mutate(t.id)} className="text-[11px] text-ink-soft opacity-0 hover:text-brick group-hover:opacity-100">✕</button>
+            </div>
+          ))}
+        </div>
+      </section>
     </div>
   );
 }
