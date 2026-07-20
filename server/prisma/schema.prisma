@@ -657,8 +657,40 @@ model ChecklistItem {
   createdById String?
   sort        Int       @default(0)
   createdAt   DateTime  @default(now())
+  completions ChecklistCompletion[]
 
   @@index([userId])
+}
+
+// A manager-set deadline for an employee's checklist items of one frequency.
+// When none is set, sensible defaults apply (Daily 6pm / Weekly Fri 6pm /
+// Monthly last-day 6pm), so pending/delay tracking works before customisation.
+model ChecklistDeadline {
+  id         String @id @default(uuid())
+  userId     String
+  frequency  String // Daily | Weekly | Monthly
+  time       String @default("18:00") // "HH:MM"
+  weekday    Int? // 0=Sun … 6=Sat, for Weekly
+  dayOfMonth Int? // 1–31 (clamped to the month's length), for Monthly
+
+  @@unique([userId, frequency])
+  @@index([userId])
+}
+
+// One row per checklist item per period once completed — the history behind
+// delayed-completion reporting. `late` = completed after that period's deadline.
+model ChecklistCompletion {
+  id          String        @id @default(uuid())
+  itemId      String
+  item        ChecklistItem @relation(fields: [itemId], references: [id], onDelete: Cascade)
+  userId      String
+  periodKey   String // "2026-07-19" | "2026-W7-14" | "2026-7" | "2026"
+  completedAt DateTime      @default(now())
+  dueAt       DateTime?
+  late        Boolean       @default(false)
+
+  @@unique([itemId, periodKey])
+  @@index([userId, late])
 }
 
 // ── Announcements (Step 14) ──────────────────────────────────────

@@ -68,6 +68,51 @@ export const deleteOkr = (id) => prisma.okr.delete({ where: { id } }).catch(() =
 export const setApproved = (userId, year, month, approved) =>
   prisma.okrApproval.upsert({ where: { userId_year_month: { userId, year, month } }, update: { approved }, create: { userId, year, month, approved } });
 
+// ── Checklist deadlines ──
+// Applied when a manager hasn't set a custom deadline. Yearly has none.
+const DEFAULT_DEADLINE = {
+  Daily: { time: '18:00' },
+  Weekly: { time: '18:00', weekday: 5 }, // Friday
+  Monthly: { time: '18:00', dayOfMonth: 31 }, // clamped to the month's last day
+};
+const DOW = ['Sun', 'Mon', 'Tue', 'Wed', 'Thu', 'Fri', 'Sat'];
+const to12h = (hhmm) => { const [h, m] = (hhmm || '18:00').split(':').map(Number); const ap = h < 12 ? 'AM' : 'PM'; const h12 = h % 12 || 12; return `${h12}:${String(m).padStart(2, '0')} ${ap}`; };
+const ordinal = (n) => { const s = ['th', 'st', 'nd', 'rd']; const v = n % 100; return `${n}${s[(v - 20) % 10] || s[v] || s[0]}`; };
+
+const cfgFor = (freq, cfg) => (freq === 'Yearly' ? null : { ...DEFAULT_DEADLINE[freq], ...(cfg || {}) });
+
+// The current period's deadline DateTime for a user's checklist of `freq`.
+function deadlineDate(freq, cfg, now) {
+  const c = cfgFor(freq, cfg);
+  if (!c) return null;
+  const [h, m] = (c.time || '18:00').split(':').map(Number);
+  if (freq === 'Daily') { const d = new Date(now); d.setHours(h, m, 0, 0); return d; }
+  if (freq === 'Weekly') {
+    const ws = weekStart(now); // Monday 00:00
+    const offset = ((c.weekday ?? 5) + 6) % 7; // Mon=0 … Sun=6
+    const d = new Date(ws); d.setDate(ws.getDate() + offset); d.setHours(h, m, 0, 0); return d;
+  }
+  if (freq === 'Monthly') {
+    const last = new Date(now.getFullYear(), now.getMonth() + 1, 0).getDate();
+    return new Date(now.getFullYear(), now.getMonth(), Math.min(c.dayOfMonth ?? last, last), h, m, 0, 0);
+  }
+  return null;
+}
+function deadlineLabel(freq, cfg) {
+  const c = cfgFor(freq, cfg);
+  if (!c) return null;
+  const t = to12h(c.time);
+  if (freq === 'Daily') return `by ${t}`;
+  if (freq === 'Weekly') return `by ${DOW[c.weekday ?? 5]} ${t}`;
+  return `by the ${c.dayOfMonth === 31 ? 'last day' : ordinal(c.dayOfMonth ?? 31)} · ${t}`;
+}
+function periodKey(now, freq) {
+  if (freq === 'Weekly') { const ws = weekStart(now); return `${ws.getFullYear()}-W${ws.getMonth() + 1}-${ws.getDate()}`; }
+  if (freq === 'Monthly') return `${now.getFullYear()}-${now.getMonth() + 1}`;
+  if (freq === 'Yearly') return `${now.getFullYear()}`;
+  return now.toISOString().slice(0, 10);
+}
+
 // ── Checklists ──
 async function ensureChecklist(userId) {
   if ((await prisma.checklistItem.count({ where: { userId } })) === 0) {
@@ -78,11 +123,30 @@ async function ensureChecklist(userId) {
 }
 export async function getChecklist(userId) {
   await ensureChecklist(userId);
-  const items = await prisma.checklistItem.findMany({ where: { userId }, orderBy: [{ sort: 'asc' }, { createdAt: 'asc' }] });
   const now = new Date();
+  const [items, cfgs] = await Promise.all([
+    prisma.checklistItem.findMany({ where: { userId }, orderBy: [{ sort: 'asc' }, { createdAt: 'asc' }] }),
+    prisma.checklistDeadline.findMany({ where: { userId } }),
+  ]);
+  const cfgBy = Object.fromEntries(cfgs.map((c) => [c.frequency, c]));
   const grouped = Object.fromEntries(FREQS.map((f) => [f, []]));
-  for (const it of items) grouped[it.frequency]?.push({ id: it.id, text: it.text, frequency: it.frequency, checked: samePeriod(it.checkedAt, now, it.frequency) });
+  for (const it of items) {
+    const checked = samePeriod(it.checkedAt, now, it.frequency);
+    const dl = deadlineDate(it.frequency, cfgBy[it.frequency], now);
+    grouped[it.frequency]?.push({
+      id: it.id, text: it.text, frequency: it.frequency, checked,
+      deadline: deadlineLabel(it.frequency, cfgBy[it.frequency]),
+      overdue: !checked && !!dl && now > dl,
+    });
+  }
   return grouped;
+}
+
+// The user's uncompleted items for the current period, overdue first.
+export async function getPendingChecklist(userId) {
+  const grouped = await getChecklist(userId);
+  const pending = FREQS.flatMap((f) => grouped[f]).filter((it) => !it.checked);
+  return pending.sort((a, b) => (b.overdue ? 1 : 0) - (a.overdue ? 1 : 0));
 }
 export const addChecklistItem = (userId, frequency, text, by) => {
   if (!FREQS.includes(frequency)) throw new ApiError(400, 'Invalid frequency');
@@ -94,8 +158,56 @@ export async function toggleChecklistItem(id) {
   const it = await prisma.checklistItem.findUnique({ where: { id } });
   if (!it) throw new ApiError(404, 'Item not found');
   const now = new Date();
-  const checkedAt = samePeriod(it.checkedAt, now, it.frequency) ? null : now;
-  return prisma.checklistItem.update({ where: { id }, data: { checkedAt } });
+  const key = periodKey(now, it.frequency);
+  const wasChecked = samePeriod(it.checkedAt, now, it.frequency);
+
+  if (wasChecked) {
+    // Un-check → drop this period's completion record.
+    await prisma.checklistCompletion.deleteMany({ where: { itemId: id, periodKey: key } });
+    return prisma.checklistItem.update({ where: { id }, data: { checkedAt: null } });
+  }
+  // Check → log the completion and whether it was after the deadline.
+  const cfg = await prisma.checklistDeadline.findUnique({ where: { userId_frequency: { userId: it.userId, frequency: it.frequency } } });
+  const dl = deadlineDate(it.frequency, cfg, now);
+  const late = !!(dl && now > dl);
+  await prisma.checklistCompletion.upsert({
+    where: { itemId_periodKey: { itemId: id, periodKey: key } },
+    create: { itemId: id, userId: it.userId, periodKey: key, completedAt: now, dueAt: dl, late },
+    update: { completedAt: now, dueAt: dl, late },
+  });
+  return prisma.checklistItem.update({ where: { id }, data: { checkedAt: now } });
+}
+
+// ── Deadline config (a manager sets these for a direct report) ──
+export async function getDeadlines(userId) {
+  const cfgs = await prisma.checklistDeadline.findMany({ where: { userId } });
+  const by = Object.fromEntries(cfgs.map((c) => [c.frequency, c]));
+  return ['Daily', 'Weekly', 'Monthly'].map((frequency) => ({
+    frequency, ...DEFAULT_DEADLINE[frequency], ...(by[frequency] || {}),
+    configured: !!by[frequency], label: deadlineLabel(frequency, by[frequency]),
+  }));
+}
+export async function setDeadline(userId, frequency, { time, weekday, dayOfMonth } = {}) {
+  if (!['Daily', 'Weekly', 'Monthly'].includes(frequency)) throw new ApiError(400, 'Invalid frequency');
+  const data = {
+    time: /^\d{1,2}:\d{2}$/.test(time || '') ? time : '18:00',
+    weekday: frequency === 'Weekly' ? Math.min(6, Math.max(0, parseInt(weekday, 10) || 5)) : null,
+    dayOfMonth: frequency === 'Monthly' ? Math.min(31, Math.max(1, parseInt(dayOfMonth, 10) || 31)) : null,
+  };
+  return prisma.checklistDeadline.upsert({
+    where: { userId_frequency: { userId, frequency } },
+    create: { userId, frequency, ...data }, update: data,
+  });
+}
+
+// Delayed-completion stats for one employee (for My Team reporting, Phase D).
+export async function checklistDelayStats(userId, sinceDays = 30) {
+  const since = new Date(Date.now() - sinceDays * 86400000);
+  const [total, late] = await Promise.all([
+    prisma.checklistCompletion.count({ where: { userId, completedAt: { gte: since } } }),
+    prisma.checklistCompletion.count({ where: { userId, late: true, completedAt: { gte: since } } }),
+  ]);
+  return { total, late, onTimePct: total ? Math.round(((total - late) / total) * 100) : 100, sinceDays };
 }
 
 // Ownership lookups (for authz in the controller).

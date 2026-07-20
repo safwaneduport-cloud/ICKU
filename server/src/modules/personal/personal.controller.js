@@ -118,3 +118,24 @@ export async function toggleChecklistItem(req, res, next) {
     res.json({ data: await service.toggleChecklistItem(req.params.id), error: null });
   } catch (e) { next(e); }
 }
+
+export async function getPendingChecklist(req, res, next) {
+  try { const t = targetOf(req); await assertManage(req.user, t); res.json({ data: await service.getPendingChecklist(t), error: null }); }
+  catch (e) { next(e); }
+}
+export async function getDeadlines(req, res, next) {
+  try { const t = targetOf(req); await assertManage(req.user, t); res.json({ data: await service.getDeadlines(t), error: null }); }
+  catch (e) { next(e); }
+}
+export async function setDeadline(req, res, next) {
+  try {
+    const t = req.query.userId || req.body?.userId;
+    if (!t) throw new ApiError(400, 'userId is required');
+    await assertSupervise(req.user, t); // only their manager (or admin) sets it
+    res.json({ data: await service.setDeadline(t, req.params.frequency, req.body || {}), error: null });
+  } catch (e) { next(e); }
+}
+export async function checklistDelays(req, res, next) {
+  try { const t = targetOf(req); await assertManage(req.user, t); res.json({ data: await service.checklistDelayStats(t, Number(req.query.days) || 30), error: null }); }
+  catch (e) { next(e); }
+}

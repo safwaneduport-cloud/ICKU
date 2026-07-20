@@ -5,7 +5,7 @@ import { getReports } from '../api/users.api.js';
 import {
   getDuties, addDuty, deleteDuty,
   getOkrs, addOkr, updateOkr, deleteOkr, approveOkrs,
-  getChecklist, addChecklistItem, deleteChecklistItem, toggleChecklistItem,
+  getChecklist, addChecklistItem, deleteChecklistItem, toggleChecklistItem, getPendingChecklist,
 } from '../api/personal.api.js';
 
 const MONTHS = ['Jan', 'Feb', 'Mar', 'Apr', 'May', 'Jun', 'Jul', 'Aug', 'Sep', 'Oct', 'Nov', 'Dec'];
@@ -35,7 +35,7 @@ export default function Okrs() {
       </div>
 
       <div className="flex gap-2">
-        {[['responsibilities', 'Responsibilities'], ['okrs', 'OKRs'], ['checklist', 'Checklists']].map(([t, label]) => (
+        {[['responsibilities', 'Responsibilities'], ['okrs', 'OKRs'], ['checklist', 'Checklists'], ['pending', 'Pending']].map(([t, label]) => (
           <button key={t} onClick={() => setTab(t)}
             className={`rounded-full px-4 py-1.5 text-sm font-medium ${tab === t ? 'bg-pine text-white' : 'border border-line bg-white text-ink-soft'}`}>
             {label}
@@ -46,6 +46,7 @@ export default function Okrs() {
       {tab === 'responsibilities' && <Duties userId={target} isSelf={isSelf} />}
       {tab === 'okrs' && <OkrsTab userId={target} isSelf={isSelf} />}
       {tab === 'checklist' && <ChecklistTab userId={target} />}
+      {tab === 'pending' && <PendingTab userId={target} />}
     </div>
   );
 }
@@ -163,15 +164,19 @@ function ChecklistTab({ userId }) {
     <div className="grid gap-4 sm:grid-cols-2">
       {FREQS.map((f) => (
         <section key={f} className="rounded-2xl border border-line bg-white p-5">
-          <div className="text-xs font-semibold uppercase tracking-wide text-ink-soft">{f}</div>
+          <div className="flex items-baseline justify-between">
+            <div className="text-xs font-semibold uppercase tracking-wide text-ink-soft">{f}</div>
+            {(d[f] || [])[0]?.deadline && <div className="text-[11px] text-ink-soft">{(d[f] || [])[0].deadline}</div>}
+          </div>
           <div className="mt-3 space-y-1.5">
             {(d[f] || []).map((it) => (
               <div key={it.id} className="group flex items-center gap-2">
                 <button onClick={() => toggle.mutate(it.id)}
-                  className={`flex h-4 w-4 shrink-0 items-center justify-center rounded-full border ${it.checked ? 'border-sage bg-sage text-white' : 'border-line'}`}>
+                  className={`flex h-4 w-4 shrink-0 items-center justify-center rounded-full border ${it.checked ? 'border-sage bg-sage text-white' : it.overdue ? 'border-brick' : 'border-line'}`}>
                   {it.checked ? '✓' : ''}
                 </button>
-                <span className={`flex-1 text-sm ${it.checked ? 'text-ink-soft line-through' : ''}`}>{it.text}</span>
+                <span className={`flex-1 text-sm ${it.checked ? 'text-ink-soft line-through' : it.overdue ? 'text-brick' : ''}`}>{it.text}</span>
+                {it.overdue && <span className="text-[10px] font-medium text-brick">overdue</span>}
                 <button onClick={() => del.mutate(it.id)} className="text-xs text-ink-soft opacity-0 hover:text-brick group-hover:opacity-100">✕</button>
               </div>
             ))}
@@ -184,5 +189,38 @@ function ChecklistTab({ userId }) {
         </section>
       ))}
     </div>
+  );
+}
+
+// ── Pending checklists (this period's unchecked items, overdue first) ──
+function PendingTab({ userId }) {
+  const qc = useQueryClient();
+  const q = useQuery({ queryKey: ['checklist-pending', userId], queryFn: () => getPendingChecklist(userId), retry: false });
+  const toggle = useMutation({
+    mutationFn: toggleChecklistItem,
+    onSuccess: () => { qc.invalidateQueries({ queryKey: ['checklist-pending', userId] }); qc.invalidateQueries({ queryKey: ['checklist', userId] }); },
+  });
+  const items = q.data || [];
+  const overdue = items.filter((i) => i.overdue).length;
+
+  return (
+    <section className="rounded-2xl border border-line bg-white p-5">
+      <div className="flex items-baseline justify-between">
+        <h2 className="font-serif text-lg font-semibold text-pine">Pending this period</h2>
+        <span className="text-xs text-ink-soft">{items.length} pending{overdue ? ` · ${overdue} overdue` : ''}</span>
+      </div>
+      <div className="mt-3 space-y-1.5">
+        {items.length === 0 && <p className="py-6 text-center text-sm text-ink-soft">All caught up 🎉</p>}
+        {items.map((it) => (
+          <div key={it.id} className="flex items-center gap-2 border-b border-line/60 py-1.5 last:border-0">
+            <button onClick={() => toggle.mutate(it.id)}
+              className={`flex h-4 w-4 shrink-0 items-center justify-center rounded-full border ${it.overdue ? 'border-brick' : 'border-line'}`} />
+            <span className={`flex-1 text-sm ${it.overdue ? 'text-brick' : ''}`}>{it.text}</span>
+            <span className="text-[11px] text-ink-soft">{it.frequency} · {it.deadline || 'no deadline'}</span>
+            {it.overdue && <span className="rounded bg-brick/10 px-1.5 py-0.5 text-[10px] font-medium text-brick">overdue</span>}
+          </div>
+        ))}
+      </div>
+    </section>
   );
 }

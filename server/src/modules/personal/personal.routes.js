@@ -17,9 +17,15 @@ router.post('/okrs/approve', ctrl.approveOkrs);
 
 // Checklists
 router.get('/checklist', ctrl.getChecklist); // ?userId
+router.get('/checklist/pending', ctrl.getPendingChecklist); // ?userId — before /:id routes
 router.post('/checklist', ctrl.addChecklistItem);
 router.patch('/checklist/:id', ctrl.updateChecklistItem);
 router.delete('/checklist/:id', ctrl.deleteChecklistItem);
 router.post('/checklist/:id/toggle', ctrl.toggleChecklistItem);
+
+// Deadlines + delay reporting (manager-facing; UI lands in My Team, Phase D)
+router.get('/checklist-deadlines', ctrl.getDeadlines); // ?userId
+router.put('/checklist-deadlines/:frequency', ctrl.setDeadline); // ?userId
+router.get('/checklist-delays', ctrl.checklistDelays); // ?userId&days
 
 export default router;
