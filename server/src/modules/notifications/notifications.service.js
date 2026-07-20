@@ -15,7 +15,7 @@ export async function list(user) {
   const reports = await prisma.user.findMany({ where: { reportsToId: me }, select: { id: true } });
   const reportIds = reports.map((r) => r.id);
 
-  const [tasks, events, leaves, expenses, announcements, kudos] = await Promise.all([
+  const [tasks, events, leaves, expenses, announcements, kudos, ownerTasks] = await Promise.all([
     // My overdue tasks.
     prisma.eventTask.findMany({
       where: { completed: false, assignees: { some: { userId: me } } },
@@ -56,6 +56,17 @@ export async function list(user) {
       take: 3,
       include: { from: { select: { name: true } } },
     }),
+    // Projects I own: task rejections and pending extension requests to act on.
+    prisma.eventTask.findMany({
+      where: {
+        event: { ownerId: me },
+        OR: [{ assignees: { some: { status: 'rejected' } } }, { extReqStatus: 'pending' }],
+      },
+      include: {
+        event: { select: { id: true, name: true } },
+        assignees: { where: { status: 'rejected' }, include: { user: { select: { name: true } } } },
+      },
+    }),
   ]);
 
   const items = [];
@@ -71,6 +82,18 @@ export async function list(user) {
   events.forEach((e) => {
     items.push({ id: `event-${e.id}`, kind: 'approval', actionable: true, at: e.createdAt,
       title: `Approve project: ${e.name}`, sub: `Raised by ${e.owner?.name || '—'}`, link: '/approvals' });
+  });
+
+  // Task rejections + extension requests on projects I own.
+  ownerTasks.forEach((t) => {
+    if (t.extReqStatus === 'pending') {
+      items.push({ id: `ext-${t.id}`, kind: 'approval', actionable: true, at: null,
+        title: `Extension requested: ${t.name}`, sub: t.event.name, link: '/events' });
+    }
+    t.assignees.forEach((a) => {
+      items.push({ id: `rej-${t.id}-${a.userId}`, kind: 'approval', actionable: true, at: a.rejectedAt,
+        title: `${a.user.name} rejected: ${t.name}`, sub: t.event.name, link: '/events' });
+    });
   });
 
   leaves.forEach((l) => {
