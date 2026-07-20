@@ -31,6 +31,12 @@ export async function decide(req, res, next) {
 export async function rejectAssignment(req, res, next) {
   try { res.json({ data: await service.rejectAssignment(req.user, req.params.id, req.body || {}), error: null }); } catch (e) { next(e); }
 }
+export async function addAssignees(req, res, next) {
+  try { res.json({ data: await service.addAssignees(req.user, req.params.id, req.body?.userIds || []), error: null }); } catch (e) { next(e); }
+}
+export async function removeAssignee(req, res, next) {
+  try { res.json({ data: await service.removeAssignee(req.user, req.params.id, req.params.userId), error: null }); } catch (e) { next(e); }
+}
 export async function remove(req, res, next) {
   try { res.json({ data: await service.remove(req.user, req.params.id), error: null }); } catch (e) { next(e); }
 }

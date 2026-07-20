@@ -10,6 +10,8 @@ export const rejectEvent = (id) => api.post(`/events/${id}/reject`).then((r) => 
 export const changeEventOwner = (id, ownerId) => api.post(`/events/${id}/owner`, { ownerId }).then((r) => r.data.data);
 export const toggleTask = (taskId) => api.post(`/events/tasks/${taskId}/toggle`).then((r) => r.data.data);
 export const rejectAssignment = (taskId, body) => api.post(`/events/tasks/${taskId}/reject-assignment`, body).then((r) => r.data.data);
+export const addTaskAssignees = (taskId, userIds) => api.post(`/events/tasks/${taskId}/assignees`, { userIds }).then((r) => r.data.data);
+export const removeTaskAssignee = (taskId, userId) => api.delete(`/events/tasks/${taskId}/assignees/${userId}`).then((r) => r.data.data);
 export const requestExtension = (taskId, body) => api.post(`/events/tasks/${taskId}/extension`, body).then((r) => r.data.data);
 export const decideExtension = (taskId, decision) => api.post(`/events/tasks/${taskId}/extension/${decision}`).then((r) => r.data.data);
 export const getApprovalModes = () => api.get('/events/approval-modes').then((r) => r.data.data);

@@ -1,8 +1,9 @@
 import { useState } from 'react';
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query';
 import { useAuth } from '../../store/AuthContext.jsx';
-import { getEvent, toggleTask, updateEventSop, rejectAssignment, requestExtension, decideExtension, changeEventOwner } from '../../api/events.api.js';
+import { getEvent, toggleTask, updateEventSop, rejectAssignment, requestExtension, decideExtension, changeEventOwner, addTaskAssignees, removeTaskAssignee } from '../../api/events.api.js';
 import { getUsers } from '../../api/users.api.js';
+import ReassignControl from '../tasks/ReassignControl.jsx';
 import { STATE, triggerLabel, dueLabel, anchorDate } from './meta.js';
 
 const triggerLabelDate = (d) => (d ? new Date(`${d}T00:00:00`).toLocaleDateString(undefined, { day: 'numeric', month: 'short' }) : '');
@@ -98,10 +99,15 @@ export default function EventDrawer({ id, onClose }) {
 // One task row: completion + assignee statuses, plus the assignee's reject /
 // request-extension controls and the owner's approve-extension controls.
 function TaskItem({ e, t, user, toggle, reject, extend, decideExt }) {
+  const qc = useQueryClient();
   const [rejecting, setRejecting] = useState(false);
   const [reason, setReason] = useState('');
   const [extending, setExtending] = useState(false);
+  const [reassigning, setReassigning] = useState(false);
   const [propose, setPropose] = useState({ dueOffset: t.dueOffset ?? 0, dueTime: t.dueTime || null });
+
+  const addAssignees = useMutation({ mutationFn: (userIds) => addTaskAssignees(t.id, userIds), onSuccess: () => qc.invalidateQueries() });
+  const removeAssignee = useMutation({ mutationFn: (userId) => removeTaskAssignee(t.id, userId), onSuccess: () => qc.invalidateQueries() });
 
   const mine = t.assignees.find((a) => a.id === user?.id);
   // "Live for me" needs both: my manager approved the assignment AND I haven't declined it.
@@ -156,6 +162,17 @@ function TaskItem({ e, t, user, toggle, reject, extend, decideExt }) {
               <button onClick={() => setRejecting(true)} className="text-ink-soft hover:text-brick">Reject</button>
               {dated && !t.ext && <button onClick={() => setExtending(true)} className="text-ink-soft hover:text-pine">Request extension</button>}
             </div>
+          )}
+
+          {/* owner reassign — add/drop recipients; each new one is re-gated */}
+          {isOwner && (
+            <div className="mt-1.5 text-[11px]">
+              <button onClick={() => setReassigning((v) => !v)} className={`hover:text-pine ${reassigning ? 'text-pine' : 'text-ink-soft'}`}>Reassign</button>
+            </div>
+          )}
+          {reassigning && (
+            <ReassignControl assignees={t.assignees} busy={addAssignees.isPending || removeAssignee.isPending}
+              onAdd={(userIds) => addAssignees.mutate(userIds)} onRemove={(userId) => removeAssignee.mutate(userId)} />
           )}
 
           {rejecting && (

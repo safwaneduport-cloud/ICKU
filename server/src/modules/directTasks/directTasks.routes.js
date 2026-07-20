@@ -13,6 +13,8 @@ router.post('/', ctrl.create);
 router.post('/:id/toggle', ctrl.toggle);
 router.post('/:id/assignee/:userId/decision/:decision', ctrl.decide); // approved | rejected, per recipient
 router.post('/:id/reject-assignment', ctrl.rejectAssignment);
+router.post('/:id/assignees', ctrl.addAssignees); // reassign: add recipients
+router.delete('/:id/assignees/:userId', ctrl.removeAssignee); // reassign: drop a recipient
 router.delete('/:id', ctrl.remove);
 
 export default router;

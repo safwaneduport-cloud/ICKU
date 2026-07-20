@@ -21,6 +21,8 @@ router.patch('/:id/sop', ctrl.updateSop);
 router.post('/:id/comments', ctrl.addComment);
 router.post('/tasks/:taskId/toggle', ctrl.toggleTask);
 router.post('/tasks/:taskId/reject-assignment', ctrl.rejectAssignment);
+router.post('/tasks/:taskId/assignees', ctrl.addTaskAssignees); // reassign: add recipients
+router.delete('/tasks/:taskId/assignees/:userId', ctrl.removeTaskAssignee); // reassign: drop a recipient
 router.post('/tasks/:taskId/assignee/:userId/decision/:decision', ctrl.decideTaskAssignee); // per-recipient approval
 router.post('/tasks/:taskId/extension', ctrl.requestExtension);
 router.post('/tasks/:taskId/extension/:decision', ctrl.decideExtension);

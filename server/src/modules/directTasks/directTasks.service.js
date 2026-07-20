@@ -115,6 +115,30 @@ export async function rejectAssignment(actor, id, { forUserId, reason } = {}) {
   });
 }
 
+// Reassign: the assigner adds one or more new recipients. Each new assignment is
+// re-gated by that recipient's own manager (same rule as creation).
+export async function addAssignees(actor, taskId, userIds = []) {
+  const t = await prisma.directTask.findUnique({ where: { id: taskId }, include: { assignees: true } });
+  if (!t) throw new ApiError(404, 'Task not found');
+  if (t.assignerId !== actor.id && !canAdmin(actor)) throw new ApiError(403, 'Only the assigner can reassign this task');
+  const existing = new Set(t.assignees.map((a) => a.userId));
+  const ids = [...new Set(userIds)].filter((id) => id && !existing.has(id));
+  if (!ids.length) throw new ApiError(400, 'Pick someone new to assign');
+  const recips = await prisma.user.findMany({ where: { id: { in: ids } }, select: { id: true, autoApproveTasks: true, reportsToId: true } });
+  const rmap = new Map(recips.map((u) => [u.id, u]));
+  await prisma.directTaskAssignee.createMany({ data: ids.map((userId) => ({ taskId, userId, ...gateFor(actor.id, rmap.get(userId)) })) });
+  return get(taskId);
+}
+
+// Reassign: the assigner removes a recipient entirely (drops their assignment).
+export async function removeAssignee(actor, taskId, userId) {
+  const t = await prisma.directTask.findUnique({ where: { id: taskId } });
+  if (!t) throw new ApiError(404, 'Task not found');
+  if (t.assignerId !== actor.id && !canAdmin(actor)) throw new ApiError(403, 'Only the assigner can reassign this task');
+  await prisma.directTaskAssignee.delete({ where: { taskId_userId: { taskId, userId } } }).catch(() => {});
+  return get(taskId);
+}
+
 // Ad-hoc task assignments awaiting my approval (I'm the recipient's manager) —
 // one row per pending recipient.
 export async function pendingApprovals(approverId) {

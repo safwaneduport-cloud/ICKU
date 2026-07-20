@@ -76,6 +76,16 @@ export async function rejectAssignment(req, res, next) {
   catch (e) { next(e); }
 }
 
+export async function addTaskAssignees(req, res, next) {
+  try { res.json({ data: await service.addTaskAssignees(req.user, req.params.taskId, req.body?.userIds || []), error: null }); }
+  catch (e) { next(e); }
+}
+
+export async function removeTaskAssignee(req, res, next) {
+  try { res.json({ data: await service.removeTaskAssignee(req.user, req.params.taskId, req.params.userId), error: null }); }
+  catch (e) { next(e); }
+}
+
 export async function requestExtension(req, res, next) {
   try { res.json({ data: await service.requestExtension(req.user, req.params.taskId, req.body || {}), error: null }); }
   catch (e) { next(e); }

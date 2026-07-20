@@ -1,7 +1,8 @@
 import { useState } from 'react';
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query';
 import { getEvents } from '../api/events.api.js';
-import { getMyTasks, getTasksIAssigned, toggleDirectTask, rejectDirectAssignment, deleteDirectTask } from '../api/directTasks.api.js';
+import { getMyTasks, getTasksIAssigned, toggleDirectTask, rejectDirectAssignment, deleteDirectTask, addDirectAssignees, removeDirectAssignee } from '../api/directTasks.api.js';
+import ReassignControl from '../features/tasks/ReassignControl.jsx';
 import { useAuth } from '../store/AuthContext.jsx';
 import { STATE, FILTERS, triggerLabel } from '../features/events/meta.js';
 import EventDrawer from '../features/events/EventDrawer.jsx';
@@ -92,6 +93,9 @@ function DirectTasks() {
   const toggle = useMutation({ mutationFn: toggleDirectTask, onSuccess: invalidate });
   const reject = useMutation({ mutationFn: (id) => rejectDirectAssignment(id, {}), onSuccess: invalidate });
   const del = useMutation({ mutationFn: deleteDirectTask, onSuccess: invalidate });
+  const addAssignees = useMutation({ mutationFn: ({ id, userIds }) => addDirectAssignees(id, userIds), onSuccess: invalidate });
+  const removeAssignee = useMutation({ mutationFn: ({ id, userId }) => removeDirectAssignee(id, userId), onSuccess: invalidate });
+  const [reassignId, setReassignId] = useState(null);
 
   const mine = (mineQ.data || []).filter((t) => (t.assignees.find((a) => a.id === user?.id) || {}).status !== 'rejected');
   const iAssigned = assignedQ.data || [];
@@ -124,19 +128,29 @@ function DirectTasks() {
         <div className="mt-2 space-y-1.5">
           {iAssigned.length === 0 && <p className="text-sm text-ink-soft">You haven't assigned any tasks.</p>}
           {iAssigned.map((t) => (
-            <div key={t.id} className="group flex items-center gap-2 border-b border-line/60 py-1 text-sm last:border-0">
-              <span className={`flex-1 ${t.completed ? 'text-ink-soft line-through' : ''}`}>{t.title}</span>
-              <span className="text-[11px] text-ink-soft">
-                {t.assignees.map((a, i) => (
-                  <span key={a.id}>{i > 0 && ', '}{a.name}
-                    {a.approval === 'pending' && <span className="text-ochre"> (awaiting mgr)</span>}
-                    {a.approval === 'rejected' && <span className="text-brick"> (declined by mgr)</span>}
-                    {a.status === 'rejected' && <span className="text-brick"> (rejected)</span>}
-                  </span>
-                ))}
-              </span>
-              {t.completed && <span className="rounded bg-sage/15 px-1.5 text-[10px] text-sage">done</span>}
-              <button onClick={() => del.mutate(t.id)} className="text-[11px] text-ink-soft opacity-0 hover:text-brick group-hover:opacity-100">✕</button>
+            <div key={t.id} className="border-b border-line/60 py-1 last:border-0">
+              <div className="group flex items-center gap-2 text-sm">
+                <span className={`flex-1 ${t.completed ? 'text-ink-soft line-through' : ''}`}>{t.title}</span>
+                <span className="text-[11px] text-ink-soft">
+                  {t.assignees.map((a, i) => (
+                    <span key={a.id}>{i > 0 && ', '}{a.name}
+                      {a.approval === 'pending' && <span className="text-ochre"> (awaiting mgr)</span>}
+                      {a.approval === 'rejected' && <span className="text-brick"> (declined by mgr)</span>}
+                      {a.status === 'rejected' && <span className="text-brick"> (rejected)</span>}
+                    </span>
+                  ))}
+                </span>
+                {t.completed && <span className="rounded bg-sage/15 px-1.5 text-[10px] text-sage">done</span>}
+                <button onClick={() => setReassignId(reassignId === t.id ? null : t.id)}
+                  className={`text-[11px] hover:text-pine ${reassignId === t.id ? 'text-pine' : 'text-ink-soft'}`}>reassign</button>
+                <button onClick={() => del.mutate(t.id)} className="text-[11px] text-ink-soft opacity-0 hover:text-brick group-hover:opacity-100">✕</button>
+              </div>
+              {reassignId === t.id && (
+                <ReassignControl assignees={t.assignees}
+                  busy={addAssignees.isPending || removeAssignee.isPending}
+                  onAdd={(userIds) => addAssignees.mutate({ id: t.id, userIds })}
+                  onRemove={(userId) => removeAssignee.mutate({ id: t.id, userId })} />
+              )}
             </div>
           ))}
         </div>

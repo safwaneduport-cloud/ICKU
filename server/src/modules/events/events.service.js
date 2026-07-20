@@ -318,6 +318,30 @@ export async function decideExtension(actor, taskId, decision) {
   return prisma.eventTask.update({ where: { id: taskId }, data });
 }
 
+// Reassign a project task: the project owner adds new recipients. Each new
+// assignment is re-gated by that recipient's own manager (same rule as creation).
+export async function addTaskAssignees(actor, taskId, userIds = []) {
+  const task = await prisma.eventTask.findUnique({ where: { id: taskId }, include: { assignees: true, event: { select: { id: true, ownerId: true } } } });
+  if (!task) throw new ApiError(404, 'Task not found');
+  if (task.event.ownerId !== actor.id && !canAdmin(actor)) throw new ApiError(403, 'Only the project owner can reassign tasks');
+  const existing = new Set(task.assignees.map((a) => a.userId));
+  const ids = [...new Set(userIds)].filter((id) => id && !existing.has(id));
+  if (!ids.length) throw new ApiError(400, 'Pick someone new to assign');
+  const recips = await prisma.user.findMany({ where: { id: { in: ids } }, select: { id: true, autoApproveTasks: true, reportsToId: true } });
+  const rmap = new Map(recips.map((u) => [u.id, u]));
+  await prisma.taskAssignee.createMany({ data: ids.map((userId) => ({ taskId, userId, ...gateFor(actor.id, rmap.get(userId)) })) });
+  return get(task.event.id);
+}
+
+// Reassign a project task: the project owner drops a recipient's assignment.
+export async function removeTaskAssignee(actor, taskId, userId) {
+  const task = await prisma.eventTask.findUnique({ where: { id: taskId }, include: { event: { select: { id: true, ownerId: true } } } });
+  if (!task) throw new ApiError(404, 'Task not found');
+  if (task.event.ownerId !== actor.id && !canAdmin(actor)) throw new ApiError(403, 'Only the project owner can reassign tasks');
+  await prisma.taskAssignee.delete({ where: { taskId_userId: { taskId, userId } } }).catch(() => {});
+  return get(task.event.id);
+}
+
 // Project-task assignments awaiting my approval (I'm the recipient's manager) —
 // one row per pending recipient, same shape idea as the ad-hoc task queue.
 export async function taskAssigneeApprovals(approverId) {
