@@ -1,6 +1,7 @@
 import { prisma } from '../../config/prisma.js';
 import { ApiError } from '../../middleware/errorHandler.js';
 import { canAdmin } from '../../lib/access.js';
+import { gateFor } from '../../lib/taskGate.js';
 import { computeState, triggerDate, isTaskPastDue } from './events.lib.js';
 
 // An event's SOP (write-up + PDF/link attachments) lives on the event, but it
@@ -58,7 +59,10 @@ const eventInclude = {
 function shape(e) {
   const tasks = (e.tasks || []).map((t) => ({
     id: t.id, name: t.name, dueOffset: t.dueOffset, dueTime: t.dueTime, completed: t.completed, completedLate: t.completedLate,
-    assignees: t.assignees.map((a) => ({ id: a.user.id, name: a.user.name, status: a.status, rejectedReason: a.rejectedReason })),
+    assignees: t.assignees.map((a) => ({
+      id: a.user.id, name: a.user.name, status: a.status,
+      approval: a.approval, approverId: a.approverId, rejectedReason: a.rejectedReason,
+    })),
     // A pending deadline-extension request awaiting the owner's decision.
     ext: t.extReqStatus === 'pending' ? { offset: t.extReqOffset, time: t.extReqTime, byId: t.extReqById } : null,
   }));
@@ -67,6 +71,7 @@ function shape(e) {
     id: e.id, name: e.name, ownerId: e.ownerId, owner: e.owner,
     status: e.status, triggerMonth: e.triggerMonth, triggerDay: e.triggerDay,
     writeup: e.writeup, approval: e.approval, approverId: e.approverId, createdById: e.createdById,
+    pendingOwnerId: e.pendingOwnerId, ownerApproverId: e.ownerApproverId,
     state: computeState(e), tasks, tasksDone: done, tasksTotal: tasks.length,
   };
 }
@@ -80,8 +85,10 @@ export async function list({ filter = 'all', mine = false, userId } = {}) {
     shaped = shaped.filter((e) => e.approval !== 'pending' || e.ownerId === userId || e.approverId === userId);
   }
   if (mine && userId) {
+    // Only tasks whose assignment to me is approved count as "mine".
     shaped = shaped.filter(
-      (e) => e.ownerId === userId || e.tasks.some((t) => t.assignees.some((a) => a.id === userId))
+      (e) => e.ownerId === userId
+        || e.tasks.some((t) => t.assignees.some((a) => a.id === userId && a.approval === 'approved' && a.status !== 'rejected'))
     );
   }
   if (filter && filter !== 'all') shaped = shaped.filter((e) => e.state === filter);
@@ -125,6 +132,15 @@ export async function create(creator, payload) {
   const approval = autoApprove ? 'approved' : 'pending';
   const approverId = autoApprove ? null : (u?.reportsToId || 'ceo');
 
+  // Each task-assignee is also gated per recipient (their autoApproveTasks +
+  // their manager) — independent of the project's own approval. Prefetch every
+  // recipient once so the nested create can attach each link's approval state.
+  const recipientIds = [...new Set(tasks.flatMap((t) => t.assignees || []))];
+  const recips = recipientIds.length
+    ? await prisma.user.findMany({ where: { id: { in: recipientIds } }, select: { id: true, autoApproveTasks: true, reportsToId: true } })
+    : [];
+  const rmap = new Map(recips.map((r) => [r.id, r]));
+
   const event = await prisma.event.create({
     data: {
       name: name.trim(),
@@ -138,7 +154,7 @@ export async function create(creator, payload) {
       tasks: {
         create: tasks.map((t, i) => ({
           name: t.name, dueOffset: t.dueOffset ?? null, dueTime: t.dueTime ?? null, sort: i,
-          assignees: { create: (t.assignees || []).map((uid) => ({ userId: uid })) },
+          assignees: { create: (t.assignees || []).map((uid) => ({ userId: uid, ...gateFor(creator.id, rmap.get(uid)) })) },
         })),
       },
     },
@@ -176,13 +192,59 @@ export async function decide(id, approverId, decision) {
   return prisma.event.update({ where: { id }, data: { approval: decision } });
 }
 
-export async function changeOwner(id, approverId, ownerId) {
+// Transfer project ownership. Only the current owner may initiate it (an admin
+// override aside). If the NEW owner's autoApproveProjects is off, the transfer is
+// held pending the new owner's manager — the project keeps running under the
+// current owner until then. Exception: while a project is still pending its own
+// approval, its approver may set the right owner as part of deciding it.
+export async function changeOwner(actor, id, newOwnerId) {
   const e = await prisma.event.findUnique({ where: { id } });
   if (!e) throw new ApiError(404, 'Project not found');
-  if (e.approverId !== approverId && e.ownerId !== approverId) {
-    throw new ApiError(403, 'Only the approver or current owner can reassign');
+  if (!newOwnerId) throw new ApiError(400, 'Pick a new owner');
+  const admin = canAdmin(actor);
+
+  if (e.approval === 'pending' && e.approverId === actor.id) {
+    return prisma.event.update({ where: { id }, data: { ownerId: newOwnerId } });
   }
-  return prisma.event.update({ where: { id }, data: { ownerId } });
+  if (e.ownerId !== actor.id && !admin) {
+    throw new ApiError(403, 'Only the current owner can change the project owner');
+  }
+
+  const nu = await prisma.user.findUnique({ where: { id: newOwnerId }, select: { autoApproveProjects: true, reportsToId: true } });
+  const managerId = nu?.reportsToId || null;
+  const auto = admin || nu?.autoApproveProjects !== false || !managerId || managerId === actor.id;
+  if (auto) {
+    return prisma.event.update({ where: { id }, data: { ownerId: newOwnerId, pendingOwnerId: null, ownerApproverId: null } });
+  }
+  // Held for the new owner's manager; ownerId stays put so the project runs on.
+  return prisma.event.update({ where: { id }, data: { pendingOwnerId: newOwnerId, ownerApproverId: managerId } });
+}
+
+// The new owner's manager approves/rejects a held ownership transfer.
+export async function decideOwnerTransfer(actor, id, decision) {
+  const e = await prisma.event.findUnique({ where: { id } });
+  if (!e) throw new ApiError(404, 'Project not found');
+  if (!e.pendingOwnerId) throw new ApiError(409, 'No pending ownership transfer');
+  if (e.ownerApproverId !== actor.id && !canAdmin(actor)) throw new ApiError(403, "Only the new owner's manager can decide this");
+  const data = decision === 'approved'
+    ? { ownerId: e.pendingOwnerId, pendingOwnerId: null, ownerApproverId: null }
+    : { pendingOwnerId: null, ownerApproverId: null };
+  return prisma.event.update({ where: { id }, data });
+}
+
+// Ownership transfers awaiting my approval (I'm the proposed new owner's manager).
+export async function ownerTransferApprovals(approverId) {
+  const rows = await prisma.event.findMany({
+    where: { pendingOwnerId: { not: null }, ownerApproverId: approverId },
+    include: { owner: { select: { name: true } } },
+  });
+  const ids = [...new Set(rows.map((r) => r.pendingOwnerId))];
+  const news = ids.length ? await prisma.user.findMany({ where: { id: { in: ids } }, select: { id: true, name: true } }) : [];
+  const nmap = new Map(news.map((u) => [u.id, u.name]));
+  return rows.map((r) => ({
+    eventId: r.id, name: r.name,
+    currentOwnerName: r.owner?.name, newOwnerId: r.pendingOwnerId, newOwnerName: nmap.get(r.pendingOwnerId),
+  }));
 }
 
 export function approvalsFor(approverId) {
@@ -198,7 +260,7 @@ export async function toggleTask(taskId, userId) {
     include: { assignees: true, event: true },
   });
   if (!task) throw new ApiError(404, 'Task not found');
-  const isAssignee = task.assignees.some((a) => a.userId === userId);
+  const isAssignee = task.assignees.some((a) => a.userId === userId && a.approval === 'approved');
   const isOwner = task.event.ownerId === userId;
   if (!isAssignee && !isOwner) throw new ApiError(403, 'Only assignees or the project owner can update this task');
 
@@ -256,6 +318,34 @@ export async function decideExtension(actor, taskId, decision) {
   return prisma.eventTask.update({ where: { id: taskId }, data });
 }
 
+// Project-task assignments awaiting my approval (I'm the recipient's manager) —
+// one row per pending recipient, same shape idea as the ad-hoc task queue.
+export async function taskAssigneeApprovals(approverId) {
+  const links = await prisma.taskAssignee.findMany({
+    where: { approval: 'pending', approverId },
+    include: {
+      user: { select: { id: true, name: true } },
+      task: { include: { event: { select: { id: true, name: true, owner: { select: { name: true } } } } } },
+    },
+  });
+  return links.map((l) => ({
+    taskId: l.taskId, userId: l.userId, userName: l.user?.name,
+    taskName: l.task.name, projectId: l.task.event.id, projectName: l.task.event.name, assignerName: l.task.event.owner?.name,
+  }));
+}
+
+// The recipient's manager approves/rejects that person's project-task assignment.
+export async function decideTaskAssignee(actor, taskId, userId, decision) {
+  const link = await prisma.taskAssignee.findUnique({ where: { taskId_userId: { taskId, userId } } });
+  if (!link) throw new ApiError(404, 'That assignment was not found');
+  if (link.approval !== 'pending') throw new ApiError(409, 'This assignment is not pending approval');
+  if (link.approverId !== actor.id && !canAdmin(actor)) throw new ApiError(403, "Only the recipient's manager can decide this");
+  return prisma.taskAssignee.update({
+    where: { taskId_userId: { taskId, userId } },
+    data: { approval: decision === 'approved' ? 'approved' : 'rejected' },
+  });
+}
+
 // A manager's direct reports + whether each auto-approves the projects they
 // create. Drives the toggle UI in My Team (Phase D).
 export function reportsApprovalModes(managerId) {
@@ -283,12 +373,14 @@ export async function assignedTasksFor(targetUserId) {
   const now = new Date();
   return links
     .filter((l) => !['pending', 'rejected'].includes(l.task.event.approval))
-    .map(({ task: t, status }) => {
+    .map(({ task: t, status, approval }) => {
       const e = t.event;
       return {
-        taskId: t.id, name: t.name, status,
+        taskId: t.id, name: t.name, status, approval,
         projectId: e.id, projectName: e.name, ownerId: e.ownerId, ownerName: e.owner?.name,
-        completed: t.completed, overdue: !t.completed && isTaskPastDue(t, triggerDate(e), now),
+        // A task whose assignment is still pending the recipient's manager isn't
+        // "live" yet, so it can't be overdue.
+        completed: t.completed, overdue: approval === 'approved' && !t.completed && isTaskPastDue(t, triggerDate(e), now),
         dueOffset: t.dueOffset, dueTime: t.dueTime,
         triggerMonth: e.triggerMonth, triggerDay: e.triggerDay, eventStatus: e.status,
       };

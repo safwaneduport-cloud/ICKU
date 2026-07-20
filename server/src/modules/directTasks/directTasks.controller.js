@@ -26,7 +26,7 @@ export async function toggle(req, res, next) {
   try { res.json({ data: await service.toggleComplete(req.user, req.params.id), error: null }); } catch (e) { next(e); }
 }
 export async function decide(req, res, next) {
-  try { res.json({ data: await service.decide(req.user, req.params.id, req.params.decision), error: null }); } catch (e) { next(e); }
+  try { res.json({ data: await service.decideAssignee(req.user, req.params.id, req.params.userId, req.params.decision), error: null }); } catch (e) { next(e); }
 }
 export async function rejectAssignment(req, res, next) {
   try { res.json({ data: await service.rejectAssignment(req.user, req.params.id, req.body || {}), error: null }); } catch (e) { next(e); }

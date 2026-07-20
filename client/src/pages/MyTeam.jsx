@@ -154,6 +154,7 @@ function TaskRow({ t, showOwner }) {
       </span>
       {showOwner && <span className="text-[11px] text-ink-soft">by {t.ownerName}</span>}
       {due && <span className="text-[11px] text-ink-soft">due {due}</span>}
+      {t.approval === 'pending' && <span className="rounded bg-ochre-tint px-1.5 text-[10px] text-ochre">awaiting approval</span>}
       {t.status === 'rejected' && <span className="rounded bg-brick/10 px-1.5 text-[10px] text-brick">rejected</span>}
       {t.overdue && <span className="rounded bg-brick/10 px-1.5 text-[10px] font-medium text-brick">overdue</span>}
     </div>
@@ -183,8 +184,9 @@ function ApprovalToggle({ uid }) {
   };
   return (
     <div className="flex flex-col gap-1.5">
-      <Row label="Projects go live" field="autoApproveProjects" />
-      <Row label="Tasks go live" field="autoApproveTasks" />
+      <Row label="Projects they create" field="autoApproveProjects" />
+      <Row label="Tasks assigned to them" field="autoApproveTasks" />
+      <p className="text-[10px] text-ink-soft">Off = it waits for your approval before going live.</p>
     </div>
   );
 }

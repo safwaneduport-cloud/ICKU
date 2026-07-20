@@ -42,7 +42,27 @@ export async function reject(req, res, next) {
 }
 
 export async function changeOwner(req, res, next) {
-  try { res.json({ data: await service.changeOwner(req.params.id, req.user.id, req.body?.ownerId), error: null }); }
+  try { res.json({ data: await service.changeOwner(req.user, req.params.id, req.body?.ownerId), error: null }); }
+  catch (e) { next(e); }
+}
+
+export async function taskApprovals(req, res, next) {
+  try { res.json({ data: await service.taskAssigneeApprovals(req.user.id), error: null }); }
+  catch (e) { next(e); }
+}
+
+export async function decideTaskAssignee(req, res, next) {
+  try { res.json({ data: await service.decideTaskAssignee(req.user, req.params.taskId, req.params.userId, req.params.decision), error: null }); }
+  catch (e) { next(e); }
+}
+
+export async function ownerApprovals(req, res, next) {
+  try { res.json({ data: await service.ownerTransferApprovals(req.user.id), error: null }); }
+  catch (e) { next(e); }
+}
+
+export async function decideOwnerTransfer(req, res, next) {
+  try { res.json({ data: await service.decideOwnerTransfer(req.user, req.params.id, req.params.decision), error: null }); }
   catch (e) { next(e); }
 }
 

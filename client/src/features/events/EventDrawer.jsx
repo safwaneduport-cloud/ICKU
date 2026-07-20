@@ -1,7 +1,8 @@
 import { useState } from 'react';
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query';
 import { useAuth } from '../../store/AuthContext.jsx';
-import { getEvent, toggleTask, updateEventSop, rejectAssignment, requestExtension, decideExtension } from '../../api/events.api.js';
+import { getEvent, toggleTask, updateEventSop, rejectAssignment, requestExtension, decideExtension, changeEventOwner } from '../../api/events.api.js';
+import { getUsers } from '../../api/users.api.js';
 import { STATE, triggerLabel, dueLabel, anchorDate } from './meta.js';
 
 const triggerLabelDate = (d) => (d ? new Date(`${d}T00:00:00`).toLocaleDateString(undefined, { day: 'numeric', month: 'short' }) : '');
@@ -48,6 +49,8 @@ export default function EventDrawer({ id, onClose }) {
               </div>
               <button onClick={onClose} className="rounded-lg border border-line px-3 py-1 text-sm">Close</button>
             </div>
+
+            <OwnerControl e={e} user={user} onDone={() => qc.invalidateQueries()} />
 
             <SopSection e={e} canEdit={canEditSop} onSaved={() => qc.invalidateQueries()} />
 
@@ -101,7 +104,8 @@ function TaskItem({ e, t, user, toggle, reject, extend, decideExt }) {
   const [propose, setPropose] = useState({ dueOffset: t.dueOffset ?? 0, dueTime: t.dueTime || null });
 
   const mine = t.assignees.find((a) => a.id === user?.id);
-  const isAccepted = !!mine && mine.status !== 'rejected';
+  // "Live for me" needs both: my manager approved the assignment AND I haven't declined it.
+  const isAccepted = !!mine && mine.status !== 'rejected' && mine.approval === 'approved';
   const isOwner = e.ownerId === user?.id;
   const dated = e.status === 'confirmed' && !!e.triggerMonth;
   const rejected = t.assignees.filter((a) => a.status === 'rejected');
@@ -118,6 +122,8 @@ function TaskItem({ e, t, user, toggle, reject, extend, decideExt }) {
             {t.assignees.length === 0 ? 'Unassigned' : t.assignees.map((a, i) => (
               <span key={a.id}>{i > 0 && ', '}
                 <span className={a.status === 'rejected' ? 'text-brick line-through' : ''}>{a.name}</span>
+                {a.approval === 'pending' && <span className="text-ochre"> (awaiting mgr)</span>}
+                {a.approval === 'rejected' && <span className="text-brick"> (declined by mgr)</span>}
               </span>
             ))}
             {dueLabel(e, t) ? ` · due ${dueLabel(e, t)}` : ''}
@@ -178,6 +184,40 @@ function TaskItem({ e, t, user, toggle, reject, extend, decideExt }) {
         </div>
       </div>
     </div>
+  );
+}
+
+// Ownership transfer. Only the current owner (or an admin) may initiate one; if
+// the new owner's projects need approval, the transfer waits for their manager
+// and the project keeps running under the current owner until then. The pending
+// state is shown to everyone who opens the project.
+function OwnerControl({ e, user, onDone }) {
+  const isAdmin = user?.id === 'ceo' || user?.id === 'EP002' || user?.role === 'HR Head';
+  const canTransfer = e.ownerId === user?.id || isAdmin;
+  const usersQ = useQuery({ queryKey: ['users'], queryFn: getUsers, retry: false, enabled: canTransfer || !!e.pendingOwnerId });
+  const move = useMutation({ mutationFn: (ownerId) => changeEventOwner(e.id, ownerId), onSuccess: onDone });
+  const nameOf = (id) => (usersQ.data || []).find((u) => u.id === id)?.name || id;
+
+  if (!canTransfer && !e.pendingOwnerId) return null;
+  return (
+    <section className="mt-4 rounded-2xl border border-line bg-white p-4">
+      <div className="text-xs font-semibold uppercase tracking-wide text-ink-soft">Ownership</div>
+      {e.pendingOwnerId ? (
+        <p className="mt-2 text-sm text-ochre">⏳ Transfer to {nameOf(e.pendingOwnerId)} is pending their manager's approval. The project stays with {e.owner?.name || '—'} until then.</p>
+      ) : canTransfer ? (
+        <>
+          <div className="mt-2 flex items-center gap-2 text-sm">
+            <span className="text-ink-soft">Change owner:</span>
+            <select defaultValue={e.ownerId} disabled={move.isPending}
+              onChange={(ev) => ev.target.value !== e.ownerId && move.mutate(ev.target.value)}
+              className="rounded border border-line px-2 py-1 text-xs">
+              {(usersQ.data || []).map((u) => <option key={u.id} value={u.id}>{u.name}</option>)}
+            </select>
+          </div>
+          <p className="mt-1 text-[11px] text-ink-soft">If the new owner's projects need approval, the transfer waits for their manager.</p>
+        </>
+      ) : null}
+    </section>
   );
 }
 

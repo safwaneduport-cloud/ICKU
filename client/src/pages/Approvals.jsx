@@ -1,5 +1,8 @@
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query';
-import { getApprovals, approveEvent, rejectEvent, changeEventOwner } from '../api/events.api.js';
+import {
+  getApprovals, approveEvent, rejectEvent, changeEventOwner,
+  getProjectTaskApprovals, decideProjectTaskAssignee, getOwnerApprovals, decideOwnerTransfer,
+} from '../api/events.api.js';
 import { getTaskApprovals, decideDirectTask } from '../api/directTasks.api.js';
 import { getUsers } from '../api/users.api.js';
 import { triggerLabel } from '../features/events/meta.js';
@@ -7,34 +10,69 @@ import { triggerLabel } from '../features/events/meta.js';
 export default function Approvals() {
   const qc = useQueryClient();
   const q = useQuery({ queryKey: ['event-approvals'], queryFn: getApprovals, retry: false });
-  const taskQ = useQuery({ queryKey: ['task-approvals'], queryFn: getTaskApprovals, retry: false });
+  const directTaskQ = useQuery({ queryKey: ['task-approvals'], queryFn: getTaskApprovals, retry: false });
+  const projTaskQ = useQuery({ queryKey: ['proj-task-approvals'], queryFn: getProjectTaskApprovals, retry: false });
+  const ownerQ = useQuery({ queryKey: ['owner-approvals'], queryFn: getOwnerApprovals, retry: false });
   const users = useQuery({ queryKey: ['users'], queryFn: getUsers, retry: false });
+
   const approve = useMutation({ mutationFn: approveEvent, onSuccess: () => qc.invalidateQueries() });
   const reject = useMutation({ mutationFn: rejectEvent, onSuccess: () => qc.invalidateQueries() });
   const owner = useMutation({ mutationFn: ({ id, ownerId }) => changeEventOwner(id, ownerId), onSuccess: () => qc.invalidateQueries() });
-  const decideTask = useMutation({ mutationFn: ({ id, decision }) => decideDirectTask(id, decision), onSuccess: () => qc.invalidateQueries() });
+  const decideDirect = useMutation({ mutationFn: ({ taskId, userId, decision }) => decideDirectTask(taskId, userId, decision), onSuccess: () => qc.invalidateQueries() });
+  const decideProj = useMutation({ mutationFn: ({ taskId, userId, decision }) => decideProjectTaskAssignee(taskId, userId, decision), onSuccess: () => qc.invalidateQueries() });
+  const decideOwner = useMutation({ mutationFn: ({ id, decision }) => decideOwnerTransfer(id, decision), onSuccess: () => qc.invalidateQueries() });
 
   const rows = q.data || [];
-  const taskRows = taskQ.data || [];
+  // Both task queues are per-recipient rows; tag them so each row calls the right
+  // mutation, and normalise the label fields (direct: title / project: taskName).
+  const taskRows = [
+    ...(directTaskQ.data || []).map((t) => ({ ...t, kind: 'direct', label: t.title, context: `by ${t.assignerName || '—'}` })),
+    ...(projTaskQ.data || []).map((t) => ({ ...t, kind: 'project', label: t.taskName, context: `${t.projectName} · by ${t.assignerName || '—'}` })),
+  ];
+  const ownerRows = ownerQ.data || [];
+
+  const decideTask = (row, decision) => (row.kind === 'direct' ? decideDirect : decideProj)
+    .mutate({ taskId: row.taskId, userId: row.userId, decision });
+
+  const nothing = !q.isLoading && rows.length === 0 && taskRows.length === 0 && ownerRows.length === 0;
 
   return (
     <div className="space-y-5">
       <h1 className="font-serif text-3xl font-bold text-pine">Approvals</h1>
-      <p className="text-sm text-ink-soft">Projects and tasks created by your team, waiting for your sign-off.</p>
+      <p className="text-sm text-ink-soft">Tasks assigned to your reports, projects they create, and ownership changes — waiting for your sign-off.</p>
 
-      {/* Task approvals */}
+      {/* Task assignments — one row per recipient whose manager (you) must approve. */}
       {taskRows.length > 0 && (
         <div className="space-y-2">
           <div className="text-xs font-semibold uppercase tracking-wide text-ink-soft">Tasks · {taskRows.length}</div>
           {taskRows.map((t) => (
-            <div key={t.id} className="flex flex-wrap items-center justify-between gap-3 rounded-2xl border border-line bg-white p-4">
+            <div key={`${t.kind}-${t.taskId}-${t.userId}`} className="flex flex-wrap items-center justify-between gap-3 rounded-2xl border border-line bg-white p-4">
               <div>
-                <div className="font-medium">{t.title}</div>
-                <div className="text-sm text-ink-soft">By {t.assignerName} → {t.assignees.map((a) => a.name).join(', ')}{t.dueDate ? ` · due ${t.dueDate}` : ''}</div>
+                <div className="font-medium">{t.label} <span className="text-ink-soft">→ {t.userName}</span></div>
+                <div className="text-sm text-ink-soft">{t.context}{t.dueDate ? ` · due ${t.dueDate}` : ''}</div>
               </div>
               <div className="flex items-center gap-2">
-                <button onClick={() => decideTask.mutate({ id: t.id, decision: 'rejected' })} className="rounded-lg border border-line px-3 py-1.5 text-sm hover:border-brick hover:text-brick">Reject</button>
-                <button onClick={() => decideTask.mutate({ id: t.id, decision: 'approved' })} className="rounded-lg bg-pine px-3 py-1.5 text-sm font-medium text-white">Approve</button>
+                <button onClick={() => decideTask(t, 'rejected')} className="rounded-lg border border-line px-3 py-1.5 text-sm hover:border-brick hover:text-brick">Reject</button>
+                <button onClick={() => decideTask(t, 'approved')} className="rounded-lg bg-pine px-3 py-1.5 text-sm font-medium text-white">Approve</button>
+              </div>
+            </div>
+          ))}
+        </div>
+      )}
+
+      {/* Ownership transfers held for the new owner's manager (you). */}
+      {ownerRows.length > 0 && (
+        <div className="space-y-2">
+          <div className="text-xs font-semibold uppercase tracking-wide text-ink-soft">Ownership changes · {ownerRows.length}</div>
+          {ownerRows.map((o) => (
+            <div key={o.eventId} className="flex flex-wrap items-center justify-between gap-3 rounded-2xl border border-line bg-white p-4">
+              <div>
+                <div className="font-medium">{o.name}</div>
+                <div className="text-sm text-ink-soft">Owner {o.currentOwnerName || '—'} → {o.newOwnerName || '—'}</div>
+              </div>
+              <div className="flex items-center gap-2">
+                <button onClick={() => decideOwner.mutate({ id: o.eventId, decision: 'rejected' })} className="rounded-lg border border-line px-3 py-1.5 text-sm hover:border-brick hover:text-brick">Reject</button>
+                <button onClick={() => decideOwner.mutate({ id: o.eventId, decision: 'approved' })} className="rounded-lg bg-pine px-3 py-1.5 text-sm font-medium text-white">Approve</button>
               </div>
             </div>
           ))}
@@ -43,7 +81,7 @@ export default function Approvals() {
 
       {rows.length > 0 && <div className="text-xs font-semibold uppercase tracking-wide text-ink-soft">Projects · {rows.length}</div>}
       {q.isLoading && <p className="text-ink-soft">Loading…</p>}
-      {!q.isLoading && rows.length === 0 && taskRows.length === 0 && (
+      {nothing && (
         <div className="rounded-2xl border border-line bg-white px-4 py-8 text-center text-ink-soft">Nothing awaiting your approval.</div>
       )}
 

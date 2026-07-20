@@ -408,6 +408,12 @@ model Event {
   approval     String  @default("approved") // pending | approved | rejected
   approverId   String?
   createdById  String?
+  // Pending ownership transfer: only the current owner can initiate one, and if
+  // the *new* owner's autoApproveProjects is off it waits here for the new owner's
+  // manager (ownerApproverId) — the project keeps running under the current owner
+  // until approved. Both null when there's no transfer in flight.
+  pendingOwnerId  String?
+  ownerApproverId String?
 
   tasks        EventTask[]
   attachments  Attachment[]
@@ -471,11 +477,19 @@ model DirectTaskAssignee {
   task           DirectTask @relation(fields: [taskId], references: [id], onDelete: Cascade)
   userId         String
   user           User       @relation("DirectTaskAssignee", fields: [userId], references: [id])
+  // Pre-approval gate, keyed on the RECIPIENT: 'approved' → they can see & act on
+  // it; 'pending' → waiting for this recipient's manager (approverId), hidden from
+  // the recipient until then; 'rejected' → that manager declined the assignment.
+  approval       String     @default("approved") // approved | pending | rejected
+  approverId     String? // the recipient's reporting manager, while pending
+  // Post-approval acceptance: the recipient (or their manager) may decline a task
+  // they already hold. Distinct from `approval` above (a different lifecycle stage).
   status         String     @default("accepted") // accepted | rejected
   rejectedReason String?
 
   @@id([taskId, userId])
   @@index([userId])
+  @@index([approval, approverId])
 }
 
 model TaskAssignee {
@@ -483,6 +497,12 @@ model TaskAssignee {
   task   EventTask @relation(fields: [taskId], references: [id], onDelete: Cascade)
   userId String
   user   User      @relation(fields: [userId], references: [id])
+
+  // Pre-approval gate, keyed on the RECIPIENT (same rule as DirectTaskAssignee):
+  // 'approved' → live for them; 'pending' → waiting for the recipient's manager
+  // (approverId), hidden from the recipient; 'rejected' → the manager declined it.
+  approval   String  @default("approved") // approved | pending | rejected
+  approverId String? // the recipient's reporting manager, while pending
 
   // Per-assignee acceptance. Newly assigned tasks are 'accepted' by default; the
   // assignee (or their manager) may 'rejected' it — the task stays for others.
@@ -492,6 +512,7 @@ model TaskAssignee {
 
   @@id([taskId, userId])
   @@index([userId])
+  @@index([approval, approverId])
 }
 
 model Attachment {

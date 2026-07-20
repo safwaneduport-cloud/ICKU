@@ -15,5 +15,9 @@ export const decideExtension = (taskId, decision) => api.post(`/events/tasks/${t
 export const getApprovalModes = () => api.get('/events/approval-modes').then((r) => r.data.data);
 export const getAssignedTasks = (userId) => api.get('/events/assigned', { params: { userId } }).then((r) => r.data.data);
 export const setApprovalMode = (reportId, patch) => api.patch(`/events/approval-modes/${reportId}`, patch).then((r) => r.data.data);
+export const getProjectTaskApprovals = () => api.get('/events/task-approvals').then((r) => r.data.data);
+export const decideProjectTaskAssignee = (taskId, userId, decision) => api.post(`/events/tasks/${taskId}/assignee/${userId}/decision/${decision}`).then((r) => r.data.data);
+export const getOwnerApprovals = () => api.get('/events/owner-approvals').then((r) => r.data.data);
+export const decideOwnerTransfer = (id, decision) => api.post(`/events/${id}/owner/decision/${decision}`).then((r) => r.data.data);
 export const addEventComment = (id, body) => api.post(`/events/${id}/comments`, { body }).then((r) => r.data.data);
 export const updateEventSop = (id, payload) => api.patch(`/events/${id}/sop`, payload).then((r) => r.data.data);

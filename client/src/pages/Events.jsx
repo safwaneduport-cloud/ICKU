@@ -126,9 +126,15 @@ function DirectTasks() {
           {iAssigned.map((t) => (
             <div key={t.id} className="group flex items-center gap-2 border-b border-line/60 py-1 text-sm last:border-0">
               <span className={`flex-1 ${t.completed ? 'text-ink-soft line-through' : ''}`}>{t.title}</span>
-              <span className="text-[11px] text-ink-soft">{t.assignees.map((a) => a.name).join(', ')}</span>
-              {t.approval === 'pending' && <span className="rounded bg-ochre-tint px-1.5 text-[10px] text-ochre">pending approval</span>}
-              {t.approval === 'rejected' && <span className="rounded bg-brick/10 px-1.5 text-[10px] text-brick">rejected</span>}
+              <span className="text-[11px] text-ink-soft">
+                {t.assignees.map((a, i) => (
+                  <span key={a.id}>{i > 0 && ', '}{a.name}
+                    {a.approval === 'pending' && <span className="text-ochre"> (awaiting mgr)</span>}
+                    {a.approval === 'rejected' && <span className="text-brick"> (declined by mgr)</span>}
+                    {a.status === 'rejected' && <span className="text-brick"> (rejected)</span>}
+                  </span>
+                ))}
+              </span>
               {t.completed && <span className="rounded bg-sage/15 px-1.5 text-[10px] text-sage">done</span>}
               <button onClick={() => del.mutate(t.id)} className="text-[11px] text-ink-soft opacity-0 hover:text-brick group-hover:opacity-100">✕</button>
             </div>

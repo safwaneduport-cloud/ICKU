@@ -15,7 +15,7 @@ export async function list(user) {
   const reports = await prisma.user.findMany({ where: { reportsToId: me }, select: { id: true } });
   const reportIds = reports.map((r) => r.id);
 
-  const [tasks, events, leaves, expenses, announcements, kudos, ownerTasks, directApprovals] = await Promise.all([
+  const [tasks, events, leaves, expenses, announcements, kudos, ownerTasks, directApprovals, projectTaskApprovals, ownerTransfers] = await Promise.all([
     // My overdue tasks.
     prisma.eventTask.findMany({
       where: { completed: false, assignees: { some: { userId: me } } },
@@ -67,11 +67,20 @@ export async function list(user) {
         assignees: { where: { status: 'rejected' }, include: { user: { select: { name: true } } } },
       },
     }),
-    // Ad-hoc tasks pending my approval (I'm the assigner's manager).
-    prisma.directTask.findMany({
+    // Ad-hoc task assignments pending my approval (I'm the recipient's manager).
+    prisma.directTaskAssignee.findMany({
       where: { approval: 'pending', approverId: me },
-      orderBy: { createdAt: 'desc' },
-      include: { assigner: { select: { name: true } } },
+      include: { user: { select: { name: true } }, task: { select: { id: true, title: true, assigner: { select: { name: true } } } } },
+    }),
+    // Project-task assignments pending my approval (I'm the recipient's manager).
+    prisma.taskAssignee.findMany({
+      where: { approval: 'pending', approverId: me },
+      include: { user: { select: { name: true } }, task: { select: { name: true, event: { select: { name: true } } } } },
+    }),
+    // Ownership transfers pending my approval (I'm the proposed new owner's manager).
+    prisma.event.findMany({
+      where: { pendingOwnerId: { not: null }, ownerApproverId: me },
+      select: { id: true, name: true },
     }),
   ]);
 
@@ -90,9 +99,19 @@ export async function list(user) {
       title: `Approve project: ${e.name}`, sub: `Raised by ${e.owner?.name || '—'}`, link: '/approvals' });
   });
 
-  directApprovals.forEach((t) => {
-    items.push({ id: `dtask-${t.id}`, kind: 'approval', actionable: true, at: t.createdAt,
-      title: `Approve task: ${t.title}`, sub: `Assigned by ${t.assigner?.name || '—'}`, link: '/approvals' });
+  directApprovals.forEach((l) => {
+    items.push({ id: `dta-${l.taskId}-${l.userId}`, kind: 'approval', actionable: true, at: null,
+      title: `Approve task for ${l.user?.name}: ${l.task.title}`, sub: `Assigned by ${l.task.assigner?.name || '—'}`, link: '/approvals' });
+  });
+
+  projectTaskApprovals.forEach((l) => {
+    items.push({ id: `pta-${l.taskId}-${l.userId}`, kind: 'approval', actionable: true, at: null,
+      title: `Approve task for ${l.user?.name}: ${l.task.name}`, sub: l.task.event?.name, link: '/approvals' });
+  });
+
+  ownerTransfers.forEach((e) => {
+    items.push({ id: `own-${e.id}`, kind: 'approval', actionable: true, at: null,
+      title: `Approve owner change: ${e.name}`, sub: 'Project ownership transfer', link: '/approvals' });
   });
 
   // Task rejections + extension requests on projects I own.

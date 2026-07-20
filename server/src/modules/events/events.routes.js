@@ -9,15 +9,19 @@ router.get('/approvals', ctrl.approvals);
 router.get('/approval-modes', ctrl.approvalModes);
 router.patch('/approval-modes/:reportId', ctrl.setApprovalMode);
 router.get('/assigned', ctrl.assignedTasks); // ?userId — tasks assigned to a report
+router.get('/task-approvals', ctrl.taskApprovals); // project-task assignments pending my approval
+router.get('/owner-approvals', ctrl.ownerApprovals); // ownership transfers pending my approval
 router.post('/', ctrl.create);
 router.get('/:id', ctrl.get);
 router.post('/:id/approve', ctrl.approve);
 router.post('/:id/reject', ctrl.reject);
 router.post('/:id/owner', ctrl.changeOwner);
+router.post('/:id/owner/decision/:decision', ctrl.decideOwnerTransfer); // approve/reject a held transfer
 router.patch('/:id/sop', ctrl.updateSop);
 router.post('/:id/comments', ctrl.addComment);
 router.post('/tasks/:taskId/toggle', ctrl.toggleTask);
 router.post('/tasks/:taskId/reject-assignment', ctrl.rejectAssignment);
+router.post('/tasks/:taskId/assignee/:userId/decision/:decision', ctrl.decideTaskAssignee); // per-recipient approval
 router.post('/tasks/:taskId/extension', ctrl.requestExtension);
 router.post('/tasks/:taskId/extension/:decision', ctrl.decideExtension);
 

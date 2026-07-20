@@ -11,7 +11,7 @@ router.get('/for/:userId', ctrl.forReport); // a report's tasks (manager)
 
 router.post('/', ctrl.create);
 router.post('/:id/toggle', ctrl.toggle);
-router.post('/:id/decision/:decision', ctrl.decide); // approved | rejected
+router.post('/:id/assignee/:userId/decision/:decision', ctrl.decide); // approved | rejected, per recipient
 router.post('/:id/reject-assignment', ctrl.rejectAssignment);
 router.delete('/:id', ctrl.remove);
 
