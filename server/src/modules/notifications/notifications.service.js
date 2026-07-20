@@ -15,7 +15,7 @@ export async function list(user) {
   const reports = await prisma.user.findMany({ where: { reportsToId: me }, select: { id: true } });
   const reportIds = reports.map((r) => r.id);
 
-  const [tasks, events, leaves, expenses, announcements, kudos, ownerTasks] = await Promise.all([
+  const [tasks, events, leaves, expenses, announcements, kudos, ownerTasks, directApprovals] = await Promise.all([
     // My overdue tasks.
     prisma.eventTask.findMany({
       where: { completed: false, assignees: { some: { userId: me } } },
@@ -67,6 +67,12 @@ export async function list(user) {
         assignees: { where: { status: 'rejected' }, include: { user: { select: { name: true } } } },
       },
     }),
+    // Ad-hoc tasks pending my approval (I'm the assigner's manager).
+    prisma.directTask.findMany({
+      where: { approval: 'pending', approverId: me },
+      orderBy: { createdAt: 'desc' },
+      include: { assigner: { select: { name: true } } },
+    }),
   ]);
 
   const items = [];
@@ -82,6 +88,11 @@ export async function list(user) {
   events.forEach((e) => {
     items.push({ id: `event-${e.id}`, kind: 'approval', actionable: true, at: e.createdAt,
       title: `Approve project: ${e.name}`, sub: `Raised by ${e.owner?.name || '—'}`, link: '/approvals' });
+  });
+
+  directApprovals.forEach((t) => {
+    items.push({ id: `dtask-${t.id}`, kind: 'approval', actionable: true, at: t.createdAt,
+      title: `Approve task: ${t.title}`, sub: `Assigned by ${t.assigner?.name || '—'}`, link: '/approvals' });
   });
 
   // Task rejections + extension requests on projects I own.

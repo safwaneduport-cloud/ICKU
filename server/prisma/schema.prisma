@@ -43,9 +43,12 @@ model User {
   reportsToId String?
   reportsTo   User?   @relation("Reports", fields: [reportsToId], references: [id])
   reports     User[]  @relation("Reports")
-  // Whether projects this person creates go live immediately (true, default) or
-  // wait for their manager's approval (false). Set by their reporting manager.
+  // Whether projects/tasks this person creates go live immediately (true,
+  // default) or wait for their manager's approval (false). Set by their manager.
   autoApproveProjects Boolean @default(true)
+  autoApproveTasks    Boolean @default(true)
+  directTasksAssigned   DirectTask[]         @relation("DirectTaskAssigner")
+  directTaskAssignments DirectTaskAssignee[] @relation("DirectTaskAssignee")
 
   // login credentials (created in the seed; used by Step 2 Auth)
   credential AuthCredential?
@@ -440,6 +443,39 @@ model EventTask {
   extReqStatus  String?
 
   @@index([eventId])
+}
+
+// A standalone (ad-hoc) task — assigned to people WITHOUT a project. Its own
+// approval flow: gated by the assigner's autoApproveTasks flag; when off it's
+// pending the assigner's reporting manager and hidden from assignees until then.
+model DirectTask {
+  id          String               @id @default(uuid())
+  title       String
+  assignerId  String
+  assigner    User                 @relation("DirectTaskAssigner", fields: [assignerId], references: [id])
+  dueDate     String? // "YYYY-MM-DD" (absolute — no project trigger to offset from)
+  dueTime     String? // "HH:MM"
+  approval    String               @default("approved") // approved | pending | rejected
+  approverId  String? // the assigner's manager, while pending
+  completed   Boolean              @default(false)
+  completedAt DateTime?
+  createdAt   DateTime             @default(now())
+  assignees   DirectTaskAssignee[]
+
+  @@index([assignerId])
+  @@index([approval, approverId])
+}
+
+model DirectTaskAssignee {
+  taskId         String
+  task           DirectTask @relation(fields: [taskId], references: [id], onDelete: Cascade)
+  userId         String
+  user           User       @relation("DirectTaskAssignee", fields: [userId], references: [id])
+  status         String     @default("accepted") // accepted | rejected
+  rejectedReason String?
+
+  @@id([taskId, userId])
+  @@index([userId])
 }
 
 model TaskAssignee {

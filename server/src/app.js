@@ -21,6 +21,7 @@ import expenseRoutes from './modules/expenses/expenses.routes.js';
 import assetRoutes from './modules/assets/assets.routes.js';
 import helpdeskRoutes from './modules/helpdesk/helpdesk.routes.js';
 import eventRoutes from './modules/events/events.routes.js';
+import directTaskRoutes from './modules/directTasks/directTasks.routes.js';
 import onboardingRoutes from './modules/onboarding/onboarding.routes.js';
 import exitRoutes from './modules/exit/exit.routes.js';
 import adminRoutes from './modules/admin/admin.routes.js';
@@ -83,6 +84,7 @@ api.use('/expenses', authenticate, expenseRoutes);        // protected
 api.use('/assets', authenticate, assetRoutes);            // protected
 api.use('/helpdesk', authenticate, helpdeskRoutes);       // protected
 api.use('/events', authenticate, eventRoutes);            // protected
+api.use('/direct-tasks', authenticate, directTaskRoutes); // protected
 api.use('/onboarding', authenticate, onboardingRoutes);   // protected
 api.use('/exit', authenticate, exitRoutes);               // protected
 api.use('/admin', authenticate, adminRoutes);             // protected (admin-gated inside)

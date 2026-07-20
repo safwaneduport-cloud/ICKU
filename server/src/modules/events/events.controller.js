@@ -82,7 +82,7 @@ export async function approvalModes(req, res, next) {
 }
 
 export async function setApprovalMode(req, res, next) {
-  try { res.json({ data: await service.setReportApprovalMode(req.user, req.params.reportId, req.body?.autoApprove), error: null }); }
+  try { res.json({ data: await service.setReportApprovalMode(req.user, req.params.reportId, req.body || {}), error: null }); }
   catch (e) { next(e); }
 }
 

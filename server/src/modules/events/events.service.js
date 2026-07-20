@@ -261,7 +261,7 @@ export async function decideExtension(actor, taskId, decision) {
 export function reportsApprovalModes(managerId) {
   return prisma.user.findMany({
     where: { reportsToId: managerId },
-    select: { id: true, name: true, designation: true, autoApproveProjects: true },
+    select: { id: true, name: true, designation: true, autoApproveProjects: true, autoApproveTasks: true },
     orderBy: { name: 'asc' },
   });
 }
@@ -295,11 +295,16 @@ export async function assignedTasksFor(targetUserId) {
     });
 }
 
-export async function setReportApprovalMode(actor, reportId, autoApprove) {
+// Patch either/both auto-approve flags (projects, tasks) for a direct report.
+export async function setReportApprovalMode(actor, reportId, patch = {}) {
   const rep = await prisma.user.findUnique({ where: { id: reportId }, select: { reportsToId: true } });
   if (!rep) throw new ApiError(404, 'Employee not found');
   if (rep.reportsToId !== actor.id && !canAdmin(actor)) throw new ApiError(403, "Only this person's manager can change their approval mode");
-  return prisma.user.update({ where: { id: reportId }, data: { autoApproveProjects: !!autoApprove }, select: { id: true, autoApproveProjects: true } });
+  const data = {};
+  if (typeof patch.autoApproveProjects === 'boolean') data.autoApproveProjects = patch.autoApproveProjects;
+  if (typeof patch.autoApproveTasks === 'boolean') data.autoApproveTasks = patch.autoApproveTasks;
+  if (!Object.keys(data).length) throw new ApiError(400, 'Nothing to update');
+  return prisma.user.update({ where: { id: reportId }, data, select: { id: true, autoApproveProjects: true, autoApproveTasks: true } });
 }
 
 export async function addComment(eventId, authorId, body, parentId) {
