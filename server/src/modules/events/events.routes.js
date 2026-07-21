@@ -10,6 +10,7 @@ router.get('/approval-history', ctrl.approvalHistory); // projects I've decided
 router.get('/approval-modes', ctrl.approvalModes);
 router.patch('/approval-modes/:reportId', ctrl.setApprovalMode);
 router.get('/assigned', ctrl.assignedTasks); // ?userId — tasks assigned to a report
+router.get('/task-list', ctrl.listTasks); // ?filter&mine — flat cross-project task list (Tasks view)
 router.get('/task-stats', ctrl.taskMonthStats); // ?userId&year&month — monthly task delay stats
 router.get('/task-pending', ctrl.taskPending); // ?userId — currently-pending tasks
 router.get('/task-approvals', ctrl.taskApprovals); // project-task assignments pending my approval

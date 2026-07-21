@@ -19,6 +19,13 @@ export async function get(req, res, next) {
   catch (e) { next(e); }
 }
 
+export async function listTasks(req, res, next) {
+  try {
+    const data = await service.listTasks({ filter: req.query.filter || 'all', mine: req.query.mine === 'true', userId: req.user.id });
+    res.json({ data, error: null });
+  } catch (e) { next(e); }
+}
+
 export async function create(req, res, next) {
   try {
     const created = await service.create(req.user, req.body || {});

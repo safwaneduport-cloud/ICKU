@@ -1,10 +1,10 @@
 import { useState } from 'react';
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query';
-import { getEvents } from '../api/events.api.js';
+import { getEvents, getTaskList } from '../api/events.api.js';
 import { getMyTasks, getTasksIAssigned, toggleDirectTask, rejectDirectAssignment, deleteDirectTask, addDirectAssignees, removeDirectAssignee } from '../api/directTasks.api.js';
 import ReassignControl from '../features/tasks/ReassignControl.jsx';
 import { useAuth } from '../store/AuthContext.jsx';
-import { STATE, FILTERS, triggerLabel } from '../features/events/meta.js';
+import { STATE, FILTERS, triggerLabel, dueLabel } from '../features/events/meta.js';
 import EventDrawer from '../features/events/EventDrawer.jsx';
 import NewEventModal from '../features/events/NewEventModal.jsx';
 import AssignTaskModal from '../features/tasks/AssignTaskModal.jsx';
@@ -21,15 +21,32 @@ const taskDueLabel = (t) => {
   return t.dueTime ? `${date}, ${d.toLocaleTimeString([], { hour: 'numeric', minute: '2-digit' })}` : date;
 };
 
+// A thin vertical bar showing a project's task completion (fills from the bottom).
+function CompletionBar({ done = 0, total = 0 }) {
+  const pct = total ? Math.round((done / total) * 100) : 0;
+  return (
+    <div className="flex w-1.5 shrink-0 flex-col justify-end self-stretch overflow-hidden bg-line/40" title={`${done}/${total} tasks done`}>
+      <div className="w-full bg-sage" style={{ height: `${pct}%` }} />
+    </div>
+  );
+}
+
+// due label for a flat task row (from the Tasks view backend shape).
+const flatTaskDue = (t) => dueLabel({ status: t.eventStatus, triggerMonth: t.triggerMonth, triggerDay: t.triggerDay }, t);
+
 export default function Events() {
+  const [view, setView] = useState('projects'); // 'projects' | 'tasks'
   const [filter, setFilter] = useState('all');
   const [mine, setMine] = useState(false);
   const [openId, setOpenId] = useState(null);
   const [showNew, setShowNew] = useState(false);
   const [showNewTask, setShowNewTask] = useState(false);
 
-  const q = useQuery({ queryKey: ['events', filter, mine], queryFn: () => getEvents(filter, mine), retry: false });
-  const rows = q.data || [];
+  const projectsQ = useQuery({ queryKey: ['events', filter, mine], queryFn: () => getEvents(filter, mine), retry: false, enabled: view === 'projects' });
+  const tasksQ = useQuery({ queryKey: ['task-list', filter, mine], queryFn: () => getTaskList(filter, mine), retry: false, enabled: view === 'tasks' });
+  const projects = projectsQ.data || [];
+  const tasks = tasksQ.data || [];
+  const loading = view === 'projects' ? projectsQ.isLoading : tasksQ.isLoading;
 
   return (
     <div className="space-y-5">
@@ -44,6 +61,14 @@ export default function Events() {
       <DirectTasks />
 
       <div className="flex flex-wrap items-center gap-2">
+        {/* Projects ⇄ Tasks view toggle */}
+        <div className="inline-flex rounded-lg border border-line bg-white p-0.5">
+          {[['projects', 'Projects'], ['tasks', 'Tasks']].map(([v, label]) => (
+            <button key={v} onClick={() => setView(v)}
+              className={`rounded-md px-3 py-1 text-sm font-medium ${view === v ? 'bg-pine text-white' : 'text-ink-soft hover:text-pine'}`}>{label}</button>
+          ))}
+        </div>
+        <span className="mx-1 h-5 w-px bg-line" />
         {FILTERS.map(([f, label]) => (
           <button key={f} onClick={() => setFilter(f)}
             className={`rounded-full px-3 py-1 text-sm ${filter === f ? 'bg-pine text-white' : 'border border-line bg-white text-ink-soft'}`}>
@@ -51,30 +76,51 @@ export default function Events() {
           </button>
         ))}
         <label className="ml-2 flex items-center gap-2 text-sm text-ink-soft">
-          <input type="checkbox" checked={mine} onChange={(e) => setMine(e.target.checked)} /> My tasks only
+          <input type="checkbox" checked={mine} onChange={(e) => setMine(e.target.checked)} /> {view === 'projects' ? 'My projects' : 'My tasks'}
         </label>
       </div>
 
-      <div className="overflow-hidden rounded-2xl border border-line bg-white">
-        {q.isLoading && <p className="px-4 py-6 text-ink-soft">Loading…</p>}
-        {!q.isLoading && rows.length === 0 && <p className="px-4 py-6 text-ink-soft">No projects match this filter.</p>}
-        {rows.map((e) => (
-          // Phone: date and state ride above the name so the title gets the full
-          // width. From sm up it's the original three-column row.
-          <button key={e.id} onClick={() => setOpenId(e.id)}
-            className="flex w-full flex-col gap-1 border-b border-line/60 px-4 py-3 text-left last:border-0 hover:bg-paper sm:flex-row sm:items-center sm:gap-4">
-            <div className="flex items-center gap-2 sm:contents">
-              <div className="font-mono text-xs text-ink-soft sm:w-16 sm:shrink-0">{triggerLabel(e)}</div>
-              <div className="ml-auto sm:hidden"><Badge state={e.state} /></div>
-            </div>
-            <div className="min-w-0 flex-1">
-              <div className="font-medium">{e.name}{e.approval === 'pending' && <span className="ml-2 rounded bg-ochre-tint px-1.5 py-0.5 text-[10px] font-medium text-ochre">pending</span>}</div>
-              <div className="text-xs text-ink-soft">Owner · {e.owner?.name || '—'}{e.tasksTotal ? ` · ${e.tasksDone}/${e.tasksTotal} tasks` : ''}</div>
-            </div>
-            <div className="hidden sm:block"><Badge state={e.state} /></div>
-          </button>
-        ))}
-      </div>
+      {view === 'projects' ? (
+        <div className="overflow-hidden rounded-2xl border border-line bg-white">
+          {loading && <p className="px-4 py-6 text-ink-soft">Loading…</p>}
+          {!loading && projects.length === 0 && <p className="px-4 py-6 text-ink-soft">No projects match this filter.</p>}
+          {projects.map((e) => (
+            <button key={e.id} onClick={() => setOpenId(e.id)}
+              className="flex w-full items-stretch border-b border-line/60 text-left last:border-0 hover:bg-paper">
+              <CompletionBar done={e.tasksDone} total={e.tasksTotal} />
+              <div className="flex flex-1 flex-col gap-1 px-4 py-3 sm:flex-row sm:items-center sm:gap-4">
+                <div className="flex items-center gap-2 sm:contents">
+                  <div className="font-mono text-xs text-ink-soft sm:w-16 sm:shrink-0">{triggerLabel(e)}</div>
+                  <div className="ml-auto sm:hidden"><Badge state={e.state} /></div>
+                </div>
+                <div className="min-w-0 flex-1">
+                  <div className="font-medium">{e.name}{e.approval === 'pending' && <span className="ml-2 rounded bg-ochre-tint px-1.5 py-0.5 text-[10px] font-medium text-ochre">pending</span>}</div>
+                  <div className="text-xs text-ink-soft">Owner · {e.owner?.name || '—'}{e.tasksTotal ? ` · ${e.tasksDone}/${e.tasksTotal} tasks` : ''}</div>
+                </div>
+                <div className="hidden sm:block"><Badge state={e.state} /></div>
+              </div>
+            </button>
+          ))}
+        </div>
+      ) : (
+        <div className="overflow-hidden rounded-2xl border border-line bg-white">
+          {loading && <p className="px-4 py-6 text-ink-soft">Loading…</p>}
+          {!loading && tasks.length === 0 && <p className="px-4 py-6 text-ink-soft">No tasks match this filter.</p>}
+          {tasks.map((t) => (
+            <button key={t.taskId} onClick={() => setOpenId(t.projectId)}
+              className="flex w-full flex-col gap-1 border-b border-line/60 px-4 py-3 text-left last:border-0 hover:bg-paper sm:flex-row sm:items-center sm:gap-4">
+              <div className="min-w-0 flex-1">
+                <div className={`font-medium ${t.completed ? 'text-ink-soft line-through' : ''}`}>{t.name}</div>
+                <div className="text-xs text-ink-soft">
+                  {t.projectName} · Owner {t.ownerName || '—'}{flatTaskDue(t) ? ` · due ${flatTaskDue(t)}` : ''}
+                </div>
+              </div>
+              {t.overdue && !t.completed && <span className="shrink-0 rounded bg-brick/10 px-1.5 py-0.5 text-[10px] font-medium text-brick">overdue</span>}
+              <div className="hidden sm:block"><Badge state={t.state} /></div>
+            </button>
+          ))}
+        </div>
+      )}
 
       {openId && <EventDrawer id={openId} onClose={() => setOpenId(null)} />}
       {showNew && <NewEventModal onClose={() => setShowNew(false)} />}

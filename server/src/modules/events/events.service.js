@@ -3,7 +3,7 @@ import { ApiError } from '../../middleware/errorHandler.js';
 import { canAdmin } from '../../lib/access.js';
 import { gateFor } from '../../lib/taskGate.js';
 import { istInstant, istMonthRange } from '../../lib/ist.js';
-import { computeState, triggerDate, isTaskPastDue, effectiveDue } from './events.lib.js';
+import { computeState, triggerDate, isTaskPastDue, effectiveDue, isUndated } from './events.lib.js';
 
 // Due instant for an ad-hoc task (dueDate "YYYY-MM-DD" + dueTime "HH:MM", IST).
 function directTaskDue(t) {
@@ -105,6 +105,40 @@ export async function list({ filter = 'all', mine = false, userId } = {}) {
   const order = { overdue: 0, current: 1, upcoming: 2, undated: 3, completed: 4 };
   shaped.sort((a, b) => (order[a.state] - order[b.state]) || a.name.localeCompare(b.name));
   return shaped;
+}
+
+// Flat list of every task across projects (the "Tasks" view of Projects & Tasks)
+// — each row carries its project, owner, due, and a per-task lifecycle state so
+// the same All/overdue/current/upcoming/completed filters work. `mine` keeps only
+// tasks assigned to me (and approved). Pending projects stay hidden from others.
+export async function listTasks({ filter = 'all', mine = false, userId } = {}) {
+  const events = await prisma.event.findMany({ where: { approval: { not: 'rejected' } }, include: eventInclude });
+  const now = new Date();
+  const rows = [];
+  for (const e of events) {
+    if (e.approval === 'pending' && userId && e.ownerId !== userId && e.approverId !== userId) continue;
+    const trig = triggerDate(e);
+    for (const t of e.tasks) {
+      const overdue = !t.completed && isTaskPastDue(t, trig, now);
+      const state = t.completed ? 'completed'
+        : overdue ? 'overdue'
+        : isUndated(e) ? 'undated'
+        : trig && trig <= now ? 'current' : 'upcoming';
+      const mineTask = t.assignees.some((a) => a.userId === userId && a.approval === 'approved' && a.status !== 'rejected');
+      rows.push({
+        taskId: t.id, name: t.name, projectId: e.id, projectName: e.name,
+        ownerId: e.ownerId, ownerName: e.owner?.name,
+        completed: t.completed, overdue, state,
+        dueOffset: t.dueOffset, dueTime: t.dueTime, triggerMonth: e.triggerMonth, triggerDay: e.triggerDay, eventStatus: e.status,
+        assignees: t.assignees.filter((a) => a.approval === 'approved' && a.status !== 'rejected').map((a) => ({ id: a.userId, name: a.user.name })),
+        mine: mineTask,
+      });
+    }
+  }
+  let out = mine && userId ? rows.filter((r) => r.mine) : rows;
+  if (filter && filter !== 'all') out = out.filter((r) => r.state === filter);
+  const order = { overdue: 0, current: 1, upcoming: 2, undated: 3, completed: 4 };
+  return out.sort((a, b) => (order[a.state] - order[b.state]) || a.name.localeCompare(b.name));
 }
 
 export async function get(id) {
