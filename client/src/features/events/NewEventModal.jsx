@@ -47,7 +47,10 @@ export default function NewEventModal({ onClose, onCreated, initialMonth, initia
     onSuccess: () => { qc.invalidateQueries(); onCreated?.(); onClose(); },
   });
 
-  const canSave = !!name.trim() && !mut.isPending;
+  // A dated project's tasks must each carry a due date (on/after the trigger).
+  const namedTasks = tasks.filter((t) => t.name.trim());
+  const duesOk = !dated || namedTasks.every((t) => t.dueOffset != null && t.dueOffset !== '');
+  const canSave = !!name.trim() && duesOk && !mut.isPending;
 
   return (
     <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/30 p-4" onClick={onClose}>
@@ -118,12 +121,16 @@ export default function NewEventModal({ onClose, onCreated, initialMonth, initia
                   onKeyDown={(e) => { if (e.key === 'Enter') { e.preventDefault(); if (t.name.trim() && i === tasks.length - 1) addTask(); } }}
                   placeholder="What needs doing?" className="w-full rounded-lg border border-line bg-white px-3 py-2" />
                 {dated && (
-                  <div className="mt-2">
+                  <div className="mt-2 flex items-center gap-2">
                     <DueDatePicker
                       anchor={anchorDate(month, Math.min(31, Math.max(1, parseInt(day, 10) || 1)))}
                       value={{ dueOffset: t.dueOffset, dueTime: t.dueTime }}
                       onChange={(patch) => setTask(i, patch)}
+                      required
                     />
+                    {t.name.trim() && (t.dueOffset == null || t.dueOffset === '') && (
+                      <span className="text-[11px] text-brick">Due date required</span>
+                    )}
                   </div>
                 )}
                 <div className="mt-2"><AssignPicker value={t.assignees} onChange={(arr) => setTask(i, { assignees: arr })} /></div>

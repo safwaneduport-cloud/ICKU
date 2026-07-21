@@ -16,7 +16,7 @@ const dayDiff = (a, b) => Math.round((midnight(a) - midnight(b)) / 86400000);
  *
  * value = { dueOffset: number|null, dueTime: string|null }
  */
-export default function DueDatePicker({ anchor, value, onChange }) {
+export default function DueDatePicker({ anchor, value, onChange, required = false }) {
   const [open, setOpen] = useState(false);
   const hasDue = value.dueOffset != null && value.dueOffset !== '';
   const selected = hasDue ? new Date(anchor.getTime() + Number(value.dueOffset) * 86400000) : null;
@@ -29,6 +29,7 @@ export default function DueDatePicker({ anchor, value, onChange }) {
 
   const pickDay = (day) => {
     const picked = new Date(view.year, view.month, day);
+    if (dayDiff(picked, anchor) < 0) return; // a task can't be due before the project date
     onChange({ dueOffset: dayDiff(picked, anchor), dueTime: value.dueTime || DEFAULT_TIME });
   };
   const clear = () => { onChange({ dueOffset: null, dueTime: null }); setOpen(false); };
@@ -44,7 +45,7 @@ export default function DueDatePicker({ anchor, value, onChange }) {
 
   const label = hasDue
     ? `${selected.toLocaleDateString([], { month: 'short', day: 'numeric' })}${value.dueTime ? `, ${fmtTime(value.dueTime)}` : ''}`
-    : 'Set due date';
+    : required ? 'Set due date *' : 'Set due date';
 
   return (
     <div className="text-xs">
@@ -75,16 +76,19 @@ export default function DueDatePicker({ anchor, value, onChange }) {
               if (!d) return <span key={i} />;
               const isSel = selected && dayDiff(new Date(view.year, view.month, d), selected) === 0;
               const isAnchor = dayDiff(new Date(view.year, view.month, d), anchor) === 0;
+              const isPast = dayDiff(new Date(view.year, view.month, d), anchor) < 0; // before the project date
               return (
                 <button
                   key={i}
                   type="button"
+                  disabled={isPast}
                   onClick={() => pickDay(d)}
                   className={`flex h-7 items-center justify-center rounded-full text-[12px] ${
-                    isSel ? 'bg-pine font-semibold text-white'
+                    isPast ? 'cursor-not-allowed text-ink-soft/30'
+                      : isSel ? 'bg-pine font-semibold text-white'
                       : isAnchor ? 'bg-pine-tint text-pine' : 'text-ink hover:bg-paper'
                   }`}
-                  title={isAnchor ? 'Project date' : undefined}
+                  title={isAnchor ? 'Project date' : isPast ? 'Before the project date' : undefined}
                 >
                   {d}
                 </button>
@@ -103,7 +107,7 @@ export default function DueDatePicker({ anchor, value, onChange }) {
               />
             </label>
             <div className="flex gap-2">
-              {hasDue && <button type="button" onClick={clear} className="text-ink-soft hover:text-brick">Clear</button>}
+              {hasDue && !required && <button type="button" onClick={clear} className="text-ink-soft hover:text-brick">Clear</button>}
               <button type="button" onClick={() => setOpen(false)} className="font-medium text-pine">Done</button>
             </div>
           </div>

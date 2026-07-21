@@ -132,6 +132,15 @@ export async function create(creator, payload) {
   const { name, status, triggerMonth, triggerDay, writeup, tasks = [], attachments = [] } = payload;
   if (!name?.trim()) throw new ApiError(400, 'Project name is required');
 
+  // A dated project's tasks each need a due date on or after the trigger day.
+  const isDated = status === 'confirmed' && !!triggerMonth;
+  if (isDated) {
+    for (const t of tasks) {
+      if (!t.name?.trim()) continue;
+      if (t.dueOffset == null || t.dueOffset < 0) throw new ApiError(400, `Task "${t.name.trim()}" needs a due date on or after the project date`);
+    }
+  }
+
   // Approval routing depends on the creator's mode (set by their manager): auto
   // → goes live immediately; manual → pending their manager's approval, and its
   // tasks stay hidden from assignees until approved (see list()). CEO auto.
@@ -268,6 +277,32 @@ export function approvalHistory(approverId) {
   return prisma.event
     .findMany({ where: { approverId, approval: { in: ['approved', 'rejected'] } }, orderBy: { updatedAt: 'desc' }, take: 50, include: eventInclude })
     .then((rows) => rows.map((e) => ({ ...shape(e), decidedAt: e.updatedAt })));
+}
+
+// Add a task to an existing project (owner/admin). Same due rule as creation;
+// the new assignees are gated per recipient like everywhere else.
+export async function addTask(actor, eventId, { name, dueOffset = null, dueTime = null, assigneeIds = [] } = {}) {
+  const e = await prisma.event.findUnique({
+    where: { id: eventId },
+    select: { id: true, ownerId: true, status: true, triggerMonth: true, tasks: { select: { sort: true } } },
+  });
+  if (!e) throw new ApiError(404, 'Project not found');
+  if (e.ownerId !== actor.id && !canAdmin(actor)) throw new ApiError(403, 'Only the project owner can add tasks');
+  if (!name?.trim()) throw new ApiError(400, 'Task name is required');
+  const dated = e.status === 'confirmed' && !!e.triggerMonth;
+  if (dated && (dueOffset == null || dueOffset < 0)) throw new ApiError(400, 'A due date on or after the project date is required');
+
+  const ids = [...new Set(assigneeIds)];
+  const recips = ids.length ? await prisma.user.findMany({ where: { id: { in: ids } }, select: { id: true, autoApproveTasks: true, reportsToId: true } }) : [];
+  const rmap = new Map(recips.map((u) => [u.id, u]));
+  const nextSort = e.tasks.reduce((m, t) => Math.max(m, t.sort), -1) + 1;
+  await prisma.eventTask.create({
+    data: {
+      eventId, name: name.trim(), dueOffset: dated ? dueOffset : null, dueTime: dated ? dueTime : null, sort: nextSort,
+      assignees: { create: ids.map((uid) => ({ userId: uid, ...gateFor(actor.id, rmap.get(uid)) })) },
+    },
+  });
+  return get(eventId);
 }
 
 // Toggle a task's completion. Allowed for its assignees or the event owner.

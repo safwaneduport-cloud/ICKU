@@ -1,9 +1,10 @@
 import { useState } from 'react';
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query';
 import { useAuth } from '../../store/AuthContext.jsx';
-import { getEvent, toggleTask, updateEventSop, rejectAssignment, requestExtension, decideExtension, changeEventOwner, addTaskAssignees, removeTaskAssignee } from '../../api/events.api.js';
+import { getEvent, toggleTask, updateEventSop, rejectAssignment, requestExtension, decideExtension, changeEventOwner, addTaskAssignees, removeTaskAssignee, addProjectTask } from '../../api/events.api.js';
 import { getUsers } from '../../api/users.api.js';
 import ReassignControl from '../tasks/ReassignControl.jsx';
+import AssignPicker from './AssignPicker.jsx';
 import { STATE, triggerLabel, dueLabel, anchorDate } from './meta.js';
 
 const triggerLabelDate = (d) => (d ? new Date(`${d}T00:00:00`).toLocaleDateString(undefined, { day: 'numeric', month: 'short' }) : '');
@@ -86,6 +87,7 @@ export default function EventDrawer({ id, onClose }) {
                   <TaskItem key={t.id} e={e} t={t} user={user} toggle={toggle} reject={reject} extend={extend} decideExt={decideExt} />
                 ))}
               </div>
+              {(e.ownerId === user?.id || isAdmin) && <AddTaskForm e={e} onAdded={() => qc.invalidateQueries()} />}
             </section>
 
             <EventChat eventId={id} />
@@ -199,6 +201,45 @@ function TaskItem({ e, t, user, toggle, reject, extend, decideExt }) {
             </div>
           )}
         </div>
+      </div>
+    </div>
+  );
+}
+
+// Add a new task to an existing project (owner/admin). Same rules as creation:
+// on a dated project the due date is required and can't precede the trigger.
+function AddTaskForm({ e, onAdded }) {
+  const [open, setOpen] = useState(false);
+  const [name, setName] = useState('');
+  const [due, setDue] = useState({ dueOffset: null, dueTime: null });
+  const [assignees, setAssignees] = useState([]);
+  const dated = e.status === 'confirmed' && !!e.triggerMonth;
+  const add = useMutation({
+    mutationFn: () => addProjectTask(e.id, { name: name.trim(), dueOffset: due.dueOffset, dueTime: due.dueTime, assigneeIds: assignees }),
+    onSuccess: () => { setName(''); setDue({ dueOffset: null, dueTime: null }); setAssignees([]); setOpen(false); onAdded(); },
+  });
+  const canAdd = name.trim() && (!dated || (due.dueOffset != null && due.dueOffset !== '')) && !add.isPending;
+
+  if (!open) return (
+    <button onClick={() => setOpen(true)} className="mt-3 w-full rounded-lg border border-dashed border-line py-2 text-sm font-medium text-pine hover:border-pine hover:bg-pine-tint/40">+ Add task</button>
+  );
+  return (
+    <div className="mt-3 rounded-lg border border-line bg-paper/40 p-3">
+      <input value={name} autoFocus onChange={(ev) => setName(ev.target.value)} placeholder="What needs doing?"
+        className="w-full rounded-lg border border-line bg-white px-3 py-2 text-sm" />
+      {dated && (
+        <div className="mt-2 flex items-center gap-2">
+          <DueDatePicker anchor={anchorDate(e.triggerMonth, e.triggerDay)} value={due} onChange={setDue} required />
+          {name.trim() && due.dueOffset == null && <span className="text-[11px] text-brick">Due date required</span>}
+        </div>
+      )}
+      <div className="mt-2"><AssignPicker value={assignees} onChange={setAssignees} /></div>
+      {add.error && <p className="mt-1 text-xs text-brick">{add.error.response?.data?.error?.message || 'Could not add the task'}</p>}
+      <div className="mt-2 flex justify-end gap-2">
+        <button onClick={() => setOpen(false)} className="rounded-lg border border-line px-3 py-1.5 text-sm">Cancel</button>
+        <button onClick={() => add.mutate()} disabled={!canAdd} className="rounded-lg bg-pine px-4 py-1.5 text-sm font-medium text-white disabled:opacity-50">
+          {add.isPending ? 'Adding…' : 'Add task'}
+        </button>
       </div>
     </div>
   );

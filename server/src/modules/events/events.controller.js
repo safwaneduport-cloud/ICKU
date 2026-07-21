@@ -71,6 +71,11 @@ export async function decideOwnerTransfer(req, res, next) {
   catch (e) { next(e); }
 }
 
+export async function addTask(req, res, next) {
+  try { res.json({ data: await service.addTask(req.user, req.params.id, req.body || {}), error: null }); }
+  catch (e) { next(e); }
+}
+
 export async function toggleTask(req, res, next) {
   try { res.json({ data: await service.toggleTask(req.params.taskId, req.user.id), error: null }); }
   catch (e) { next(e); }

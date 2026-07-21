@@ -19,6 +19,7 @@ router.get('/:id', ctrl.get);
 router.post('/:id/approve', ctrl.approve);
 router.post('/:id/reject', ctrl.reject);
 router.post('/:id/owner', ctrl.changeOwner);
+router.post('/:id/tasks', ctrl.addTask); // add a task to an existing project
 router.post('/:id/owner/decision/:decision', ctrl.decideOwnerTransfer); // approve/reject a held transfer
 router.patch('/:id/sop', ctrl.updateSop);
 router.post('/:id/comments', ctrl.addComment);
