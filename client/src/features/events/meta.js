@@ -1,9 +1,12 @@
+// Project state colour code (also drives the Institutional Calendar):
+//  Blue = upcoming (trigger not started) · Yellow = current (started, nothing
+//  overdue) · Red = overdue (any task past due) · Green = completed (all done).
 export const STATE = {
-  undated: { label: 'Undated', c: '#9A6312', b: '#F5EAD4' },
-  upcoming: { label: 'Upcoming', c: '#3F6075', b: '#E3EAEF' },
-  current: { label: 'Current', c: '#134535', b: '#E4EDE7' },
-  overdue: { label: 'Overdue', c: '#9C3A2A', b: '#F3E1DC' },
-  completed: { label: 'Completed', c: '#2C7A57', b: '#E2EFE7' },
+  undated: { label: 'Undated', c: '#6B7280', b: '#EDEEF0' },
+  upcoming: { label: 'Upcoming', c: '#2563A8', b: '#E1ECF8' },   // blue
+  current: { label: 'Current', c: '#9A6312', b: '#FBF0D2' },     // yellow / amber
+  overdue: { label: 'Overdue', c: '#9C3A2A', b: '#F3E1DC' },     // red
+  completed: { label: 'Completed', c: '#2C7A57', b: '#E2EFE7' }, // green
 };
 
 export const FILTERS = [

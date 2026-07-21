@@ -1,3 +1,4 @@
+import { useState } from 'react';
 import { useQuery } from '@tanstack/react-query';
 import { useNavigate } from 'react-router-dom';
 import { getUsers } from '../api/users.api.js';
@@ -11,7 +12,14 @@ export default function Organization() {
   const navigate = useNavigate();
   const isHr = user?.id === 'ceo' || user?.id === 'EP002' || user?.role === 'HR Head';
 
-  const nameById = new Map((users.data ?? []).map((u) => [u.id, u.name]));
+  const [dept, setDept] = useState('all');
+  const all = users.data ?? [];
+  const nameById = new Map(all.map((u) => [u.id, u.name]));
+  const departments = [...new Set(all.map((u) => u.department?.name).filter(Boolean))].sort();
+  // Default sort is by department (then name), and an optional department filter.
+  const rows = all
+    .filter((u) => dept === 'all' || (u.department?.name || '—') === dept)
+    .sort((a, b) => (a.department?.name || 'zzz').localeCompare(b.department?.name || 'zzz') || a.name.localeCompare(b.name));
 
   return (
     <div className="space-y-4">
@@ -24,8 +32,15 @@ export default function Organization() {
           </button>
         )}
       </div>
-      <div className="flex items-baseline justify-between">
-        <span className="font-mono text-xs text-ink-soft">{users.data?.length ?? '—'} people from DB</span>
+      <div className="flex flex-wrap items-center justify-between gap-2">
+        <span className="font-mono text-xs text-ink-soft">{rows.length}{dept !== 'all' ? ` of ${all.length}` : ''} people</span>
+        <label className="flex items-center gap-2 text-sm text-ink-soft">
+          Department
+          <select value={dept} onChange={(e) => setDept(e.target.value)} className="rounded-lg border border-line px-2 py-1 text-sm text-ink">
+            <option value="all">All departments</option>
+            {departments.map((d) => <option key={d} value={d}>{d}</option>)}
+          </select>
+        </label>
       </div>
 
       {users.isLoading && <p className="text-sm text-ink-soft">Loading…</p>}
@@ -35,7 +50,7 @@ export default function Organization() {
           name onto three lines and hides the last two behind a scroll. */}
       {users.data && (
         <div className="divide-y divide-line/60 overflow-hidden rounded-2xl border border-line bg-white sm:hidden">
-          {users.data.map((u) => (
+          {rows.map((u) => (
             <div key={u.id} className="p-3">
               <div className="flex items-baseline justify-between gap-2">
                 <button onClick={() => openProfile(u.id)} className="min-w-0 flex-1 truncate text-left font-medium text-pine">
@@ -67,7 +82,7 @@ export default function Organization() {
               </tr>
             </thead>
             <tbody>
-              {users.data.map((u) => (
+              {rows.map((u) => (
                 <tr key={u.id} className="border-b border-line/60 last:border-0">
                   <td className="px-4 py-2.5">
                     <button
