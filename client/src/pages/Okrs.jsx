@@ -1,4 +1,4 @@
-import { useState } from 'react';
+import { useState, useEffect } from 'react';
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query';
 import { useAuth } from '../store/AuthContext.jsx';
 import { getReports } from '../api/users.api.js';
@@ -11,6 +11,55 @@ import {
 
 const MONTHS = ['Jan', 'Feb', 'Mar', 'Apr', 'May', 'Jun', 'Jul', 'Aug', 'Sep', 'Oct', 'Nov', 'Dec'];
 const FREQS = ['Daily', 'Weekly', 'Monthly', 'Yearly'];
+
+// Lets a manager add a new item for several direct reports at once. Defaults to
+// the report currently being viewed (pre-checked, still uncheckable). `ids` is
+// what an Add should apply to — the selection, or just the current target.
+function useTargets(reports, currentTarget) {
+  const [targets, setTargets] = useState(() => (reports.some((r) => r.id === currentTarget) ? [currentTarget] : []));
+  useEffect(() => {
+    setTargets(reports.some((r) => r.id === currentTarget) ? [currentTarget] : []);
+  }, [currentTarget, reports.length]); // eslint-disable-line react-hooks/exhaustive-deps
+  const ids = targets.length ? [...new Set(targets)] : [currentTarget];
+  return { targets, setTargets, ids };
+}
+
+// The "⋯" button + dropdown of direct reports (with "All"). Only rendered when
+// the manager has reports.
+function TargetPicker({ reports, currentTarget, targets, setTargets }) {
+  const [open, setOpen] = useState(false);
+  if (!reports.length) return null;
+  const allIds = reports.map((r) => r.id);
+  const allOn = allIds.every((id) => targets.includes(id));
+  const toggle = (id) => setTargets((s) => (s.includes(id) ? s.filter((x) => x !== id) : [...s, id]));
+  return (
+    <div className="relative">
+      <button type="button" onClick={() => setOpen((v) => !v)} title="Add for several reports"
+        className={`h-full rounded-lg border px-2.5 text-sm ${targets.length > 1 ? 'border-pine text-pine' : 'border-line text-ink-soft'} hover:border-pine`}>
+        ⋯{targets.length > 1 ? ` ${targets.length}` : ''}
+      </button>
+      {open && (
+        <div className="absolute bottom-full right-0 z-30 mb-1 w-60 rounded-lg border border-line bg-white p-1.5 shadow-lg">
+          <div className="px-1 pb-1 text-[11px] font-semibold uppercase tracking-wide text-ink-soft">Add for…</div>
+          <label className="flex items-center gap-2 rounded px-2 py-1 text-sm hover:bg-paper">
+            <input type="checkbox" checked={allOn} onChange={() => setTargets(allOn ? [] : allIds)} />
+            <span className="font-medium">All ({reports.length})</span>
+          </label>
+          <div className="my-1 h-px bg-line" />
+          <div className="max-h-48 overflow-y-auto">
+            {reports.map((r) => (
+              <label key={r.id} className="flex items-center gap-2 rounded px-2 py-1 text-sm hover:bg-paper">
+                <input type="checkbox" checked={targets.includes(r.id)} onChange={() => toggle(r.id)} />
+                <span className="flex-1">{r.name}</span>
+                {r.id === currentTarget && <span className="text-[10px] text-ink-soft">viewing</span>}
+              </label>
+            ))}
+          </div>
+        </div>
+      )}
+    </div>
+  );
+}
 
 export default function Okrs() {
   const { user } = useAuth();
@@ -44,20 +93,24 @@ export default function Okrs() {
         ))}
       </div>
 
-      {tab === 'responsibilities' && <Duties userId={target} isSelf={isSelf} />}
-      {tab === 'okrs' && <OkrsTab userId={target} isSelf={isSelf} />}
-      {tab === 'checklist' && <ChecklistTab userId={target} isSelf={isSelf} />}
+      {tab === 'responsibilities' && <Duties userId={target} isSelf={isSelf} reports={reports.data || []} />}
+      {tab === 'okrs' && <OkrsTab userId={target} isSelf={isSelf} reports={reports.data || []} />}
+      {tab === 'checklist' && <ChecklistTab userId={target} isSelf={isSelf} reports={reports.data || []} />}
       {tab === 'pending' && <PendingTab userId={target} isSelf={isSelf} />}
     </div>
   );
 }
 
 // ── Responsibilities (manager-set) ──
-function Duties({ userId, isSelf }) {
+function Duties({ userId, isSelf, reports = [] }) {
   const qc = useQueryClient();
   const q = useQuery({ queryKey: ['duties', userId], queryFn: () => getDuties(userId), retry: false });
   const [text, setText] = useState('');
-  const add = useMutation({ mutationFn: () => addDuty(userId, text.trim()), onSuccess: () => { setText(''); qc.invalidateQueries({ queryKey: ['duties', userId] }); } });
+  const { targets, setTargets, ids } = useTargets(reports, userId);
+  const add = useMutation({
+    mutationFn: () => Promise.all(ids.map((id) => addDuty(id, text.trim()))),
+    onSuccess: () => { setText(''); qc.invalidateQueries({ queryKey: ['duties'] }); },
+  });
   const del = useMutation({ mutationFn: deleteDuty, onSuccess: () => qc.invalidateQueries({ queryKey: ['duties', userId] }) });
 
   return (
@@ -73,8 +126,13 @@ function Duties({ userId, isSelf }) {
       </div>
       {!isSelf && (
         <div className="mt-3 flex gap-2">
-          <input value={text} onChange={(e) => setText(e.target.value)} placeholder="Add a responsibility…" className="flex-1 rounded-lg border border-line px-3 py-2 text-sm" />
-          <button onClick={() => add.mutate()} disabled={!text.trim()} className="rounded-lg bg-pine px-4 py-2 text-sm font-medium text-white disabled:opacity-60">Add</button>
+          <input value={text} onChange={(e) => setText(e.target.value)}
+            onKeyDown={(e) => { if (e.key === 'Enter' && text.trim()) add.mutate(); }}
+            placeholder="Add a responsibility…" className="flex-1 rounded-lg border border-line px-3 py-2 text-sm" />
+          <TargetPicker reports={reports} currentTarget={userId} targets={targets} setTargets={setTargets} />
+          <button onClick={() => add.mutate()} disabled={!text.trim() || add.isPending} className="rounded-lg bg-pine px-4 py-2 text-sm font-medium text-white disabled:opacity-60">
+            {ids.length > 1 ? `Add to ${ids.length}` : 'Add'}
+          </button>
         </div>
       )}
     </div>
@@ -82,21 +140,25 @@ function Duties({ userId, isSelf }) {
 }
 
 // ── OKRs (month-scoped) ──
-function OkrsTab({ userId, isSelf }) {
+function OkrsTab({ userId, isSelf, reports = [] }) {
   const { user } = useAuth();
   const qc = useQueryClient();
   const now = new Date();
   const [ym, setYm] = useState({ year: now.getFullYear(), month: now.getMonth() + 1 });
   const key = ['okrs', userId, ym.year, ym.month];
   const q = useQuery({ queryKey: key, queryFn: () => getOkrs(userId, ym.year, ym.month), retry: false });
-  const invalidate = () => qc.invalidateQueries({ queryKey: key });
+  const invalidate = () => qc.invalidateQueries({ queryKey: ['okrs'] });
 
   const upd = useMutation({ mutationFn: ({ id, patch }) => updateOkr(id, patch), onSuccess: invalidate });
   const del = useMutation({ mutationFn: deleteOkr, onSuccess: invalidate });
   const approve = useMutation({ mutationFn: (approved) => approveOkrs({ userId, year: ym.year, month: ym.month, approved }), onSuccess: invalidate });
   const [obj, setObj] = useState('');
   const [tgt, setTgt] = useState('');
-  const add = useMutation({ mutationFn: () => addOkr({ userId, year: ym.year, month: ym.month, objective: obj.trim(), target: tgt.trim() }), onSuccess: () => { setObj(''); setTgt(''); invalidate(); } });
+  const { targets, setTargets, ids } = useTargets(reports, userId);
+  const add = useMutation({
+    mutationFn: () => Promise.all(ids.map((id) => addOkr({ userId: id, year: ym.year, month: ym.month, objective: obj.trim(), target: tgt.trim() }))),
+    onSuccess: () => { setObj(''); setTgt(''); invalidate(); },
+  });
 
   const shift = (delta) => setYm((s) => { let m = s.month + delta, y = s.year; while (m < 1) { m += 12; y -= 1; } while (m > 12) { m -= 12; y += 1; } return { year: y, month: m }; });
   const d = q.data;
@@ -144,7 +206,10 @@ function OkrsTab({ userId, isSelf }) {
       <div className="flex flex-wrap gap-2">
         <input value={obj} onChange={(e) => setObj(e.target.value)} placeholder="New objective…" className="flex-1 rounded-lg border border-line px-3 py-2 text-sm" />
         <input value={tgt} onChange={(e) => setTgt(e.target.value)} placeholder="Target" className="w-32 rounded-lg border border-line px-3 py-2 text-sm" />
-        <button onClick={() => add.mutate()} disabled={!obj.trim()} className="rounded-lg bg-pine px-4 py-2 text-sm font-medium text-white disabled:opacity-60">Add OKR</button>
+        <TargetPicker reports={reports} currentTarget={userId} targets={targets} setTargets={setTargets} />
+        <button onClick={() => add.mutate()} disabled={!obj.trim() || add.isPending} className="rounded-lg bg-pine px-4 py-2 text-sm font-medium text-white disabled:opacity-60">
+          {ids.length > 1 ? `Add to ${ids.length}` : 'Add OKR'}
+        </button>
       </div>
     </div>
   );
@@ -154,27 +219,40 @@ function OkrsTab({ userId, isSelf }) {
 // Only the item's owner can check/uncheck (isSelf). Both owner and manager can
 // add/edit/delete. Deletion asks for confirmation; a 7-day history panel lets
 // either restore a deleted item.
-function ChecklistTab({ userId, isSelf }) {
+function ChecklistTab({ userId, isSelf, reports = [] }) {
   const qc = useQueryClient();
   const q = useQuery({ queryKey: ['checklist', userId], queryFn: () => getChecklist(userId), retry: false });
   const invalidate = () => {
-    qc.invalidateQueries({ queryKey: ['checklist', userId] });
-    qc.invalidateQueries({ queryKey: ['checklist-history', userId] });
+    qc.invalidateQueries({ queryKey: ['checklist'] });
+    qc.invalidateQueries({ queryKey: ['checklist-history'] });
   };
   const toggle = useMutation({ mutationFn: toggleChecklistItem, onSuccess: invalidate });
   const del = useMutation({ mutationFn: deleteChecklistItem, onSuccess: invalidate });
-  const add = useMutation({ mutationFn: ({ frequency, text }) => addChecklistItem({ userId, frequency, text }), onSuccess: invalidate });
+  const add = useMutation({ mutationFn: ({ frequency, text, ids }) => Promise.all(ids.map((id) => addChecklistItem({ userId: id, frequency, text }))), onSuccess: invalidate });
   const edit = useMutation({ mutationFn: ({ id, text }) => updateChecklistItem(id, text), onSuccess: invalidate });
   const [drafts, setDrafts] = useState({});
   const [confirm, setConfirm] = useState(null); // item pending delete confirmation
   const [showHistory, setShowHistory] = useState(false);
+  const { targets, setTargets, ids } = useTargets(reports, userId);
+
+  const submit = (f) => {
+    const text = (drafts[f] || '').trim();
+    if (!text) return;
+    add.mutate({ frequency: f, text, ids });
+    setDrafts((s) => ({ ...s, [f]: '' }));
+  };
 
   const d = q.data || {};
   return (
     <div className="space-y-4">
-      <div className="flex items-center justify-between">
+      <div className="flex flex-wrap items-center justify-between gap-2">
         <p className="text-sm text-ink-soft">{isSelf ? 'Tick items as you complete them. Only you can check your own list.' : "You can add, edit or clear items — but only they can tick them off."}</p>
-        <button onClick={() => setShowHistory((v) => !v)} className="shrink-0 text-sm font-medium text-pine hover:underline">{showHistory ? 'Hide history' : 'History'}</button>
+        <div className="flex items-center gap-2">
+          {reports.length > 0 && (
+            <div className="flex items-center gap-1 text-[11px] text-ink-soft">New items for:<TargetPicker reports={reports} currentTarget={userId} targets={targets} setTargets={setTargets} /></div>
+          )}
+          <button onClick={() => setShowHistory((v) => !v)} className="shrink-0 text-sm font-medium text-pine hover:underline">{showHistory ? 'Hide history' : 'History'}</button>
+        </div>
       </div>
 
       {showHistory && <HistoryPanel userId={userId} onRestored={invalidate} />}
@@ -194,8 +272,10 @@ function ChecklistTab({ userId, isSelf }) {
             </div>
             <div className="mt-3 flex gap-2">
               <input value={drafts[f] || ''} onChange={(e) => setDrafts((s) => ({ ...s, [f]: e.target.value }))}
-                onKeyDown={(e) => { if (e.key === 'Enter' && (drafts[f] || '').trim()) { add.mutate({ frequency: f, text: drafts[f].trim() }); setDrafts((s) => ({ ...s, [f]: '' })); } }}
+                onKeyDown={(e) => { if (e.key === 'Enter') submit(f); }}
                 placeholder={`Add ${f.toLowerCase()} item…`} className="flex-1 rounded-lg border border-line px-2 py-1.5 text-sm" />
+              <button onClick={() => submit(f)} disabled={!(drafts[f] || '').trim() || add.isPending}
+                className="shrink-0 rounded-lg bg-pine px-3 text-sm font-medium text-white disabled:opacity-50">{ids.length > 1 ? `+${ids.length}` : 'Add'}</button>
             </div>
           </section>
         ))}
