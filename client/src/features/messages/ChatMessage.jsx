@@ -2,6 +2,7 @@ import { useState, useRef, useEffect } from 'react';
 import { useMutation } from '@tanstack/react-query';
 import { useAuth } from '../../store/AuthContext.jsx';
 import { reactMessage, editMessage, deleteMessage, createReminder } from '../../api/messages.api.js';
+import EmojiPicker from './EmojiPicker.jsx';
 
 const QUICK = ['👍', '✅', '🎉', '❤️', '😂', '👀'];
 const initials = (n = '') => n.split(' ').map((w) => w[0]).slice(0, 2).join('').toUpperCase();
@@ -21,13 +22,21 @@ function remindOptions() {
   ];
 }
 
+// Lightweight inline formatting (Slack-style, non-nested): *bold*, _italic_,
+// ~strike~, `code`, and @mentions. One regex tokenises the string; each token
+// maps to an element. Deliberately simple — no external markdown library.
+const RICH = /(\*[^*\n]+\*|_[^_\n]+_|~[^~\n]+~|`[^`\n]+`|@[\p{L}][\p{L}0-9._-]*)/gu;
 function renderBody(body) {
-  const parts = body.split(/(@[\p{L}][\p{L}0-9._-]*)/gu);
-  return parts.map((p, i) =>
-    p.startsWith('@')
-      ? <span key={i} className="rounded bg-pine-tint px-0.5 font-medium text-pine">{p}</span>
-      : <span key={i}>{p}</span>
-  );
+  return body.split(RICH).map((p, i) => {
+    if (!p) return null;
+    const inner = p.slice(1, -1);
+    if (p[0] === '@') return <span key={i} className="rounded bg-pine-tint px-0.5 font-medium text-pine">{p}</span>;
+    if (p.length > 2 && p[0] === '*' && p.endsWith('*')) return <strong key={i}>{inner}</strong>;
+    if (p.length > 2 && p[0] === '_' && p.endsWith('_')) return <em key={i}>{inner}</em>;
+    if (p.length > 2 && p[0] === '~' && p.endsWith('~')) return <span key={i} className="line-through">{inner}</span>;
+    if (p.length > 2 && p[0] === '`' && p.endsWith('`')) return <code key={i} className="rounded bg-paper px-1 font-mono text-[13px]">{inner}</code>;
+    return <span key={i}>{p}</span>;
+  });
 }
 
 // Slack-style message row: avatar + name + time on the first of a run, hover
@@ -153,10 +162,8 @@ export default function ChatMessage({ m, conversationId, compact, onOpenThread, 
 
           {/* emoji picker popover */}
           {pickerOpen && (
-            <div className="absolute right-0 top-8 z-20 flex gap-1 rounded-lg border border-line bg-white p-1.5 shadow-md">
-              {QUICK.map((e) => (
-                <button key={e} onClick={() => { react.mutate(e); setPickerOpen(false); }} className="rounded px-1 text-lg hover:bg-paper">{e}</button>
-              ))}
+            <div className="absolute right-0 top-8 z-20">
+              <EmojiPicker onPick={(e) => { react.mutate(e); setPickerOpen(false); }} />
             </div>
           )}
 

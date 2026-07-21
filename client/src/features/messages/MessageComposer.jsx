@@ -1,5 +1,6 @@
 import { useRef, useState } from 'react';
 import { uploadFile } from '../../api/files.api.js';
+import EmojiPicker from './EmojiPicker.jsx';
 
 const initials = (n = '') => n.split(' ').map((w) => w[0]).slice(0, 2).join('').toUpperCase();
 const MAX_MB = 10;
@@ -18,12 +19,43 @@ export default function MessageComposer({ onSend, users = [], placeholder = 'Wri
   // mention dropdown state
   const [mq, setMq] = useState(null);          // { query, start } or null
   const [hi, setHi] = useState(0);
+  const [emojiOpen, setEmojiOpen] = useState(false);
 
+  // Wrap the current selection (or caret) in a formatting marker: * _ ~ `.
+  function wrapSelection(mark) {
+    const el = taRef.current; if (!el) return;
+    const s = el.selectionStart ?? text.length;
+    const end = el.selectionEnd ?? s;
+    const sel = text.slice(s, end);
+    setText(text.slice(0, s) + mark + sel + mark + text.slice(end));
+    requestAnimationFrame(() => {
+      el.focus();
+      if (sel) el.setSelectionRange(s + mark.length, end + mark.length);
+      else { const p = s + mark.length; el.setSelectionRange(p, p); }
+    });
+  }
+
+  function insertEmoji(emo) {
+    const el = taRef.current;
+    const s = el?.selectionStart ?? text.length;
+    const end = el?.selectionEnd ?? s;
+    setText(text.slice(0, s) + emo + text.slice(end));
+    setEmojiOpen(false);
+    requestAnimationFrame(() => { el?.focus(); const p = s + emo.length; el?.setSelectionRange(p, p); });
+  }
+
+  // @channel / @all notify everyone in the conversation. They surface at the top
+  // of the autocomplete when the query prefixes them.
+  const SPECIAL = [
+    { id: '@channel', name: 'channel', role: 'Notify everyone here', special: true },
+    { id: '@all', name: 'all', role: 'Notify everyone here', special: true },
+  ];
   const matches = mq === null
     ? []
-    : users
-        .filter((u) => u.name.toLowerCase().includes(mq.query.toLowerCase()))
-        .slice(0, 6);
+    : [
+        ...SPECIAL.filter((s) => s.name.startsWith(mq.query.toLowerCase())),
+        ...users.filter((u) => u.name.toLowerCase().includes(mq.query.toLowerCase())),
+      ].slice(0, 6);
 
   function onChange(e) {
     const val = e.target.value;
@@ -51,7 +83,8 @@ export default function MessageComposer({ onSend, users = [], placeholder = 'Wri
 
   function pickMention(u) {
     const caret = taRef.current.selectionStart;
-    const next = text.slice(0, mq.start) + '@' + u.name + ' ' + text.slice(caret);
+    const token = u.special ? u.id : '@' + u.name; // u.id is already "@channel"/"@all"
+    const next = text.slice(0, mq.start) + token + ' ' + text.slice(caret);
     setText(next);
     setMentionIds((ids) => (ids.includes(u.id) ? ids : [...ids, u.id]));
     setMq(null);
@@ -64,6 +97,12 @@ export default function MessageComposer({ onSend, users = [], placeholder = 'Wri
       if (e.key === 'ArrowUp') { e.preventDefault(); setHi((h) => (h - 1 + matches.length) % matches.length); return; }
       if (e.key === 'Enter' || e.key === 'Tab') { e.preventDefault(); pickMention(matches[hi]); return; }
       if (e.key === 'Escape') { setMq(null); return; }
+    }
+    // Formatting shortcuts (⌘/Ctrl + B / I).
+    if ((e.metaKey || e.ctrlKey) && !e.altKey) {
+      const k = e.key.toLowerCase();
+      if (k === 'b') { e.preventDefault(); wrapSelection('*'); return; }
+      if (k === 'i') { e.preventDefault(); wrapSelection('_'); return; }
     }
     if (e.key === 'Enter' && !e.shiftKey) { e.preventDefault(); send(); }
   }
@@ -116,7 +155,7 @@ export default function MessageComposer({ onSend, users = [], placeholder = 'Wri
               className={`flex w-full items-center gap-2 px-3 py-1.5 text-left text-sm ${i === hi ? 'bg-pine-tint' : ''}`}
             >
               <span className="flex h-6 w-6 items-center justify-center rounded bg-steel/15 text-[9px] font-semibold text-steel">{initials(u.name)}</span>
-              <span className="truncate">{u.name}</span>
+              <span className="truncate font-medium">{u.special ? u.id : u.name}</span>
               <span className="ml-auto truncate text-xs text-ink-soft">{u.role}</span>
             </button>
           ))}
@@ -140,6 +179,22 @@ export default function MessageComposer({ onSend, users = [], placeholder = 'Wri
           ))}
         </div>
       )}
+
+      {/* format toolbar */}
+      <div className="mb-1 flex items-center gap-0.5">
+        <FmtBtn onClick={() => wrapSelection('*')} title="Bold (⌘/Ctrl+B)"><span className="font-bold">B</span></FmtBtn>
+        <FmtBtn onClick={() => wrapSelection('_')} title="Italic (⌘/Ctrl+I)"><span className="italic">I</span></FmtBtn>
+        <FmtBtn onClick={() => wrapSelection('~')} title="Strikethrough"><span className="line-through">S</span></FmtBtn>
+        <FmtBtn onClick={() => wrapSelection('`')} title="Code"><span className="font-mono text-[11px]">{'</>'}</span></FmtBtn>
+        <div className="relative">
+          <FmtBtn onClick={() => setEmojiOpen((v) => !v)} title="Emoji">😊</FmtBtn>
+          {emojiOpen && (
+            <div className="absolute bottom-9 left-0 z-30">
+              <EmojiPicker onPick={insertEmoji} />
+            </div>
+          )}
+        </div>
+      </div>
 
       <div className="flex items-end gap-2">
         <button
@@ -180,7 +235,21 @@ export default function MessageComposer({ onSend, users = [], placeholder = 'Wri
           Send
         </button>
       </div>
-      <div className="px-1 pt-1 text-[10px] text-ink-soft">Type <span className="font-mono">@</span> to mention · Enter to send · Shift+Enter for a new line</div>
+      <div className="px-1 pt-1 text-[10px] text-ink-soft">
+        <span className="font-mono">*bold*</span> · <span className="font-mono">_italic_</span> · <span className="font-mono">@</span> to mention · Enter to send · Shift+Enter for a new line
+      </div>
     </div>
+  );
+}
+
+// A compact formatting-toolbar button. onMouseDown+preventDefault keeps the
+// textarea's selection intact so the wrap applies to the highlighted text.
+function FmtBtn({ onClick, title, children }) {
+  return (
+    <button type="button" title={title}
+      onMouseDown={(e) => { e.preventDefault(); onClick(); }}
+      className="flex h-7 w-7 items-center justify-center rounded text-sm text-ink-soft hover:bg-paper hover:text-pine">
+      {children}
+    </button>
   );
 }
