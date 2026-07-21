@@ -3,10 +3,10 @@ import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query';
 import { getUsers } from '../api/users.api.js';
 import {
   getConversations, getConversation, getMessages, postMessage,
-  getThread, createGroup, addMembers, openDm, markRead,
+  getThread, createGroup, addMembers, openDm, markRead, getReminders,
 } from '../api/messages.api.js';
 import { useProfile } from '../store/ProfileContext.jsx';
-import MessageComposer from '../features/messages/MessageComposer.jsx';
+import MessageComposer, { readDraft } from '../features/messages/MessageComposer.jsx';
 import ChatMessage from '../features/messages/ChatMessage.jsx';
 import AssignPicker from '../features/events/AssignPicker.jsx';
 import { groupByDept } from '../lib/orgGroups.js';
@@ -40,6 +40,14 @@ export default function Messages() {
 
   const conversations = useQuery({ queryKey: ['conversations'], queryFn: getConversations, retry: false, refetchInterval: 5000 });
   const users = useQuery({ queryKey: ['users'], queryFn: getUsers, retry: false });
+
+  // Re-render the rail when a draft is saved/cleared so the "Draft" pills update.
+  const [, bumpDraft] = useState(0);
+  useEffect(() => {
+    const h = () => bumpDraft((n) => n + 1);
+    window.addEventListener('icku-draftchange', h);
+    return () => window.removeEventListener('icku-draftchange', h);
+  }, []);
   const userOpts = (users.data || []).map((u) => ({ id: u.id, name: u.name, role: u.role }));
 
   const groups = (conversations.data || []).filter((c) => c.type === 'group');
@@ -160,6 +168,9 @@ function RailSection({ title, onAdd, items, selectedId, onSelect, renderIcon, em
           >
             {renderIcon(c)}
             <span className="min-w-0 flex-1 truncate">{c.name}</span>
+            {selectedId !== c.id && readDraft(c.id) && (
+              <span className="rounded bg-white/15 px-1 text-[9px] font-semibold uppercase tracking-wide text-white/70">draft</span>
+            )}
             {c.unread > 0 && (
               <span className={`flex h-[18px] min-w-[18px] items-center justify-center rounded-full px-1 text-[10px] font-bold ${selectedId === c.id ? 'bg-white/30 text-white' : 'bg-sage text-white'}`}>
                 {c.unread > 99 ? '99+' : c.unread}
@@ -178,6 +189,8 @@ function ChatPane({ conversationId, users, onOpenThread, onOpenProfile, onBack }
   const [toast, setToast] = useState('');
   const conv = useQuery({ queryKey: ['conversation', conversationId], queryFn: () => getConversation(conversationId), retry: false });
   const messages = useQuery({ queryKey: ['messages', conversationId], queryFn: () => getMessages(conversationId), retry: false, refetchInterval: 3000 });
+  const reminders = useQuery({ queryKey: ['reminders'], queryFn: getReminders, retry: false });
+  const remindByMsg = new Map((reminders.data || []).filter((r) => r.messageId).map((r) => [r.messageId, r.remindAt]));
   const bottomRef = useRef(null);
 
   useEffect(() => { bottomRef.current?.scrollIntoView({ behavior: 'smooth' }); }, [messages.data?.length]);
@@ -228,10 +241,10 @@ function ChatPane({ conversationId, users, onOpenThread, onOpenProfile, onBack }
             <div key={m.id}>
               {newDay && <DateDivider at={m.at} />}
               <ChatMessage
-                m={m} compact={compact} conversationId={conversationId}
+                m={m} compact={compact} conversationId={conversationId} reminderAt={remindByMsg.get(m.id)}
                 onOpenThread={onOpenThread} onOpenProfile={onOpenProfile}
                 onChanged={() => qc.invalidateQueries({ queryKey: ['messages', conversationId] })}
-                onRemind={() => { qc.invalidateQueries({ queryKey: ['notifications'] }); setToast('⏰ Reminder set'); }}
+                onRemind={() => { qc.invalidateQueries({ queryKey: ['notifications'] }); qc.invalidateQueries({ queryKey: ['reminders'] }); setToast('🔖 Saved for later'); }}
               />
             </div>
           );
@@ -242,7 +255,7 @@ function ChatPane({ conversationId, users, onOpenThread, onOpenProfile, onBack }
 
       {/* composer */}
       <div className="border-t border-line p-3">
-        <MessageComposer onSend={(p) => send.mutateAsync(p)} users={users} placeholder={`Message ${c?.name || ''}`} />
+        <MessageComposer onSend={(p) => send.mutateAsync(p)} users={users} placeholder={`Message ${c?.name || ''}`} draftKey={conversationId} />
       </div>
 
       {addOpen && c && (

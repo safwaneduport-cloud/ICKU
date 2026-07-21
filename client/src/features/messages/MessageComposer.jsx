@@ -1,6 +1,9 @@
-import { useRef, useState } from 'react';
+import { useEffect, useRef, useState } from 'react';
 import { uploadFile } from '../../api/files.api.js';
 import EmojiPicker from './EmojiPicker.jsx';
+
+const DRAFT_PREFIX = 'icku-draft-';
+export const readDraft = (key) => (key ? localStorage.getItem(DRAFT_PREFIX + key) || '' : '');
 
 const initials = (n = '') => n.split(' ').map((w) => w[0]).slice(0, 2).join('').toUpperCase();
 const MAX_MB = 10;
@@ -8,10 +11,10 @@ const MAX_BYTES = MAX_MB * 1024 * 1024; // per-attachment cap
 
 // Slack-style composer: multi-line text, @-mention autocomplete, and
 // file/image attachments. Enter sends; Shift+Enter makes a new line.
-export default function MessageComposer({ onSend, users = [], placeholder = 'Write a message…', autoFocus = false }) {
+export default function MessageComposer({ onSend, users = [], placeholder = 'Write a message…', autoFocus = false, draftKey = null }) {
   const taRef = useRef(null);
   const fileRef = useRef(null);
-  const [text, setText] = useState('');
+  const [text, setText] = useState(() => readDraft(draftKey));
   const [atts, setAtts] = useState([]);       // { kind, name, url }
   const [mentionIds, setMentionIds] = useState([]);
   const [sending, setSending] = useState(false);
@@ -20,6 +23,18 @@ export default function MessageComposer({ onSend, users = [], placeholder = 'Wri
   const [mq, setMq] = useState(null);          // { query, start } or null
   const [hi, setHi] = useState(0);
   const [emojiOpen, setEmojiOpen] = useState(false);
+
+  // Persist the unsent text as a per-conversation draft (localStorage). Deps are
+  // [text] only — on a draftKey switch the reload effect below updates text
+  // first, so this then writes under the NEW key (no cross-key clobber).
+  useEffect(() => {
+    if (!draftKey) return;
+    if (text) localStorage.setItem(DRAFT_PREFIX + draftKey, text);
+    else localStorage.removeItem(DRAFT_PREFIX + draftKey);
+    window.dispatchEvent(new CustomEvent('icku-draftchange'));
+  }, [text]); // eslint-disable-line react-hooks/exhaustive-deps
+  // Switching conversations → load that conversation's saved draft.
+  useEffect(() => { setText(readDraft(draftKey)); }, [draftKey]); // eslint-disable-line react-hooks/exhaustive-deps
 
   // Wrap the current selection (or caret) in a formatting marker: * _ ~ `.
   function wrapSelection(mark) {

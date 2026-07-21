@@ -8,6 +8,18 @@ const QUICK = ['👍', '✅', '🎉', '❤️', '😂', '👀'];
 const initials = (n = '') => n.split(' ').map((w) => w[0]).slice(0, 2).join('').toUpperCase();
 const timeOf = (iso) => new Date(iso).toLocaleTimeString(undefined, { hour: 'numeric', minute: '2-digit' });
 
+// "Due in 1 hour" / "Due in 20 min" / "Due in 2 days" for a reminder banner.
+function dueIn(at) {
+  const ms = new Date(at) - Date.now();
+  if (ms <= 0) return 'now';
+  const min = Math.round(ms / 60000);
+  if (min < 60) return `in ${min} min`;
+  const hr = Math.round(min / 60);
+  if (hr < 24) return `in ${hr} hour${hr === 1 ? '' : 's'}`;
+  const d = Math.round(hr / 24);
+  return `in ${d} day${d === 1 ? '' : 's'}`;
+}
+
 function remindOptions() {
   const now = new Date();
   const at = (ms) => new Date(now.getTime() + ms);
@@ -41,7 +53,7 @@ function renderBody(body) {
 
 // Slack-style message row: avatar + name + time on the first of a run, hover
 // action toolbar (quick reactions / reply / more), reactions below, inline edit.
-export default function ChatMessage({ m, conversationId, compact, onOpenThread, onOpenProfile, onChanged, onRemind }) {
+export default function ChatMessage({ m, conversationId, compact, reminderAt, onOpenThread, onOpenProfile, onChanged, onRemind }) {
   const { user } = useAuth();
   const mine = user?.id === m.authorId;
   const [menuOpen, setMenuOpen] = useState(false);
@@ -85,6 +97,11 @@ export default function ChatMessage({ m, conversationId, compact, onOpenThread, 
       </div>
 
       <div className="min-w-0 flex-1">
+        {reminderAt && (
+          <div className="mb-0.5 flex items-center gap-1 text-[11px] font-semibold text-steel">
+            🔖 Saved for later · Due {dueIn(reminderAt)}
+          </div>
+        )}
         {!compact && (
           <div className="flex items-baseline gap-2">
             <button onClick={() => onOpenProfile?.(m.authorId)} className="text-sm font-semibold text-ink hover:underline">{m.author}</button>
