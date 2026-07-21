@@ -4,7 +4,7 @@ import { getMonth } from '../attendance/attendance.service.js';
 
 const publicSelect = {
   id: true, name: true, email: true, role: true, tier: true,
-  designation: true, status: true, departmentId: true, reportsToId: true,
+  designation: true, status: true, departmentId: true, reportsToId: true, photoUrl: true,
 };
 
 export function listUsers() {

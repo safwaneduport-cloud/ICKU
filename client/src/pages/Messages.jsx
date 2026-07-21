@@ -3,17 +3,30 @@ import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query';
 import { getUsers } from '../api/users.api.js';
 import {
   getConversations, getConversation, getMessages, postMessage,
-  getThread, createGroup, addMembers, openDm, markRead, getReminders, setSection,
+  getThread, getMyThreads, createGroup, addMembers, openDm, markRead,
+  getReminders, completeReminder, setSection,
 } from '../api/messages.api.js';
 import { useProfile } from '../store/ProfileContext.jsx';
-import MessageComposer, { readDraft } from '../features/messages/MessageComposer.jsx';
+import MessageComposer, { readDraft, listDrafts, clearDraft } from '../features/messages/MessageComposer.jsx';
 import ChatMessage from '../features/messages/ChatMessage.jsx';
+import Avatar from '../features/messages/Avatar.jsx';
 import AssignPicker from '../features/events/AssignPicker.jsx';
 import { groupByDept } from '../lib/orgGroups.js';
 
-const initials = (n = '') => n.split(' ').map((w) => w[0]).slice(0, 2).join('').toUpperCase();
 const sameDay = (a, b) => new Date(a).toDateString() === new Date(b).toDateString();
 const withinGap = (a, b) => Math.abs(new Date(b) - new Date(a)) < 5 * 60e3;
+const timeOf = (iso) => new Date(iso).toLocaleTimeString(undefined, { hour: 'numeric', minute: '2-digit' });
+const stripFmt = (s = '') => s.replace(/[*_~`]/g, '');
+// "in 20 min" / "in 2 hr" / "in 3 days" for a reminder's due time.
+function dueLabel(at) {
+  const ms = new Date(at) - Date.now();
+  if (ms <= 0) return 'now';
+  const min = Math.round(ms / 60000);
+  if (min < 60) return `in ${min} min`;
+  const hr = Math.round(min / 60);
+  if (hr < 24) return `in ${hr} hr`;
+  return `in ${Math.round(hr / 24)} day${Math.round(hr / 24) === 1 ? '' : 's'}`;
+}
 
 function DateDivider({ at }) {
   const d = new Date(at);
@@ -54,10 +67,25 @@ export default function Messages() {
   const dms = (conversations.data || []).filter((c) => c.type === 'dm');
   const events = (conversations.data || []).filter((c) => c.type === 'event');
 
-  // Mark a conversation read when it's opened (clears the unread badge).
+  // ── Top cards (Slack-style): Catch Up · Threads · Later · Drafts ──
+  const [activeCard, setActiveCard] = useState(null); // 'catchup'|'threads'|'later'|'drafts'|null
+  const [pendingThread, setPendingThread] = useState(null); // deep-link into a thread from the Threads card
+  const paneOpen = !!(selectedId || activeCard);
+  const threadsQ = useQuery({ queryKey: ['my-threads'], queryFn: getMyThreads, retry: false, refetchInterval: 15000 });
+  const remindersQ = useQuery({ queryKey: ['reminders'], queryFn: getReminders, retry: false, refetchInterval: 15000 });
+  const drafts = listDrafts(); // localStorage; bumpDraft re-renders on change
+  const totalUnread = (conversations.data || []).reduce((n, c) => n + (c.unread || 0), 0);
+
+  const openConversation = (id) => { setActiveCard(null); setSelectedId(id); };
+  const openThreadFrom = (convId, parent) => { setActiveCard(null); setPendingThread(parent); setSelectedId(convId); };
+  const pickCard = (key) => { setSelectedId(null); setThread(null); setActiveCard((k) => (k === key ? null : key)); };
+
+  // Mark a conversation read when it's opened (clears the unread badge). If we
+  // arrived by deep-linking into a thread, open that thread too.
   useEffect(() => {
     if (!selectedId) return;
-    setThread(null);
+    setThread(pendingThread);
+    setPendingThread(null);
     markRead(selectedId).then(() => qc.invalidateQueries({ queryKey: ['conversations'] })).catch(() => {});
   }, [selectedId]); // eslint-disable-line
 
@@ -66,15 +94,18 @@ export default function Messages() {
     // From lg up it's the classic rail + chat + thread layout.
     <div className="flex h-[calc(100dvh-8.5rem)] gap-4 sm:h-[calc(100dvh-10rem)]">
       {/* ── Left rail (Slack-style dark channel list) ── */}
-      <aside className={`w-full shrink-0 flex-col overflow-hidden rounded-2xl bg-pine text-white lg:flex lg:w-64 ${selectedId ? 'hidden lg:flex' : 'flex'}`}>
+      <aside className={`w-full shrink-0 flex-col overflow-hidden rounded-2xl bg-pine text-white lg:flex lg:w-64 ${paneOpen ? 'hidden lg:flex' : 'flex'}`}>
         <div className="flex items-center justify-between border-b border-white/10 px-4 py-3">
           <h1 className="font-serif text-lg font-bold text-white">Messages</h1>
         </div>
+        <TopCards active={activeCard} onPick={pickCard}
+          unread={totalUnread} threads={(threadsQ.data || []).length}
+          reminders={(remindersQ.data || []).filter((r) => !r.doneAt).length} drafts={drafts.length} />
         <div className="flex-1 overflow-y-auto px-2 pb-3">
           <ChannelRail
             items={groups}
             selectedId={selectedId}
-            onSelect={setSelectedId}
+            onSelect={openConversation}
             onAddChannel={() => setModal('group')}
           />
           <RailSection
@@ -82,26 +113,36 @@ export default function Messages() {
             onAdd={() => setModal('dm')}
             items={dms}
             selectedId={selectedId}
-            onSelect={setSelectedId}
-            renderIcon={(c) => (
-              <span className="flex h-5 w-5 items-center justify-center rounded bg-white/15 text-[8px] font-semibold text-white">{initials(c.name)}</span>
-            )}
+            onSelect={openConversation}
+            renderIcon={(c) => <Avatar id={c.id} name={c.name} photoUrl={c.photoUrl} size={20} rounded="rounded" />}
             empty="No direct messages yet"
           />
           <RailSection
             title="Project messages"
             items={events}
             selectedId={selectedId}
-            onSelect={setSelectedId}
+            onSelect={openConversation}
             renderIcon={() => <span>🗓</span>}
             empty="No project chats yet — join one from any project."
           />
         </div>
       </aside>
 
-      {/* ── Chat pane ── */}
-      <section className={`relative min-w-0 flex-1 flex-col rounded-2xl border border-line bg-white lg:flex ${selectedId ? 'flex' : 'hidden lg:flex'}`}>
-        {!selectedId ? (
+      {/* ── Chat pane (or an active card view) ── */}
+      <section className={`relative min-w-0 flex-1 flex-col rounded-2xl border border-line bg-white lg:flex ${paneOpen ? 'flex' : 'hidden lg:flex'}`}>
+        {activeCard ? (
+          <CardView
+            card={activeCard}
+            conversations={conversations.data || []}
+            threads={threadsQ.data || []}
+            reminders={remindersQ.data || []}
+            drafts={drafts}
+            onBack={() => setActiveCard(null)}
+            onOpenConversation={openConversation}
+            onOpenThread={openThreadFrom}
+            onRemindersChanged={() => qc.invalidateQueries({ queryKey: ['reminders'] })}
+          />
+        ) : !selectedId ? (
           <div className="flex flex-1 flex-col items-center justify-center text-center text-ink-soft">
             <div className="text-4xl">💬</div>
             <p className="mt-2 text-sm">Select a conversation, or start a new one.</p>
@@ -143,6 +184,138 @@ export default function Messages() {
         />
       )}
     </div>
+  );
+}
+
+// ── Top cards (Catch Up · Threads · Later · Drafts), horizontal scroll ──
+function TopCards({ active, onPick, unread, threads, reminders, drafts }) {
+  const cards = [
+    ['catchup', 'Catch Up', '🗂', unread, 'new'],
+    ['threads', 'Threads', '🧵', threads, ''],
+    ['later', 'Later', '🔖', reminders, ''],
+    ['drafts', 'Drafts', '✏️', drafts, ''],
+  ];
+  return (
+    <div className="flex gap-2 overflow-x-auto border-b border-white/10 px-2 py-2 [-ms-overflow-style:none] [scrollbar-width:none]">
+      {cards.map(([key, label, icon, count, suffix]) => (
+        <button key={key} onClick={() => onPick(key)}
+          className={`flex min-w-[84px] shrink-0 flex-col rounded-xl border px-3 py-2 text-left transition ${active === key ? 'border-white/50 bg-white/20' : 'border-white/10 bg-white/5 hover:bg-white/10'}`}>
+          <span className="text-base leading-none">{icon}</span>
+          <span className="mt-1.5 text-xs font-semibold text-white">{label}</span>
+          <span className="text-[11px] text-white/60">{count > 0 ? `${count}${suffix ? ` ${suffix}` : ''}` : '—'}</span>
+        </button>
+      ))}
+    </div>
+  );
+}
+
+// Shell for a card's list view in the chat pane (header + scroll body).
+function PaneShell({ title, subtitle, onBack, children }) {
+  return (
+    <>
+      <div className="flex items-center gap-2 border-b border-line px-4 py-3">
+        <button onClick={onBack} className="-ml-1 shrink-0 rounded-lg p-1 text-ink-soft hover:bg-paper lg:hidden" aria-label="Back">←</button>
+        <div className="min-w-0 flex-1">
+          <div className="truncate font-serif text-lg font-semibold text-pine">{title}</div>
+          {subtitle && <div className="truncate text-xs text-ink-soft">{subtitle}</div>}
+        </div>
+        <button onClick={onBack} className="hidden shrink-0 rounded-lg p-1 text-ink-soft hover:bg-paper lg:block" aria-label="Close">✕</button>
+      </div>
+      <div className="flex-1 overflow-y-auto p-2">{children}</div>
+    </>
+  );
+}
+
+function Empty({ icon, text }) {
+  return (
+    <div className="flex flex-col items-center justify-center py-16 text-center text-ink-soft">
+      <div className="text-3xl">{icon}</div><p className="mt-2 text-sm">{text}</p>
+    </div>
+  );
+}
+
+function ConvBadge({ c }) {
+  if (c.type === 'dm') return <Avatar id={c.id} name={c.name} photoUrl={c.photoUrl} size={32} />;
+  return <span className="flex h-8 w-8 shrink-0 items-center justify-center rounded-lg bg-pine-tint text-sm text-pine">{c.type === 'event' ? '🗓' : '#'}</span>;
+}
+
+function CardView({ card, conversations, threads, reminders, drafts, onBack, onOpenConversation, onOpenThread, onRemindersChanged }) {
+  if (card === 'catchup') return <CatchUpView conversations={conversations} onBack={onBack} onOpen={onOpenConversation} />;
+  if (card === 'threads') return <ThreadsView threads={threads} onBack={onBack} onOpenThread={onOpenThread} />;
+  if (card === 'later') return <LaterView reminders={reminders} onBack={onBack} onOpen={onOpenConversation} onChanged={onRemindersChanged} />;
+  if (card === 'drafts') return <DraftsView drafts={drafts} conversations={conversations} onBack={onBack} onOpen={onOpenConversation} />;
+  return null;
+}
+
+function CatchUpView({ conversations, onBack, onOpen }) {
+  const unread = conversations.filter((c) => c.unread > 0)
+    .sort((a, b) => new Date(b.lastMessage?.at || 0) - new Date(a.lastMessage?.at || 0));
+  return (
+    <PaneShell title="Catch Up" subtitle={unread.length ? `${unread.length} conversation${unread.length === 1 ? '' : 's'} with unread` : ''} onBack={onBack}>
+      {unread.length === 0 ? <Empty icon="🎉" text="You're all caught up." /> : unread.map((c) => (
+        <button key={c.id} onClick={() => onOpen(c.id)} className="flex w-full items-center gap-3 rounded-lg px-3 py-2 text-left hover:bg-paper">
+          <ConvBadge c={c} />
+          <div className="min-w-0 flex-1">
+            <div className="truncate text-sm font-semibold text-ink">{c.type === 'group' ? '# ' : c.type === 'event' ? '🗓 ' : ''}{c.name}</div>
+            {c.lastMessage && <div className="truncate text-xs text-ink-soft">{c.lastMessage.author}: {stripFmt(c.lastMessage.body) || '📎 attachment'}</div>}
+          </div>
+          <span className="flex h-5 min-w-[20px] items-center justify-center rounded-full bg-sage px-1.5 text-[11px] font-bold text-white">{c.unread > 99 ? '99+' : c.unread}</span>
+        </button>
+      ))}
+    </PaneShell>
+  );
+}
+
+function ThreadsView({ threads, onBack, onOpenThread }) {
+  return (
+    <PaneShell title="Threads" subtitle={threads.length ? `${threads.length} thread${threads.length === 1 ? '' : 's'} you're in` : ''} onBack={onBack}>
+      {threads.length === 0 ? <Empty icon="🧵" text="No threads yet." /> : threads.map((t) => (
+        <button key={t.id} onClick={() => onOpenThread(t.conversationId, t)} className="flex w-full items-start gap-3 rounded-lg px-3 py-2 text-left hover:bg-paper">
+          <Avatar id={t.authorId} name={t.author} photoUrl={t.authorPhoto} size={32} />
+          <div className="min-w-0 flex-1">
+            <div className="truncate text-[11px] font-semibold text-steel">{t.conversationType === 'group' ? '#' : t.conversationType === 'event' ? '🗓' : ''} {t.conversationName}</div>
+            <div className="truncate text-sm text-ink"><span className="font-semibold">{t.author}: </span>{stripFmt(t.body) || '(no text)'}</div>
+            <div className="text-[11px] text-ink-soft">💬 {t.replyCount} {t.replyCount === 1 ? 'reply' : 'replies'}{t.lastReplyAt ? ` · last ${timeOf(t.lastReplyAt)}` : ''}</div>
+          </div>
+        </button>
+      ))}
+    </PaneShell>
+  );
+}
+
+function LaterView({ reminders, onBack, onOpen, onChanged }) {
+  const done = useMutation({ mutationFn: completeReminder, onSuccess: onChanged });
+  const active = reminders.filter((r) => !r.doneAt).sort((a, b) => new Date(a.remindAt) - new Date(b.remindAt));
+  return (
+    <PaneShell title="Later" subtitle={active.length ? `${active.length} saved` : ''} onBack={onBack}>
+      {active.length === 0 ? <Empty icon="🔖" text="Nothing saved for later." /> : active.map((r) => (
+        <div key={r.id} className="group flex items-start gap-3 rounded-lg px-3 py-2 hover:bg-paper">
+          <button onClick={() => done.mutate(r.id)} title="Mark done" className="mt-0.5 flex h-5 w-5 shrink-0 items-center justify-center rounded-full border border-line text-[10px] text-transparent hover:border-sage hover:text-sage">✓</button>
+          <button onClick={() => r.conversationId && onOpen(r.conversationId)} className="min-w-0 flex-1 text-left">
+            <div className="truncate text-sm text-ink">{stripFmt(r.text) || 'Saved message'}</div>
+            <div className={`text-[11px] ${r.due ? 'font-semibold text-brick' : 'text-ink-soft'}`}>{r.due ? '⏰ Due now' : `Due ${dueLabel(r.remindAt)}`}</div>
+          </button>
+        </div>
+      ))}
+    </PaneShell>
+  );
+}
+
+function DraftsView({ drafts, conversations, onBack, onOpen }) {
+  const [, bump] = useState(0);
+  const nameOf = (id) => { const c = conversations.find((x) => x.id === id); return c ? `${c.type === 'group' ? '# ' : c.type === 'event' ? '🗓 ' : ''}${c.name}` : 'Conversation'; };
+  return (
+    <PaneShell title="Drafts" subtitle={drafts.length ? `${drafts.length} unsent` : ''} onBack={onBack}>
+      {drafts.length === 0 ? <Empty icon="✏️" text="No drafts." /> : drafts.map((d) => (
+        <div key={d.conversationId} className="group flex items-start gap-3 rounded-lg px-3 py-2 hover:bg-paper">
+          <button onClick={() => onOpen(d.conversationId)} className="min-w-0 flex-1 text-left">
+            <div className="truncate text-sm font-semibold text-ink">{nameOf(d.conversationId)}</div>
+            <div className="truncate text-xs text-ink-soft">{stripFmt(d.text)}</div>
+          </button>
+          <button onClick={() => { clearDraft(d.conversationId); bump((n) => n + 1); }} title="Discard draft" className="shrink-0 text-[11px] text-ink-soft opacity-0 hover:text-brick group-hover:opacity-100">discard</button>
+        </div>
+      ))}
+    </PaneShell>
   );
 }
 
@@ -419,7 +592,7 @@ function NewDmModal({ users, onClose, onOpened }) {
             {members.map((u) => (
               <button key={u.id} onClick={() => mut.mutate(u.id)} disabled={mut.isPending}
                 className="flex w-full items-center gap-2 rounded-lg px-2 py-2 text-left text-sm hover:bg-pine-tint">
-                <span className="flex h-7 w-7 items-center justify-center rounded-lg bg-pine text-[10px] font-semibold text-white">{initials(u.name)}</span>
+                <Avatar id={u.id} name={u.name} photoUrl={u.photoUrl} size={28} />
                 <span className="flex-1 truncate">{u.name}</span>
                 <span className="truncate text-xs text-ink-soft">{u.role}</span>
               </button>

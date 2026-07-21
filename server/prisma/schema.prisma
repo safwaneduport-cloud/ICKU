@@ -34,6 +34,7 @@ model User {
   status      String  @default("active")
   birthday    String? // "MM-DD"
   joinedOn    String? // "YYYY-MM-DD"
+  photoUrl    String? // uploaded profile photo (avatar); null = coloured initials placeholder
 
   // department (nullable so users can exist before dept assignment)
   departmentId String?

@@ -3,9 +3,9 @@ import { useMutation } from '@tanstack/react-query';
 import { useAuth } from '../../store/AuthContext.jsx';
 import { reactMessage, editMessage, deleteMessage, createReminder } from '../../api/messages.api.js';
 import EmojiPicker from './EmojiPicker.jsx';
+import Avatar from './Avatar.jsx';
 
 const QUICK = ['👍', '✅', '🎉', '❤️', '😂', '👀'];
-const initials = (n = '') => n.split(' ').map((w) => w[0]).slice(0, 2).join('').toUpperCase();
 const timeOf = (iso) => new Date(iso).toLocaleTimeString(undefined, { hour: 'numeric', minute: '2-digit' });
 
 // "Due in 1 hour" / "Due in 20 min" / "Due in 2 days" for a reminder banner.
@@ -89,9 +89,8 @@ export default function ChatMessage({ m, conversationId, compact, reminderAt, on
         {compact ? (
           <span className="mt-1 hidden w-9 text-right text-[10px] leading-5 text-ink-soft group-hover:inline-block">{timeOf(m.at)}</span>
         ) : (
-          <button onClick={() => onOpenProfile?.(m.authorId)} title="View profile"
-            className="mt-1 flex h-9 w-9 items-center justify-center rounded-lg bg-pine text-[11px] font-semibold text-white">
-            {initials(m.author)}
+          <button onClick={() => onOpenProfile?.(m.authorId)} title="View profile" className="mt-1 block">
+            <Avatar id={m.authorId} name={m.author} photoUrl={m.authorPhoto} size={36} />
           </button>
         )}
       </div>

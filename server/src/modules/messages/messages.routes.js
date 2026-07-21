@@ -19,6 +19,8 @@ router.post('/conversations/:id/messages', ctrl.postMessage);
 router.post('/conversations/:id/read', ctrl.markRead);
 router.patch('/conversations/:id/section', ctrl.setSection);
 
+// Threads I'm part of (Threads card) — before the '/thread/:messageId' param route
+router.get('/threads/mine', ctrl.myThreads);
 // Thread (a message's replies)
 router.get('/thread/:messageId', ctrl.listThread);
 

@@ -18,6 +18,9 @@ export const postMessage = (id, payload) =>
 export const getThread = (messageId) =>
   api.get(`/messages/thread/${messageId}`).then((r) => r.data.data);
 
+export const getMyThreads = () =>
+  api.get('/messages/threads/mine').then((r) => r.data.data);
+
 export const createGroup = (name, memberIds) =>
   api.post('/messages/groups', { name, memberIds }).then((r) => r.data.data);
 

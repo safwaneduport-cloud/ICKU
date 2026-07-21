@@ -32,7 +32,7 @@ async function loadForRead(userId, conversationId) {
 
 // What listMessages / listThread need to shape a full message.
 const MSG_INCLUDE = {
-  author: { select: { id: true, name: true } },
+  author: { select: { id: true, name: true, photoUrl: true } },
   _count: { select: { replies: true } },
   replies: { orderBy: { createdAt: 'desc' }, take: 1, select: { createdAt: true } },
   reactions: { select: { userId: true, emoji: true } },
@@ -56,6 +56,7 @@ function shapeMessage(m, meId) {
     body: deleted ? '' : m.body,
     authorId: m.authorId,
     author: m.author?.name || '—',
+    authorPhoto: m.author?.photoUrl ?? null,
     at: m.createdAt,
     attachments: deleted ? [] : (Array.isArray(m.attachments) ? m.attachments : []),
     mentions: m.mentions || [],
@@ -78,7 +79,7 @@ export async function listConversations(userId) {
     include: {
       conversation: {
         include: {
-          members: { include: { user: { select: { id: true, name: true } } } },
+          members: { include: { user: { select: { id: true, name: true, photoUrl: true } } } },
           messages: {
             orderBy: { createdAt: 'desc' },
             take: 1,
@@ -106,6 +107,7 @@ export async function listConversations(userId) {
         type: c.type,
         eventId: c.eventId,
         name: c.type === 'dm' ? other?.name || 'Direct message' : c.name,
+        photoUrl: other?.photoUrl ?? null, // DM partner avatar (null for groups/events)
         memberCount: c.members.length,
         lastMessage: last
           ? {
@@ -137,7 +139,7 @@ export async function setSection(userId, conversationId, section) {
 export async function getConversation(userId, conversationId) {
   const conv = await prisma.conversation.findUnique({
     where: { id: conversationId },
-    include: { members: { include: { user: { select: { id: true, name: true, designation: true } } } } },
+    include: { members: { include: { user: { select: { id: true, name: true, designation: true, photoUrl: true } } } } },
   });
   if (!conv) throw new ApiError(404, 'Conversation not found');
   const isMember = conv.members.some((m) => m.userId === userId);
@@ -148,11 +150,13 @@ export async function getConversation(userId, conversationId) {
     type: conv.type,
     eventId: conv.eventId,
     name: conv.type === 'dm' ? other?.name || 'Direct message' : conv.name,
+    photoUrl: other?.photoUrl ?? null,
     createdById: conv.createdById,
     members: conv.members.map((m) => ({
       id: m.userId,
       name: m.user.name,
       designation: m.user.designation,
+      photoUrl: m.user.photoUrl ?? null,
       role: m.role,
     })),
   };
@@ -237,6 +241,40 @@ export async function listThread(userId, messageId) {
     include: MSG_INCLUDE,
   });
   return { parent: shapeMessage(parent, userId), replies: replies.map((r) => shapeMessage(r, userId)) };
+}
+
+// Threads the signed-in user is part of: top-level messages that have replies,
+// in conversations they can see, where they authored the root, replied, or were
+// @mentioned. Most recently active thread first (drives the "Threads" card).
+export async function myThreads(userId) {
+  const memberships = await prisma.conversationMember.findMany({ where: { userId }, select: { conversationId: true } });
+  const convIds = memberships.map((m) => m.conversationId);
+  if (!convIds.length) return [];
+  const parents = await prisma.message.findMany({
+    where: {
+      parentId: null,
+      deletedAt: null,
+      conversationId: { in: convIds },
+      replies: { some: {} },
+      OR: [
+        { authorId: userId },
+        { mentions: { has: userId } },
+        { replies: { some: { authorId: userId } } },
+        { replies: { some: { mentions: { has: userId } } } },
+      ],
+    },
+    include: { ...MSG_INCLUDE, conversation: { select: { id: true, type: true, name: true } } },
+    orderBy: { createdAt: 'desc' },
+    take: 60,
+  });
+  const shaped = parents.map((m) => ({
+    ...shapeMessage(m, userId),
+    conversationId: m.conversationId,
+    conversationName: m.conversation.name || (m.conversation.type === 'dm' ? 'Direct message' : ''),
+    conversationType: m.conversation.type,
+  }));
+  shaped.sort((a, b) => new Date(b.lastReplyAt || b.at) - new Date(a.lastReplyAt || a.at));
+  return shaped;
 }
 
 export async function postMessage(userId, conversationId, { body = '', parentId = null, attachments = null, mentions = [] } = {}) {

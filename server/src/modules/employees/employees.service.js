@@ -10,6 +10,7 @@ import { canAdmin } from '../../lib/access.js';
 export const SELF_EDITABLE = [
   // googleEmail is self-service (people know their own gmail); eduportEmail is
   // HR-managed below, since it mirrors the real mailbox only ~14 staff have.
+  'photoUrl', // profile photo (avatar) — self-service
   'mobilePhone', 'workPhone', 'homePhone', 'googleEmail', 'dateOfBirth', 'gender', 'maritalStatus',
   'marriageDate', 'bloodGroup', 'physicallyHandicapped', 'nationality',
   'currentAddrLine1', 'currentAddrLine2', 'currentAddrCity', 'currentAddrState', 'currentAddrZip', 'currentAddrCountry',

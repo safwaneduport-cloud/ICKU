@@ -5,6 +5,26 @@ import EmojiPicker from './EmojiPicker.jsx';
 const DRAFT_PREFIX = 'icku-draft-';
 export const readDraft = (key) => (key ? localStorage.getItem(DRAFT_PREFIX + key) || '' : '');
 
+// Every saved draft as [{ conversationId, text }] — powers the Drafts card.
+export const listDrafts = () => {
+  const out = [];
+  for (let i = 0; i < localStorage.length; i += 1) {
+    const k = localStorage.key(i);
+    if (k && k.startsWith(DRAFT_PREFIX)) {
+      const text = localStorage.getItem(k);
+      if (text && text.trim()) out.push({ conversationId: k.slice(DRAFT_PREFIX.length), text });
+    }
+  }
+  return out;
+};
+
+// Discard a saved draft (Drafts card) and notify the rail to re-render.
+export const clearDraft = (key) => {
+  if (!key) return;
+  localStorage.removeItem(DRAFT_PREFIX + key);
+  window.dispatchEvent(new CustomEvent('icku-draftchange'));
+};
+
 const initials = (n = '') => n.split(' ').map((w) => w[0]).slice(0, 2).join('').toUpperCase();
 const MAX_MB = 10;
 const MAX_BYTES = MAX_MB * 1024 * 1024; // per-attachment cap

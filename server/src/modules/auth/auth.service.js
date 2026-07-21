@@ -6,6 +6,7 @@ import { signAccessToken, signRefreshToken } from '../../lib/jwt.js';
 const publicUser = (u) => ({
   id: u.id, name: u.name, role: u.role, tier: u.tier,
   designation: u.designation, departmentId: u.departmentId, reportsToId: u.reportsToId,
+  photoUrl: u.photoUrl ?? null,
 });
 
 function issueTokens(user) {

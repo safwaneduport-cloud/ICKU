@@ -8,6 +8,8 @@ import { getDepartments } from '../api/departments.api.js';
 import { getUsers } from '../api/users.api.js';
 import { changeOwnPassword } from '../api/credentials.api.js';
 import { getMicrosoftStatus, getMicrosoftConnectUrl, disconnectMicrosoft } from '../api/integrations.api.js';
+import { uploadFile } from '../api/files.api.js';
+import Avatar from '../features/messages/Avatar.jsx';
 import { groupByDept } from '../lib/orgGroups.js';
 
 // Mirrors COMPLETION_FIELDS on the server. eduportEmail is absent on purpose —
@@ -102,6 +104,49 @@ function MiniSelect({ field, value, onChange, invalid }) {
   );
 }
 
+// Avatar + upload control in the profile header. Uploads via the shared file
+// endpoint, then saves the returned URL to photoUrl (self-editable field).
+function PhotoPicker({ targetKey, user, canEdit, onSaved }) {
+  const [busy, setBusy] = useState(false);
+  const [err, setErr] = useState('');
+  const save = useMutation({ mutationFn: (photoUrl) => updateEmployeeProfile(targetKey, { photoUrl }), onSuccess: () => onSaved?.() });
+
+  async function onFile(e) {
+    const file = e.target.files?.[0];
+    e.target.value = '';
+    if (!file) return;
+    if (!file.type.startsWith('image/')) { setErr('Please choose an image file.'); return; }
+    if (file.size > 5 * 1024 * 1024) { setErr('Image must be under 5 MB.'); return; }
+    setErr(''); setBusy(true);
+    try {
+      const dataUrl = await new Promise((res, rej) => { const r = new FileReader(); r.onload = () => res(r.result); r.onerror = rej; r.readAsDataURL(file); });
+      const up = await uploadFile(dataUrl, file.name);
+      await save.mutateAsync(up.url);
+    } catch (ex) {
+      setErr(`Upload failed: ${ex.response?.data?.error?.message || ex.message}`);
+    } finally { setBusy(false); }
+  }
+
+  return (
+    <div className="relative">
+      <Avatar id={user.id} name={user.name} photoUrl={user.photoUrl} size={64} rounded="rounded-2xl" />
+      {canEdit && (
+        <>
+          <label className={`absolute -bottom-1 -right-1 flex h-7 w-7 cursor-pointer items-center justify-center rounded-full border-2 border-white bg-pine text-xs text-white shadow ${busy ? 'opacity-60' : 'hover:opacity-90'}`} title="Change photo">
+            {busy ? '…' : '📷'}
+            <input type="file" accept="image/*" onChange={onFile} className="hidden" disabled={busy} />
+          </label>
+          {user.photoUrl && !busy && (
+            <button onClick={() => save.mutate(null)} title="Remove photo"
+              className="absolute -right-1 -top-1 flex h-5 w-5 items-center justify-center rounded-full border border-line bg-white text-[10px] text-ink-soft shadow hover:text-brick">✕</button>
+          )}
+        </>
+      )}
+      {err && <p className="absolute left-1/2 top-full z-10 mt-1 w-40 -translate-x-1/2 rounded bg-white px-1 text-center text-[10px] text-brick shadow">{err}</p>}
+    </div>
+  );
+}
+
 export default function Profile() {
   const { user } = useAuth();
   const qc = useQueryClient();
@@ -156,9 +201,13 @@ export default function Profile() {
       {/* header + completion */}
       <div className="rounded-2xl border border-line bg-white p-5">
         <div className="flex flex-wrap items-center justify-between gap-3">
-          <div>
-            <h1 className="font-serif text-2xl font-bold text-pine">{viewingSelf ? 'My Profile' : p.user.name}</h1>
-            <p className="text-sm text-ink-soft">{p.user.designation} · {p.user.department?.name || '—'} · {p.user.employeeNumber}</p>
+          <div className="flex items-center gap-3">
+            <PhotoPicker targetKey={targetKey} user={p.user} canEdit={viewingSelf || isHr}
+              onSaved={() => { qc.invalidateQueries({ queryKey: ['profile-edit'] }); qc.invalidateQueries({ queryKey: ['users'] }); qc.invalidateQueries({ queryKey: ['conversations'] }); }} />
+            <div>
+              <h1 className="font-serif text-2xl font-bold text-pine">{viewingSelf ? 'My Profile' : p.user.name}</h1>
+              <p className="text-sm text-ink-soft">{p.user.designation} · {p.user.department?.name || '—'} · {p.user.employeeNumber}</p>
+            </div>
           </div>
           <div className="text-right">
             <div className="text-2xl font-bold" style={{ color: barColor }}>{pct}%</div>

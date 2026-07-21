@@ -41,6 +41,10 @@ export async function listThread(req, res, next) {
   try { ok(res, await service.listThread(req.user.id, req.params.messageId)); } catch (e) { next(e); }
 }
 
+export async function myThreads(req, res, next) {
+  try { ok(res, await service.myThreads(req.user.id)); } catch (e) { next(e); }
+}
+
 export async function markRead(req, res, next) {
   try { ok(res, await service.markRead(req.user.id, req.params.id)); } catch (e) { next(e); }
 }
