@@ -2,6 +2,7 @@ import { prisma } from '../../config/prisma.js';
 import { ApiError } from '../../middleware/errorHandler.js';
 import { canAdmin } from '../../lib/access.js';
 import { gateFor } from '../../lib/taskGate.js';
+import { notifyAssignments, notifyTaskAssigned } from '../../lib/notify.js';
 
 async function isManagerOf(managerId, userId) {
   const u = await prisma.user.findUnique({ where: { id: userId }, select: { reportsToId: true } });
@@ -53,7 +54,9 @@ export async function create(assigner, { title, assigneeIds = [], dueDate, dueTi
     },
     include,
   });
-  return shape(t);
+  const shaped = shape(t);
+  notifyAssignments(links, { title: shaped.title, by: shaped.assignerName, dueText: dueDate || null, assignerId: assigner.id });
+  return shaped;
 }
 
 // Tasks assigned TO me — only ones my manager has approved (pending stay hidden).
@@ -86,7 +89,10 @@ export async function decideAssignee(actor, taskId, userId, decision) {
     where: { taskId_userId: { taskId, userId } },
     data: { approval: decision === 'approved' ? 'approved' : 'rejected' },
   });
-  return get(taskId);
+  const shaped = await get(taskId);
+  // Approved → the task is now live for that person, so notify them.
+  if (decision === 'approved') notifyTaskAssigned(userId, { title: shaped.title, by: shaped.assignerName, dueText: shaped.dueDate });
+  return shaped;
 }
 
 export async function toggleComplete(actor, id) {
@@ -126,8 +132,11 @@ export async function addAssignees(actor, taskId, userIds = []) {
   if (!ids.length) throw new ApiError(400, 'Pick someone new to assign');
   const recips = await prisma.user.findMany({ where: { id: { in: ids } }, select: { id: true, autoApproveTasks: true, reportsToId: true } });
   const rmap = new Map(recips.map((u) => [u.id, u]));
-  await prisma.directTaskAssignee.createMany({ data: ids.map((userId) => ({ taskId, userId, ...gateFor(actor.id, rmap.get(userId)) })) });
-  return get(taskId);
+  const links = ids.map((userId) => ({ userId, ...gateFor(actor.id, rmap.get(userId)) }));
+  await prisma.directTaskAssignee.createMany({ data: links.map((l) => ({ taskId, ...l })) });
+  const shaped = await get(taskId);
+  notifyAssignments(links, { title: shaped.title, by: shaped.assignerName, dueText: shaped.dueDate, assignerId: actor.id });
+  return shaped;
 }
 
 // Reassign: the assigner removes a recipient entirely (drops their assignment).

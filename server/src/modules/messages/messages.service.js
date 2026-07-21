@@ -1,5 +1,6 @@
 import { prisma } from '../../config/prisma.js';
 import { ApiError } from '../../middleware/errorHandler.js';
+import { notifyMention } from '../../lib/notify.js';
 
 // ── helpers ──────────────────────────────────────────────────────────
 async function loadMembership(userId, conversationId) {
@@ -286,6 +287,12 @@ export async function postMessage(userId, conversationId, { body = '', parentId 
       });
     }
   }
+
+  // Email real @-mentions (skip @channel/@all markers and self — those would
+  // mass-mail a channel; members still get the in-app unread bell).
+  const mentioned = cleanMentions.filter((m) => !m.startsWith('@') && m !== userId);
+  const where = conv.type === 'dm' ? 'a direct message' : conv.name;
+  for (const uid of mentioned) notifyMention(uid, { by: msg.author.name, where, snippet: text });
 
   return shapeMessage(msg, userId);
 }

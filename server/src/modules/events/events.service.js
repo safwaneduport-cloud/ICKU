@@ -2,6 +2,7 @@ import { prisma } from '../../config/prisma.js';
 import { ApiError } from '../../middleware/errorHandler.js';
 import { canAdmin } from '../../lib/access.js';
 import { gateFor } from '../../lib/taskGate.js';
+import { notifyAssignments, notifyApprovalNeeded, notifyTaskAssigned } from '../../lib/notify.js';
 import { istInstant, istMonthRange } from '../../lib/ist.js';
 import { computeState, triggerDate, isTaskPastDue, effectiveDue, isUndated } from './events.lib.js';
 
@@ -179,7 +180,7 @@ export async function create(creator, payload) {
   // → goes live immediately; manual → pending their manager's approval, and its
   // tasks stay hidden from assignees until approved (see list()). CEO auto.
   const isCeo = creator.id === 'ceo';
-  const u = await prisma.user.findUnique({ where: { id: creator.id }, select: { reportsToId: true, autoApproveProjects: true } });
+  const u = await prisma.user.findUnique({ where: { id: creator.id }, select: { name: true, reportsToId: true, autoApproveProjects: true } });
   const autoApprove = isCeo || u?.autoApproveProjects !== false;
   const approval = autoApprove ? 'approved' : 'pending';
   const approverId = autoApprove ? null : (u?.reportsToId || 'ceo');
@@ -192,6 +193,10 @@ export async function create(creator, payload) {
     ? await prisma.user.findMany({ where: { id: { in: recipientIds } }, select: { id: true, autoApproveTasks: true, reportsToId: true } })
     : [];
   const rmap = new Map(recips.map((r) => [r.id, r]));
+  const perTask = tasks.map((t, i) => ({
+    name: t.name, dueOffset: t.dueOffset ?? null, dueTime: t.dueTime ?? null, sort: i,
+    links: (t.assignees || []).map((uid) => ({ userId: uid, ...gateFor(creator.id, rmap.get(uid)) })),
+  }));
 
   const event = await prisma.event.create({
     data: {
@@ -204,14 +209,17 @@ export async function create(creator, payload) {
       approval, approverId, createdById: creator.id,
       attachments: { create: sopAttachments(attachments) },
       tasks: {
-        create: tasks.map((t, i) => ({
-          name: t.name, dueOffset: t.dueOffset ?? null, dueTime: t.dueTime ?? null, sort: i,
-          assignees: { create: (t.assignees || []).map((uid) => ({ userId: uid, ...gateFor(creator.id, rmap.get(uid)) })) },
+        create: perTask.map((pt) => ({
+          name: pt.name, dueOffset: pt.dueOffset, dueTime: pt.dueTime, sort: pt.sort,
+          assignees: { create: pt.links },
         })),
       },
     },
   });
   await syncEventSop(event.id);
+  // Emails: assignees (or their manager if pending), and the project's approver.
+  for (const pt of perTask) notifyAssignments(pt.links, { title: pt.name, project: event.name, by: u?.name, assignerId: creator.id });
+  if (approval === 'pending' && approverId) notifyApprovalNeeded(approverId, { kind: 'project', title: name.trim(), by: u?.name });
   return event;
 }
 
@@ -318,7 +326,7 @@ export function approvalHistory(approverId) {
 export async function addTask(actor, eventId, { name, dueOffset = null, dueTime = null, assigneeIds = [] } = {}) {
   const e = await prisma.event.findUnique({
     where: { id: eventId },
-    select: { id: true, ownerId: true, status: true, triggerMonth: true, tasks: { select: { sort: true } } },
+    select: { id: true, name: true, ownerId: true, status: true, triggerMonth: true, tasks: { select: { sort: true } } },
   });
   if (!e) throw new ApiError(404, 'Project not found');
   if (e.ownerId !== actor.id && !canAdmin(actor)) throw new ApiError(403, 'Only the project owner can add tasks');
@@ -329,13 +337,15 @@ export async function addTask(actor, eventId, { name, dueOffset = null, dueTime 
   const ids = [...new Set(assigneeIds)];
   const recips = ids.length ? await prisma.user.findMany({ where: { id: { in: ids } }, select: { id: true, autoApproveTasks: true, reportsToId: true } }) : [];
   const rmap = new Map(recips.map((u) => [u.id, u]));
+  const links = ids.map((uid) => ({ userId: uid, ...gateFor(actor.id, rmap.get(uid)) }));
   const nextSort = e.tasks.reduce((m, t) => Math.max(m, t.sort), -1) + 1;
   await prisma.eventTask.create({
     data: {
       eventId, name: name.trim(), dueOffset: dated ? dueOffset : null, dueTime: dated ? dueTime : null, sort: nextSort,
-      assignees: { create: ids.map((uid) => ({ userId: uid, ...gateFor(actor.id, rmap.get(uid)) })) },
+      assignees: { create: links },
     },
   });
+  notifyAssignments(links, { title: name.trim(), project: e.name, assignerId: actor.id });
   return get(eventId);
 }
 
@@ -407,7 +417,7 @@ export async function decideExtension(actor, taskId, decision) {
 // Reassign a project task: the project owner adds new recipients. Each new
 // assignment is re-gated by that recipient's own manager (same rule as creation).
 export async function addTaskAssignees(actor, taskId, userIds = []) {
-  const task = await prisma.eventTask.findUnique({ where: { id: taskId }, include: { assignees: true, event: { select: { id: true, ownerId: true } } } });
+  const task = await prisma.eventTask.findUnique({ where: { id: taskId }, include: { assignees: true, event: { select: { id: true, name: true, ownerId: true } } } });
   if (!task) throw new ApiError(404, 'Task not found');
   if (task.event.ownerId !== actor.id && !canAdmin(actor)) throw new ApiError(403, 'Only the project owner can reassign tasks');
   const existing = new Set(task.assignees.map((a) => a.userId));
@@ -415,7 +425,9 @@ export async function addTaskAssignees(actor, taskId, userIds = []) {
   if (!ids.length) throw new ApiError(400, 'Pick someone new to assign');
   const recips = await prisma.user.findMany({ where: { id: { in: ids } }, select: { id: true, autoApproveTasks: true, reportsToId: true } });
   const rmap = new Map(recips.map((u) => [u.id, u]));
-  await prisma.taskAssignee.createMany({ data: ids.map((userId) => ({ taskId, userId, ...gateFor(actor.id, rmap.get(userId)) })) });
+  const links = ids.map((userId) => ({ userId, ...gateFor(actor.id, rmap.get(userId)) }));
+  await prisma.taskAssignee.createMany({ data: links.map((l) => ({ taskId, ...l })) });
+  notifyAssignments(links, { title: task.name, project: task.event.name, assignerId: actor.id });
   return get(task.event.id);
 }
 
@@ -450,10 +462,15 @@ export async function decideTaskAssignee(actor, taskId, userId, decision) {
   if (!link) throw new ApiError(404, 'That assignment was not found');
   if (link.approval !== 'pending') throw new ApiError(409, 'This assignment is not pending approval');
   if (link.approverId !== actor.id && !canAdmin(actor)) throw new ApiError(403, "Only the recipient's manager can decide this");
-  return prisma.taskAssignee.update({
+  const updated = await prisma.taskAssignee.update({
     where: { taskId_userId: { taskId, userId } },
     data: { approval: decision === 'approved' ? 'approved' : 'rejected' },
   });
+  if (decision === 'approved') {
+    const t = await prisma.eventTask.findUnique({ where: { id: taskId }, select: { name: true, event: { select: { name: true } } } });
+    notifyTaskAssigned(userId, { title: t?.name, project: t?.event?.name });
+  }
+  return updated;
 }
 
 // A manager's direct reports + whether each auto-approves the projects they
