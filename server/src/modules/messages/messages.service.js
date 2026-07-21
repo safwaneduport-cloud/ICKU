@@ -116,11 +116,21 @@ export async function listConversations(userId) {
           : null,
         lastAt: last?.createdAt || c.createdAt,
         unread,
+        section: m.section || null,
       };
     })
   );
 
   return rows.sort((a, b) => new Date(b.lastAt) - new Date(a.lastAt));
+}
+
+// Set (or clear) the requesting member's personal section for a conversation.
+export async function setSection(userId, conversationId, section) {
+  const clean = (section || '').trim().slice(0, 40) || null;
+  const m = await prisma.conversationMember.findUnique({ where: { conversationId_userId: { conversationId, userId } } });
+  if (!m) throw new ApiError(404, 'Not a member of this conversation');
+  await prisma.conversationMember.update({ where: { conversationId_userId: { conversationId, userId } }, data: { section: clean } });
+  return { ok: true, section: clean };
 }
 
 export async function getConversation(userId, conversationId) {

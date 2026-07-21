@@ -6,6 +6,9 @@ export const getConversations = () =>
 export const getConversation = (id) =>
   api.get(`/messages/conversations/${id}`).then((r) => r.data.data);
 
+export const setSection = (id, section) =>
+  api.patch(`/messages/conversations/${id}/section`, { section }).then((r) => r.data.data);
+
 export const getMessages = (id) =>
   api.get(`/messages/conversations/${id}/messages`).then((r) => r.data.data);
 

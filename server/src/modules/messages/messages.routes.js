@@ -17,6 +17,7 @@ router.get('/conversations/:id', ctrl.getConversation);
 router.get('/conversations/:id/messages', ctrl.listMessages);
 router.post('/conversations/:id/messages', ctrl.postMessage);
 router.post('/conversations/:id/read', ctrl.markRead);
+router.patch('/conversations/:id/section', ctrl.setSection);
 
 // Thread (a message's replies)
 router.get('/thread/:messageId', ctrl.listThread);

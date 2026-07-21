@@ -3,7 +3,7 @@ import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query';
 import { getUsers } from '../api/users.api.js';
 import {
   getConversations, getConversation, getMessages, postMessage,
-  getThread, createGroup, addMembers, openDm, markRead, getReminders,
+  getThread, createGroup, addMembers, openDm, markRead, getReminders, setSection,
 } from '../api/messages.api.js';
 import { useProfile } from '../store/ProfileContext.jsx';
 import MessageComposer, { readDraft } from '../features/messages/MessageComposer.jsx';
@@ -71,14 +71,11 @@ export default function Messages() {
           <h1 className="font-serif text-lg font-bold text-white">Messages</h1>
         </div>
         <div className="flex-1 overflow-y-auto px-2 pb-3">
-          <RailSection
-            title="Channels"
-            onAdd={() => setModal('group')}
+          <ChannelRail
             items={groups}
             selectedId={selectedId}
             onSelect={setSelectedId}
-            renderIcon={() => <span className="text-white/50">#</span>}
-            empty="No channels yet"
+            onAddChannel={() => setModal('group')}
           />
           <RailSection
             title="Direct messages"
@@ -179,6 +176,65 @@ function RailSection({ title, onAdd, items, selectedId, onSelect, renderIcon, em
           </button>
         ))}
       </div>
+    </div>
+  );
+}
+
+// Channels rail with personal grouping: ungrouped channels first, then each
+// named section. Every channel has a "⋯" to move it between sections.
+function ChannelRail({ items, selectedId, onSelect, onAddChannel }) {
+  const qc = useQueryClient();
+  const move = useMutation({ mutationFn: ({ id, section }) => setSection(id, section), onSuccess: () => qc.invalidateQueries({ queryKey: ['conversations'] }) });
+  const sections = [...new Set(items.map((c) => c.section).filter(Boolean))].sort();
+  const ungrouped = items.filter((c) => !c.section);
+  const rows = (list) => list.map((c) => (
+    <ChannelRow key={c.id} c={c} selected={selectedId === c.id} onSelect={onSelect} sections={sections} onMove={(section) => move.mutate({ id: c.id, section })} />
+  ));
+  return (
+    <div className="mt-3">
+      <div className="flex items-center justify-between px-2">
+        <span className="text-[10px] font-mono font-semibold uppercase tracking-widest text-white/45">Channels</span>
+        <button onClick={onAddChannel} title="New channel" className="text-white/55 hover:text-white">＋</button>
+      </div>
+      <div className="mt-1 space-y-0.5">
+        {items.length === 0 && <p className="px-2 py-1 text-xs text-white/40">No channels yet</p>}
+        {rows(ungrouped)}
+      </div>
+      {sections.map((sec) => (
+        <div key={sec} className="mt-2">
+          <div className="px-2 text-[10px] font-semibold uppercase tracking-wide text-white/40">{sec}</div>
+          <div className="mt-1 space-y-0.5">{rows(items.filter((c) => c.section === sec))}</div>
+        </div>
+      ))}
+    </div>
+  );
+}
+
+function ChannelRow({ c, selected, onSelect, sections, onMove }) {
+  const [menu, setMenu] = useState(false);
+  return (
+    <div className={`group/row relative flex items-center rounded-lg pr-1 ${selected ? 'bg-white/20' : 'hover:bg-white/10'}`}>
+      <button onClick={() => onSelect(c.id)}
+        className={`flex min-w-0 flex-1 items-center gap-2 px-2 py-1.5 text-left text-sm ${selected ? 'font-medium text-white' : 'text-white/80'}`}>
+        <span className="text-white/50">#</span>
+        <span className="min-w-0 flex-1 truncate">{c.name}</span>
+        {!selected && readDraft(c.id) && <span className="rounded bg-white/15 px-1 text-[9px] font-semibold uppercase tracking-wide text-white/70">draft</span>}
+        {c.unread > 0 && (
+          <span className={`flex h-[18px] min-w-[18px] items-center justify-center rounded-full px-1 text-[10px] font-bold ${selected ? 'bg-white/30 text-white' : 'bg-sage text-white'}`}>{c.unread > 99 ? '99+' : c.unread}</span>
+        )}
+      </button>
+      <button onClick={() => setMenu((v) => !v)} title="Move to section"
+        className="shrink-0 px-1 text-white/40 opacity-0 hover:text-white group-hover/row:opacity-100">⋯</button>
+      {menu && (
+        <div className="absolute right-1 top-9 z-30 w-48 rounded-lg border border-line bg-white py-1 text-sm text-ink shadow-lg">
+          <div className="px-3 pb-1 text-[10px] font-semibold uppercase tracking-wide text-ink-soft">Move to section</div>
+          {sections.filter((s) => s !== c.section).map((s) => (
+            <button key={s} onClick={() => { onMove(s); setMenu(false); }} className="block w-full px-3 py-1 text-left hover:bg-paper">{s}</button>
+          ))}
+          <button onClick={() => { const n = prompt('New section name'); if (n && n.trim()) onMove(n.trim()); setMenu(false); }} className="block w-full px-3 py-1 text-left font-medium text-pine hover:bg-paper">+ New section…</button>
+          {c.section && <button onClick={() => { onMove(''); setMenu(false); }} className="block w-full border-t border-line px-3 py-1 text-left text-ink-soft hover:bg-paper">Remove from “{c.section}”</button>}
+        </div>
+      )}
     </div>
   );
 }

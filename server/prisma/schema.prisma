@@ -887,6 +887,7 @@ model ConversationMember {
   user           User         @relation("ConvMember", fields: [userId], references: [id])
   role           String       @default("member") // "owner" | "member"
   lastReadAt     DateTime? // for unread badges
+  section        String? // this member's personal sidebar section/group for the channel
   joinedAt       DateTime     @default(now())
 
   @@id([conversationId, userId])

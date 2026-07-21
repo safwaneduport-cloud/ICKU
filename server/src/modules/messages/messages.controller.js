@@ -44,6 +44,9 @@ export async function listThread(req, res, next) {
 export async function markRead(req, res, next) {
   try { ok(res, await service.markRead(req.user.id, req.params.id)); } catch (e) { next(e); }
 }
+export async function setSection(req, res, next) {
+  try { ok(res, await service.setSection(req.user.id, req.params.id, req.body?.section)); } catch (e) { next(e); }
+}
 
 export async function editMessage(req, res, next) {
   try { ok(res, await service.editMessage(req.user.id, req.params.messageId, req.body?.body)); } catch (e) { next(e); }
