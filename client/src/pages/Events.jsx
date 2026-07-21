@@ -69,16 +69,17 @@ function directRow(t, { toMe, byMe }) {
 
 export default function Events() {
   const { user } = useAuth();
-  const [view, setView] = useState('board'); // 'board' | 'tasks' | 'calendar'
+  const [view, setView] = useState('board'); // 'board' (Projects) | 'tasks' | 'calendar'
   const [filter, setFilter] = useState('all');
   const [scope, setScope] = useState('me'); // 'me' | 'by' | 'all' — Tasks + Calendar
+  const [projScope, setProjScope] = useState('mine'); // 'mine' | 'all' — Projects view
   const [openId, setOpenId] = useState(null);
   const [showNew, setShowNew] = useState(false);
   const [showNewTask, setShowNewTask] = useState(false);
 
   const qc = useQueryClient();
-  // Board reads projects for the active filter (respects My-projects only on Board).
-  const projectsQ = useQuery({ queryKey: ['events', filter, false], queryFn: () => getEvents(filter, false), retry: false, enabled: view === 'board' });
+  // Projects view: My projects (owned or I'm assigned) vs every project in the org.
+  const projectsQ = useQuery({ queryKey: ['events', filter, projScope], queryFn: () => getEvents(filter, projScope === 'mine'), retry: false, enabled: view === 'board' });
   // Tasks + Calendar read all project tasks for the filter, then split to/by client-side.
   const needTasks = view === 'tasks' || view === 'calendar';
   const projTasksQ = useQuery({ queryKey: ['task-list', filter, false], queryFn: () => getTaskList(filter, false), retry: false, enabled: needTasks });
@@ -93,24 +94,31 @@ export default function Events() {
     qc.invalidateQueries({ queryKey: ['events'] });
   };
 
-  // Unified rows for the active scope. Direct "mine" only carry the assigner's
-  // view; "assigned" carry the recipients — so we pick the right source per scope.
+  // Unified rows for the active scope:
+  //  · To me  = tasks assigned to me (incl. ones I assigned to myself)
+  //  · By me  = tasks I handed to someone else (excludes self-only assignments)
+  //  · All    = To me ∪ By me (everything involving me, deduped)
   const rows = useMemo(() => {
+    const uid = user?.id;
+    const soleMe = (as = []) => as.length > 0 && as.every((a) => a.id === uid); // assigned only to myself
     const pt = (projTasksQ.data || []);
-    const mine = (myDirectQ.data || []).filter((t) => (t.assignees?.find((a) => a.id === user?.id) || {}).status !== 'rejected');
+    const mine = (myDirectQ.data || []).filter((t) => (t.assignees?.find((a) => a.id === uid) || {}).status !== 'rejected');
     const assigned = (iAssignedQ.data || []);
+    // project tasks: assigned to me → To me; in a project I own & handed out → By me
+    const isByMeProj = (t) => t.ownerId === uid && !soleMe(t.assignees);
     if (scope === 'me') {
-      return [...pt.filter((t) => t.mine).map((t) => projectRow(t, user?.id)), ...mine.map((t) => directRow(t, { toMe: true, byMe: false }))];
+      return [...pt.filter((t) => t.mine).map((t) => projectRow(t, uid)), ...mine.map((t) => directRow(t, { toMe: true, byMe: false }))];
     }
     if (scope === 'by') {
-      return [...pt.filter((t) => t.ownerId === user?.id).map((t) => projectRow(t, user?.id)), ...assigned.map((t) => directRow(t, { toMe: false, byMe: true }))];
+      return [...pt.filter(isByMeProj).map((t) => projectRow(t, uid)), ...assigned.filter((t) => !soleMe(t.assignees)).map((t) => directRow(t, { toMe: false, byMe: true }))];
     }
-    // all: every project task + every direct task (dedupe self-assigned direct by id)
+    // all = to me ∪ by me
+    const projRows = pt.filter((t) => t.mine || isByMeProj(t)).map((t) => projectRow(t, uid));
     const seen = new Set();
     const direct = [];
-    for (const t of mine) { seen.add(t.id); direct.push(directRow(t, { toMe: true, byMe: t.assignerId === user?.id })); }
-    for (const t of assigned) if (!seen.has(t.id)) direct.push(directRow(t, { toMe: false, byMe: true }));
-    return [...pt.map((t) => projectRow(t, user?.id)), ...direct];
+    for (const t of mine) { seen.add(t.id); direct.push(directRow(t, { toMe: true, byMe: false })); }
+    for (const t of assigned) if (!seen.has(t.id) && !soleMe(t.assignees)) direct.push(directRow(t, { toMe: false, byMe: true }));
+    return [...projRows, ...direct];
   }, [projTasksQ.data, myDirectQ.data, iAssignedQ.data, scope, user?.id]);
 
   const order = { overdue: 0, current: 1, upcoming: 2, undated: 3, completed: 4 };
@@ -131,15 +139,24 @@ export default function Events() {
       {/* View switch */}
       <div className="flex flex-wrap items-center gap-3">
         <div className="inline-flex rounded-lg border border-line bg-white p-0.5">
-          {[['board', '▤ Board'], ['tasks', '☰ Tasks'], ['calendar', '🗓 Calendar']].map(([v, label]) => (
+          {[['board', '▤ Projects'], ['tasks', '☰ Tasks'], ['calendar', '🗓 Calendar']].map(([v, label]) => (
             <button key={v} onClick={() => setView(v)}
               className={`rounded-md px-3 py-1.5 text-sm font-medium ${view === v ? 'bg-pine text-white' : 'text-ink-soft hover:text-pine'}`}>{label}</button>
           ))}
         </div>
-        {/* To me / By me / All — Tasks + Calendar only */}
+        {/* Projects view: My projects / All projects */}
+        {view === 'board' && (
+          <div className="inline-flex rounded-lg border border-line bg-white p-0.5">
+            {[['mine', 'My projects'], ['all', 'All projects']].map(([s, label]) => (
+              <button key={s} onClick={() => setProjScope(s)}
+                className={`rounded-md px-3 py-1.5 text-sm font-medium ${projScope === s ? 'bg-pine text-white' : 'text-ink-soft hover:text-pine'}`}>{label}</button>
+            ))}
+          </div>
+        )}
+        {/* To me / By me / All — Tasks + Calendar */}
         {view !== 'board' && (
           <div className="inline-flex rounded-lg border border-line bg-white p-0.5">
-            {[['me', 'To me'], ['by', 'By me'], ['all', 'All tasks']].map(([s, label]) => (
+            {[['me', 'To me'], ['by', 'By me'], ['all', 'All']].map(([s, label]) => (
               <button key={s} onClick={() => setScope(s)}
                 className={`rounded-md px-3 py-1.5 text-sm font-medium ${scope === s ? 'bg-pine text-white' : 'text-ink-soft hover:text-pine'}`}>{label}</button>
             ))}
