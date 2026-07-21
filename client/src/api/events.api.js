@@ -5,6 +5,8 @@ export const getEvents = (filter, mine) =>
 export const getEvent = (id) => api.get(`/events/${id}`).then((r) => r.data.data);
 export const getTaskList = (filter, mine) => api.get('/events/task-list', { params: { filter, mine } }).then((r) => r.data.data);
 export const createEvent = (payload) => api.post('/events', payload).then((r) => r.data.data);
+export const deleteEvent = (id) => api.delete(`/events/${id}`).then((r) => r.data.data);
+export const deleteProjectTask = (taskId) => api.delete(`/events/tasks/${taskId}`).then((r) => r.data.data);
 export const addProjectTask = (eventId, payload) => api.post(`/events/${eventId}/tasks`, payload).then((r) => r.data.data);
 export const getApprovals = () => api.get('/events/approvals').then((r) => r.data.data);
 export const getApprovalHistory = () => api.get('/events/approval-history').then((r) => r.data.data);

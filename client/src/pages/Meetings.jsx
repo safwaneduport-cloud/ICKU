@@ -19,10 +19,27 @@ const DOW = ['Sun', 'Mon', 'Tue', 'Wed', 'Thu', 'Fri', 'Sat'];
 const MONTHS_FULL = ['January', 'February', 'March', 'April', 'May', 'June', 'July', 'August', 'September', 'October', 'November', 'December'];
 const pad = (n) => String(n).padStart(2, '0');
 const ymd = (d) => `${d.getFullYear()}-${pad(d.getMonth() + 1)}-${pad(d.getDate())}`;
+const addDays = (d, n) => { const x = new Date(d); x.setDate(x.getDate() + n); return x; };
+const startOfWeek = (d) => { const x = new Date(d); x.setDate(x.getDate() - x.getDay()); x.setHours(0, 0, 0, 0); return x; };
 const fmtDate = (iso) => new Date(`${iso}T00:00:00`).toLocaleDateString(undefined, { weekday: 'short', month: 'short', day: 'numeric' });
 const durLabel = (d) => (!d ? '' : d < 60 ? `${d} min` : d % 60 ? `${Math.floor(d / 60)} hr 30 min` : `${d / 60} hr`);
 // MS times arrive as IST wall-clock strings ("YYYY-MM-DDTHH:MM:SS").
 const msTime = (s) => (s ? s.slice(11, 16) : '');
+const minOf = (hhmm) => { const [h, m] = (hhmm || '00:00').split(':').map(Number); return h * 60 + m; };
+const msDurationMin = (e) => {
+  if (!e?.start || !e?.end) return 60;
+  const d = (new Date(e.end.replace(' ', 'T')) - new Date(e.start.replace(' ', 'T'))) / 60000;
+  return d > 0 && d < 24 * 60 ? Math.round(d) : 60;
+};
+// "12–18 July 2026" style label for a week starting at `ws`.
+function weekLabel(ws) {
+  const we = addDays(ws, 6);
+  const sameMonth = ws.getMonth() === we.getMonth();
+  const left = sameMonth ? ws.getDate() : `${MONTHS_FULL[ws.getMonth()].slice(0, 3)} ${ws.getDate()}`;
+  return `${left}–${we.getDate()} ${MONTHS_FULL[we.getMonth()]} ${we.getFullYear()}`;
+}
+// True when two [start,end) minute ranges overlap.
+const overlaps = (a, b) => a.startMin < b.endMin && b.startMin < a.endMin;
 
 // One shape for both sources so the calendar + list treat them uniformly.
 function normalize(icku, ms) {
@@ -30,11 +47,15 @@ function normalize(icku, ms) {
   // in the icku list, so showing the mirror too would double it on the calendar.
   const ickuMsIds = new Set(icku.map((m) => m.msEventId).filter(Boolean));
   const rows = [
-    ...icku.map((m) => ({ kind: 'icku', id: m.id, date: m.date, time: m.time || '00:00', title: m.title,
-      sub: `${m.owner.name} · ${m.attendeeCount} attendee${m.attendeeCount === 1 ? '' : 's'}`, tag: m.recurring, m })),
-    ...ms.filter((e) => !ickuMsIds.has(e.id)).map((e) => ({ kind: e.isOnlineMeeting ? 'teams' : 'outlook', id: e.id, date: (e.start || '').slice(0, 10),
-      time: e.allDay ? '00:00' : msTime(e.start), title: e.subject, allDay: e.allDay,
-      sub: e.organizer || e.location || 'Outlook', link: e.joinUrl || e.webLink || '#', e })),
+    ...icku.map((m) => { const time = m.time || '00:00'; const dur = m.durationMin || 60; return {
+      kind: 'icku', id: m.id, date: m.date, time, title: m.title,
+      durationMin: dur, startMin: minOf(time), endMin: minOf(time) + dur, mine: m.mine,
+      sub: `${m.owner.name} · ${m.attendeeCount} attendee${m.attendeeCount === 1 ? '' : 's'}`, tag: m.recurring, m }; }),
+    ...ms.filter((e) => !ickuMsIds.has(e.id)).map((e) => { const time = e.allDay ? '00:00' : msTime(e.start); const dur = e.allDay ? 0 : msDurationMin(e); return {
+      kind: e.isOnlineMeeting ? 'teams' : 'outlook', id: e.id, date: (e.start || '').slice(0, 10),
+      time, title: e.subject, allDay: e.allDay,
+      durationMin: dur, startMin: minOf(time), endMin: minOf(time) + dur, mine: true, // your own Outlook/Teams calendar
+      sub: e.organizer || e.location || 'Outlook', link: e.joinUrl || e.webLink || '#', e }; }),
   ];
   return rows.sort((a, b) => `${a.date}T${a.time}`.localeCompare(`${b.date}T${b.time}`));
 }
@@ -48,21 +69,25 @@ const SRC = {
 export default function Meetings() {
   const { user } = useAuth();
   const meta = useQuery({ queryKey: ['meetings-meta'], queryFn: meetingsMeta, retry: false });
-  const [view, setView] = useState('calendar'); // calendar | list
+  const [view, setView] = useState('week'); // week | calendar (month) | list
   const [scope, setScope] = useState('all');
   const [cursor, setCursor] = useState(() => { const d = new Date(); return new Date(d.getFullYear(), d.getMonth(), 1); });
+  const [weekCursor, setWeekCursor] = useState(() => new Date());
   const [openId, setOpenId] = useState(null);
   const [modal, setModal] = useState(null); // { meeting } for edit, { initialDate } for new, or {} for new
   const [toast, setToast] = useState('');
   useEffect(() => { if (!toast) return; const t = setTimeout(() => setToast(''), 3500); return () => clearTimeout(t); }, [toast]);
 
   const y = cursor.getFullYear(); const mo = cursor.getMonth();
+  const weekStart = useMemo(() => startOfWeek(weekCursor), [weekCursor]);
   const list = useQuery({ queryKey: ['meetings', scope], queryFn: () => getMeetings(scope), retry: false });
 
-  // Pull the signed-in user's own Outlook/Teams calendar for the visible month.
-  const from = new Date(y, mo, 1).toISOString();
-  const to = new Date(y, mo + 1, 0, 23, 59, 59).toISOString();
-  const cal = useQuery({ queryKey: ['ms-calendar', y, mo], queryFn: () => getMicrosoftCalendar(from, to), retry: false, refetchOnWindowFocus: true });
+  // Pull the signed-in user's own Outlook/Teams calendar for the visible range
+  // (a week in week view, otherwise the month).
+  const range = view === 'week'
+    ? { from: weekStart.toISOString(), to: addDays(weekStart, 7).toISOString(), key: `w${ymd(weekStart)}` }
+    : { from: new Date(y, mo, 1).toISOString(), to: new Date(y, mo + 1, 0, 23, 59, 59).toISOString(), key: `m${y}-${mo}` };
+  const cal = useQuery({ queryKey: ['ms-calendar', range.key], queryFn: () => getMicrosoftCalendar(range.from, range.to), retry: false, refetchOnWindowFocus: true });
   const msEvents = cal.data?.connected ? (cal.data.events || []) : [];
 
   const rows = useMemo(() => normalize(list.data || [], msEvents), [list.data, msEvents]);
@@ -78,7 +103,7 @@ export default function Meetings() {
         <h1 className="font-serif text-3xl font-bold text-pine">Meetings</h1>
         <div className="flex items-center gap-2">
           <div className="flex rounded-lg border border-line bg-white p-0.5">
-            {[['calendar', '🗓 Calendar'], ['list', '☰ List']].map(([v, label]) => (
+            {[['week', '▦ Week'], ['calendar', '🗓 Month'], ['list', '☰ List']].map(([v, label]) => (
               <button key={v} onClick={() => setView(v)}
                 className={`rounded-md px-3 py-1.5 text-sm font-medium ${view === v ? 'bg-pine text-white' : 'text-ink-soft hover:text-pine'}`}>{label}</button>
             ))}
@@ -92,12 +117,12 @@ export default function Meetings() {
           <button key={s} onClick={() => setScope(s)}
             className={`rounded-full px-4 py-1.5 text-sm font-medium ${scope === s ? 'bg-pine text-white' : 'border border-line bg-white text-ink-soft'}`}>{label}</button>
         ))}
-        {view === 'calendar' && (
+        {view !== 'list' && (
           <div className="ml-2 flex items-center gap-1">
-            <button onClick={() => setCursor(new Date(y, mo - 1, 1))} className="rounded-lg border border-line bg-white px-2.5 py-1.5 text-sm">←</button>
-            <span className="min-w-[10rem] text-center text-sm font-medium text-ink">{MONTHS_FULL[mo]} {y}</span>
-            <button onClick={() => setCursor(new Date(y, mo + 1, 1))} className="rounded-lg border border-line bg-white px-2.5 py-1.5 text-sm">→</button>
-            <button onClick={() => { const d = new Date(); setCursor(new Date(d.getFullYear(), d.getMonth(), 1)); }} className="ml-1 rounded-lg border border-line bg-white px-3 py-1.5 text-sm hover:border-pine">Today</button>
+            <button onClick={() => view === 'week' ? setWeekCursor(addDays(weekStart, -7)) : setCursor(new Date(y, mo - 1, 1))} className="rounded-lg border border-line bg-white px-2.5 py-1.5 text-sm">←</button>
+            <span className="min-w-[11rem] text-center text-sm font-medium text-ink">{view === 'week' ? weekLabel(weekStart) : `${MONTHS_FULL[mo]} ${y}`}</span>
+            <button onClick={() => view === 'week' ? setWeekCursor(addDays(weekStart, 7)) : setCursor(new Date(y, mo + 1, 1))} className="rounded-lg border border-line bg-white px-2.5 py-1.5 text-sm">→</button>
+            <button onClick={() => { const d = new Date(); if (view === 'week') setWeekCursor(d); else setCursor(new Date(d.getFullYear(), d.getMonth(), 1)); }} className="ml-1 rounded-lg border border-line bg-white px-3 py-1.5 text-sm hover:border-pine">Today</button>
           </div>
         )}
         {cal.data?.connected
@@ -105,7 +130,9 @@ export default function Meetings() {
           : <a href="/profile" className="ml-auto text-xs text-pine hover:underline">Connect your calendar to see Teams meetings here →</a>}
       </div>
 
-      {view === 'calendar'
+      {view === 'week'
+        ? <WeekCalendar weekStart={weekStart} rows={rows} onOpen={open} onNewOn={(date) => meta.data?.canCreate && setModal({ initialDate: date })} />
+        : view === 'calendar'
         ? <MonthCalendar year={y} month={mo} rows={rows} onOpen={open} onNewOn={(date) => meta.data?.canCreate && setModal({ initialDate: date })} />
         : <MeetingList rows={rows} loading={list.isLoading} onOpen={open} />}
 
@@ -126,6 +153,144 @@ function inviteSummary(invited) {
   if (failed) bits.push(`${failed} couldn’t be emailed`);
   if (skipped) bits.push(`${skipped} without an email address`);
   return bits.join(' · ');
+}
+
+// Greedy side-by-side layout for a day's timed meetings: transitively-overlapping
+// meetings form a cluster and share the column width in lanes (like Teams/Outlook).
+function layoutDay(events) {
+  const sorted = [...events].sort((a, b) => a.startMin - b.startMin || a.endMin - b.endMin);
+  const out = [];
+  let i = 0;
+  while (i < sorted.length) {
+    let clusterEnd = sorted[i].endMin;
+    const cluster = [sorted[i]];
+    let j = i + 1;
+    while (j < sorted.length && sorted[j].startMin < clusterEnd) { cluster.push(sorted[j]); clusterEnd = Math.max(clusterEnd, sorted[j].endMin); j++; }
+    const laneEnds = [];
+    const placed = cluster.map((ev) => {
+      let lane = laneEnds.findIndex((end) => end <= ev.startMin);
+      if (lane === -1) { lane = laneEnds.length; laneEnds.push(ev.endMin); } else laneEnds[lane] = ev.endMin;
+      return { row: ev, lane };
+    });
+    for (const p of placed) out.push({ ...p, lanes: laneEnds.length });
+    i = j;
+  }
+  return out;
+}
+
+const hourLabel = (h) => (h === 0 ? '12a' : h < 12 ? `${h}a` : h === 12 ? '12p' : `${h - 12}p`);
+const GRID_COLS = '3.25rem repeat(7, minmax(0, 1fr))';
+
+// ── Week calendar (Teams-style time grid: hours down the Y axis, days across) ──
+function WeekCalendar({ weekStart, rows, onOpen, onNewOn }) {
+  const days = useMemo(() => Array.from({ length: 7 }, (_, i) => addDays(weekStart, i)), [weekStart]);
+  const todayStr = ymd(new Date());
+
+  const byDay = useMemo(() => {
+    const map = new Map(days.map((d) => [ymd(d), []]));
+    for (const r of rows) if (map.has(r.date)) map.get(r.date).push(r);
+    return map;
+  }, [rows, days]);
+
+  // Flag the signed-in user's own double-bookings: any two of *their* meetings
+  // that overlap in time (same idea as Teams' conflict warning).
+  const conflictIds = useMemo(() => {
+    const set = new Set();
+    for (const list of byDay.values()) {
+      const mine = list.filter((r) => r.mine && !r.allDay);
+      for (let i = 0; i < mine.length; i++)
+        for (let j = i + 1; j < mine.length; j++)
+          if (overlaps(mine[i], mine[j])) { set.add(mine[i].id); set.add(mine[j].id); }
+    }
+    return set;
+  }, [byDay]);
+
+  // Hour window: business hours (8a–7p), widened to fit anything outside them.
+  let minH = 8, maxH = 19, hasAllDay = false;
+  for (const list of byDay.values()) for (const r of list) {
+    if (r.allDay) { hasAllDay = true; continue; }
+    minH = Math.min(minH, Math.floor(r.startMin / 60));
+    maxH = Math.max(maxH, Math.ceil(r.endMin / 60));
+  }
+  minH = Math.max(0, minH); maxH = Math.min(24, Math.max(maxH, minH + 1));
+  const hours = Array.from({ length: maxH - minH }, (_, i) => minH + i);
+  const HOUR = 48; // px per hour
+  const gridTop = minH * 60;
+  const gridHeight = (maxH - minH) * HOUR;
+
+  return (
+    <div className="overflow-hidden rounded-2xl border border-line bg-white">
+      <div className="grid border-b border-line" style={{ gridTemplateColumns: GRID_COLS }}>
+        <div className="border-r border-line/60" />
+        {days.map((d) => {
+          const isToday = ymd(d) === todayStr;
+          return (
+            <div key={ymd(d)} className={`border-r border-line/50 px-1 py-2 text-center last:border-r-0 ${isToday ? 'bg-pine-tint/40' : ''}`}>
+              <div className="text-[10px] font-semibold uppercase tracking-wide text-ink-soft">{DOW[d.getDay()]}</div>
+              <div className={`mx-auto mt-0.5 flex h-6 w-6 items-center justify-center rounded-full text-sm ${isToday ? 'bg-pine font-bold text-white' : 'text-ink'}`}>{d.getDate()}</div>
+            </div>
+          );
+        })}
+      </div>
+
+      {hasAllDay && (
+        <div className="grid border-b border-line bg-paper/40" style={{ gridTemplateColumns: GRID_COLS }}>
+          <div className="flex items-center justify-end border-r border-line/60 pr-1.5 text-[9px] uppercase text-ink-soft">all-day</div>
+          {days.map((d) => (
+            <div key={ymd(d)} className="min-h-[1.75rem] space-y-0.5 border-r border-line/50 p-1 last:border-r-0">
+              {(byDay.get(ymd(d)) || []).filter((r) => r.allDay).map((r) => (
+                <button key={r.id} onClick={() => onOpen(r)} className="block w-full truncate rounded px-1 py-0.5 text-left text-[10px] font-medium hover:opacity-80" style={{ color: SRC[r.kind].c, background: SRC[r.kind].b }}>{r.title}</button>
+              ))}
+            </div>
+          ))}
+        </div>
+      )}
+
+      <div className="grid" style={{ gridTemplateColumns: GRID_COLS }}>
+        <div className="border-r border-line/60">
+          {hours.map((h) => (
+            <div key={h} className="relative border-b border-line/40" style={{ height: HOUR }}>
+              <span className="absolute -top-2 right-1.5 text-[10px] tabular-nums text-ink-soft">{hourLabel(h)}</span>
+            </div>
+          ))}
+        </div>
+        {days.map((d) => {
+          const laid = layoutDay((byDay.get(ymd(d)) || []).filter((r) => !r.allDay));
+          const isToday = ymd(d) === todayStr;
+          return (
+            <div key={ymd(d)} className={`relative border-r border-line/50 last:border-r-0 ${isToday ? 'bg-pine-tint/10' : ''}`} style={{ height: gridHeight }}>
+              {hours.map((h) => (
+                <button key={h} onClick={() => onNewOn?.(ymd(d))} tabIndex={-1}
+                  className="block w-full border-b border-line/40 hover:bg-pine-tint/20" style={{ height: HOUR }} aria-label={`New meeting ${ymd(d)}`} />
+              ))}
+              {laid.map(({ row: r, lane, lanes }) => {
+                const top = (r.startMin - gridTop) * (HOUR / 60);
+                const height = Math.max(18, r.durationMin * (HOUR / 60) - 2);
+                const w = 100 / lanes;
+                const conflict = conflictIds.has(r.id);
+                const s = SRC[r.kind];
+                return (
+                  <button key={r.id} onClick={() => onOpen(r)}
+                    title={`${r.time} · ${r.title}${conflict ? ' — overlaps another of your meetings' : ''}`}
+                    className={`absolute overflow-hidden rounded-md px-1.5 py-0.5 text-left hover:opacity-90 ${conflict ? 'ring-2 ring-brick' : ''}`}
+                    style={{ top, height, left: `calc(${lane * w}% + 1px)`, width: `calc(${w}% - 2px)`, background: s.b, color: s.c, borderLeft: `3px solid ${conflict ? '#9C3A2A' : s.c}` }}>
+                    <div className="truncate text-[10px] font-semibold leading-tight">{conflict && '⚠ '}{r.title}</div>
+                    <div className="truncate text-[9px] leading-tight opacity-70">{r.time}{s.label ? ` · ${s.label}` : ''}</div>
+                  </button>
+                );
+              })}
+            </div>
+          );
+        })}
+      </div>
+
+      {conflictIds.size > 0 && (
+        <div className="flex items-center gap-2 border-t border-line bg-brick/5 px-3 py-2 text-xs font-medium text-brick">
+          <span className="inline-block h-3 w-3 rounded-sm ring-2 ring-brick" /> ⚠ Conflict — you have meetings that overlap in time. The flagged blocks sit side by side.
+        </div>
+      )}
+    </div>
+  );
 }
 
 // ── Month calendar ──────────────────────────────────────────────────

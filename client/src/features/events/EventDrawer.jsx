@@ -1,7 +1,7 @@
 import { useState } from 'react';
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query';
 import { useAuth } from '../../store/AuthContext.jsx';
-import { getEvent, toggleTask, updateEventSop, rejectAssignment, requestExtension, decideExtension, changeEventOwner, addTaskAssignees, removeTaskAssignee, addProjectTask } from '../../api/events.api.js';
+import { getEvent, toggleTask, updateEventSop, rejectAssignment, requestExtension, decideExtension, changeEventOwner, addTaskAssignees, removeTaskAssignee, addProjectTask, deleteEvent, deleteProjectTask } from '../../api/events.api.js';
 import { getUsers } from '../../api/users.api.js';
 import ReassignControl from '../tasks/ReassignControl.jsx';
 import AssignPicker from './AssignPicker.jsx';
@@ -29,9 +29,13 @@ export default function EventDrawer({ id, onClose }) {
   const extend = useMutation({ mutationFn: ({ taskId, dueOffset, dueTime }) => requestExtension(taskId, { dueOffset, dueTime }), onSuccess: () => qc.invalidateQueries() });
   const decideExt = useMutation({ mutationFn: ({ taskId, decision }) => decideExtension(taskId, decision), onSuccess: () => qc.invalidateQueries() });
 
+  const del = useMutation({ mutationFn: () => deleteEvent(id), onSuccess: () => { qc.invalidateQueries({ queryKey: ['events'] }); qc.invalidateQueries({ queryKey: ['task-list'] }); onClose(); } });
+  const [confirmDel, setConfirmDel] = useState(false);
+
   const e = q.data;
   const isAdmin = user?.id === 'ceo' || user?.id === 'EP002' || user?.role === 'HR Head';
   const canEditSop = !!e && (e.ownerId === user?.id || e.createdById === user?.id || isAdmin);
+  const canDelete = !!e && (e.ownerId === user?.id || isAdmin);
 
   return (
     <div className="fixed inset-0 z-40 flex justify-end bg-black/30" onClick={onClose}>
@@ -51,6 +55,20 @@ export default function EventDrawer({ id, onClose }) {
               </div>
               <button onClick={onClose} className="rounded-lg border border-line px-3 py-1 text-sm">Close</button>
             </div>
+
+            {canDelete && (
+              <div className="mt-3 flex items-center justify-end gap-2">
+                {confirmDel ? (
+                  <>
+                    <span className="text-xs text-ink-soft">Delete this project and all its tasks?</span>
+                    <button onClick={() => del.mutate()} disabled={del.isPending} className="rounded-lg bg-brick px-3 py-1 text-sm font-medium text-white disabled:opacity-50">{del.isPending ? 'Deleting…' : 'Delete'}</button>
+                    <button onClick={() => setConfirmDel(false)} className="rounded-lg border border-line px-3 py-1 text-sm">Keep</button>
+                  </>
+                ) : (
+                  <button onClick={() => setConfirmDel(true)} className="rounded-lg border border-brick/40 px-3 py-1 text-sm text-brick hover:bg-brick/5">🗑 Delete project</button>
+                )}
+              </div>
+            )}
 
             <OwnerControl e={e} user={user} onDone={() => qc.invalidateQueries()} />
 
@@ -110,6 +128,8 @@ function TaskItem({ e, t, user, toggle, reject, extend, decideExt }) {
 
   const addAssignees = useMutation({ mutationFn: (userIds) => addTaskAssignees(t.id, userIds), onSuccess: () => qc.invalidateQueries() });
   const removeAssignee = useMutation({ mutationFn: (userId) => removeTaskAssignee(t.id, userId), onSuccess: () => qc.invalidateQueries() });
+  const delTask = useMutation({ mutationFn: () => deleteProjectTask(t.id), onSuccess: () => qc.invalidateQueries() });
+  const [confirmDel, setConfirmDel] = useState(false);
 
   const mine = t.assignees.find((a) => a.id === user?.id);
   // "Live for me" needs both: my manager approved the assignment AND I haven't declined it.
@@ -166,10 +186,18 @@ function TaskItem({ e, t, user, toggle, reject, extend, decideExt }) {
             </div>
           )}
 
-          {/* owner reassign — add/drop recipients; each new one is re-gated */}
+          {/* owner reassign — add/drop recipients; each new one is re-gated — and delete */}
           {isOwner && (
-            <div className="mt-1.5 text-[11px]">
+            <div className="mt-1.5 flex items-center gap-3 text-[11px]">
               <button onClick={() => setReassigning((v) => !v)} className={`hover:text-pine ${reassigning ? 'text-pine' : 'text-ink-soft'}`}>Reassign</button>
+              {confirmDel ? (
+                <span className="flex items-center gap-1.5">
+                  <button onClick={() => delTask.mutate()} disabled={delTask.isPending} className="rounded bg-brick px-1.5 py-0.5 font-medium text-white disabled:opacity-50">Delete</button>
+                  <button onClick={() => setConfirmDel(false)} className="text-ink-soft">Cancel</button>
+                </span>
+              ) : (
+                <button onClick={() => setConfirmDel(true)} className="text-ink-soft hover:text-brick">Delete task</button>
+              )}
             </div>
           )}
           {reassigning && (

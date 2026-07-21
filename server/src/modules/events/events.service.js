@@ -252,6 +252,30 @@ export async function decide(id, approverId, decision) {
   return prisma.event.update({ where: { id }, data: { approval: decision } });
 }
 
+// Delete a project. Only its owner (or a platform admin) may. Tasks, assignees,
+// attachments and comments cascade; tagged meetings are un-tagged automatically
+// (Meeting.eventId is SetNull). The companion SOP doc and the project chat aren't
+// cascade-linked, so we clear them explicitly.
+export async function remove(actor, id) {
+  const e = await prisma.event.findUnique({ where: { id }, select: { id: true, ownerId: true } });
+  if (!e) throw new ApiError(404, 'Project not found');
+  if (e.ownerId !== actor.id && !canAdmin(actor)) throw new ApiError(403, 'Only the project owner can delete this project');
+  await prisma.knowledgeDoc.deleteMany({ where: { eventId: id } });
+  await prisma.conversation.deleteMany({ where: { eventId: id } }); // cascades its members + messages
+  await prisma.event.delete({ where: { id } }); // cascades tasks, assignees, attachments, comments
+  return { ok: true };
+}
+
+// Delete a single task from a project. Only the project owner (or admin) may.
+// Assignees cascade with the task.
+export async function removeTask(actor, taskId) {
+  const t = await prisma.eventTask.findUnique({ where: { id: taskId }, include: { event: { select: { id: true, ownerId: true } } } });
+  if (!t) throw new ApiError(404, 'Task not found');
+  if (t.event.ownerId !== actor.id && !canAdmin(actor)) throw new ApiError(403, 'Only the project owner can delete this task');
+  await prisma.eventTask.delete({ where: { id: taskId } });
+  return { ok: true };
+}
+
 // Transfer project ownership. Only the current owner may initiate it (an admin
 // override aside). If the NEW owner's autoApproveProjects is off, the transfer is
 // held pending the new owner's manager — the project keeps running under the

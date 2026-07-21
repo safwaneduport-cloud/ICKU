@@ -24,6 +24,8 @@ router.post('/:id/tasks', ctrl.addTask); // add a task to an existing project
 router.post('/:id/owner/decision/:decision', ctrl.decideOwnerTransfer); // approve/reject a held transfer
 router.patch('/:id/sop', ctrl.updateSop);
 router.post('/:id/comments', ctrl.addComment);
+router.delete('/tasks/:taskId', ctrl.removeTask); // owner deletes a project task
+router.delete('/:id', ctrl.remove); // owner deletes a whole project
 router.post('/tasks/:taskId/toggle', ctrl.toggleTask);
 router.post('/tasks/:taskId/reject-assignment', ctrl.rejectAssignment);
 router.post('/tasks/:taskId/assignees', ctrl.addTaskAssignees); // reassign: add recipients

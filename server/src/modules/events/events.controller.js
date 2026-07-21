@@ -103,6 +103,16 @@ export async function removeTaskAssignee(req, res, next) {
   catch (e) { next(e); }
 }
 
+export async function remove(req, res, next) {
+  try { res.json({ data: await service.remove(req.user, req.params.id), error: null }); }
+  catch (e) { next(e); }
+}
+
+export async function removeTask(req, res, next) {
+  try { res.json({ data: await service.removeTask(req.user, req.params.taskId), error: null }); }
+  catch (e) { next(e); }
+}
+
 export async function requestExtension(req, res, next) {
   try { res.json({ data: await service.requestExtension(req.user, req.params.taskId, req.body || {}), error: null }); }
   catch (e) { next(e); }
