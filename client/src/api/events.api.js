@@ -16,6 +16,8 @@ export const requestExtension = (taskId, body) => api.post(`/events/tasks/${task
 export const decideExtension = (taskId, decision) => api.post(`/events/tasks/${taskId}/extension/${decision}`).then((r) => r.data.data);
 export const getApprovalModes = () => api.get('/events/approval-modes').then((r) => r.data.data);
 export const getAssignedTasks = (userId) => api.get('/events/assigned', { params: { userId } }).then((r) => r.data.data);
+export const getTaskMonthStats = (userId, year, month) => api.get('/events/task-stats', { params: { userId, year, month } }).then((r) => r.data.data);
+export const getTaskPending = (userId) => api.get('/events/task-pending', { params: { userId } }).then((r) => r.data.data);
 export const setApprovalMode = (reportId, patch) => api.patch(`/events/approval-modes/${reportId}`, patch).then((r) => r.data.data);
 export const getProjectTaskApprovals = () => api.get('/events/task-approvals').then((r) => r.data.data);
 export const decideProjectTaskAssignee = (taskId, userId, decision) => api.post(`/events/tasks/${taskId}/assignee/${userId}/decision/${decision}`).then((r) => r.data.data);

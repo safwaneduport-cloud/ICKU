@@ -1,5 +1,6 @@
 import { prisma } from '../../config/prisma.js';
 import { ApiError } from '../../middleware/errorHandler.js';
+import { istParts, istInstant, istMonthRange } from '../../lib/ist.js';
 
 export const FREQS = ['Daily', 'Weekly', 'Monthly', 'Yearly'];
 
@@ -81,19 +82,9 @@ const ordinal = (n) => { const s = ['th', 'st', 'nd', 'rd']; const v = n % 100; 
 
 const cfgFor = (freq, cfg) => (freq === 'Yearly' ? null : { ...DEFAULT_DEADLINE[freq], ...(cfg || {}) });
 
-// Deadline times are wall-clock IST (the company is India-only; IST has no DST).
-// The server may run in UTC (Render does), so deadline instants are computed
-// explicitly at UTC+5:30 — NOT via local setHours, which would read "6 PM" as
-// 6 PM *server* time (11:30 PM IST) and miss genuinely-late completions. This
-// math is server-timezone-independent, so it's correct on Render and in dev.
-const IST_OFFSET_MS = 330 * 60000;
-const istParts = (now) => {
-  const s = new Date(now.getTime() + IST_OFFSET_MS); // shift, then read via UTC getters
-  return { y: s.getUTCFullYear(), mo: s.getUTCMonth(), d: s.getUTCDate(), dow: s.getUTCDay() };
-};
-// Absolute instant of a given IST wall-clock date + time.
-const istInstant = (y, mo, d, h, mi) => new Date(Date.UTC(y, mo, d, h, mi, 0) - IST_OFFSET_MS);
-
+// Deadline times are wall-clock IST — computed via the shared lib/ist helpers
+// (UTC+5:30, server-timezone-independent) so "6 PM" isn't misread as 6 PM server
+// time on Render (UTC). See lib/ist.js.
 // The current period's deadline DateTime for a user's checklist of `freq` (IST).
 // Exported for timezone tests.
 export function deadlineDate(freq, cfg, now) {
@@ -323,6 +314,30 @@ export async function checklistDelayStats(userId, sinceDays = 30) {
     onTimePct: effective ? Math.round(((effective - blackMarks) / effective) * 100) : 100,
     // ≥3 black marks in the window flags a habitual pattern for the manager.
     habitual: blackMarks >= 3,
+  };
+}
+
+// Delay stats for one IST calendar month — powers the Delayed + On-time cards
+// and their click-through detail (the `completions` list). Excused manager
+// clears are neutral (excluded from the on-time denominator).
+export async function checklistMonthStats(userId, year, month) {
+  const { start, end } = istMonthRange(year, month);
+  const comps = await prisma.checklistCompletion.findMany({
+    where: { userId, completedAt: { gte: start, lt: end } },
+    orderBy: { completedAt: 'desc' },
+    include: { item: { select: { text: true, frequency: true } } },
+  });
+  const delayed = comps.filter((c) => c.late).length;
+  const excused = comps.filter((c) => c.clearedById != null && !c.late).length;
+  const effective = comps.length - excused;
+  return {
+    year, month, total: comps.length, delayed, excused,
+    onTimePct: effective ? Math.round(((effective - delayed) / effective) * 100) : 100,
+    habitual: delayed >= 3,
+    completions: comps.map((c) => ({
+      itemText: c.item?.text || '(deleted item)', frequency: c.item?.frequency,
+      completedAt: c.completedAt, dueAt: c.dueAt, late: c.late, byManager: c.clearedById != null,
+    })),
   };
 }
 

@@ -437,6 +437,7 @@ model EventTask {
   dueTime       String? // "HH:MM" 24h time-of-day for the due date; null = legacy (midnight)
   completed     Boolean        @default(false)
   completedLate Boolean        @default(false)
+  completedAt   DateTime? // when it was marked done — powers month-based delay stats
   sort          Int            @default(0)
   assignees     TaskAssignee[]
 

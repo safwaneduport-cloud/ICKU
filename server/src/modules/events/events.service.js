@@ -2,7 +2,16 @@ import { prisma } from '../../config/prisma.js';
 import { ApiError } from '../../middleware/errorHandler.js';
 import { canAdmin } from '../../lib/access.js';
 import { gateFor } from '../../lib/taskGate.js';
-import { computeState, triggerDate, isTaskPastDue } from './events.lib.js';
+import { istInstant, istMonthRange } from '../../lib/ist.js';
+import { computeState, triggerDate, isTaskPastDue, effectiveDue } from './events.lib.js';
+
+// Due instant for an ad-hoc task (dueDate "YYYY-MM-DD" + dueTime "HH:MM", IST).
+function directTaskDue(t) {
+  if (!t.dueDate) return null;
+  const [y, mo, d] = t.dueDate.split('-').map(Number);
+  const [h, mi] = (t.dueTime && /^\d{1,2}:\d{2}$/.test(t.dueTime)) ? t.dueTime.split(':').map(Number) : [23, 59];
+  return istInstant(y, mo - 1, d, h, mi);
+}
 
 // An event's SOP (write-up + PDF/link attachments) lives on the event, but it
 // also belongs in the SOP library — so we keep a companion KnowledgeDoc in step
@@ -269,7 +278,7 @@ export async function toggleTask(taskId, userId) {
   const late = nowCompleted && isTaskPastDue(task, trig, new Date());
   return prisma.eventTask.update({
     where: { id: taskId },
-    data: { completed: nowCompleted, completedLate: nowCompleted ? late : false },
+    data: { completed: nowCompleted, completedLate: nowCompleted ? late : false, completedAt: nowCompleted ? new Date() : null },
   });
 }
 
@@ -409,6 +418,59 @@ export async function assignedTasksFor(targetUserId) {
         triggerMonth: e.triggerMonth, triggerDay: e.triggerDay, eventStatus: e.status,
       };
     });
+}
+
+// Task delay stats for one IST calendar month — completed tasks (project +
+// ad-hoc) assigned to the user, with a `late` flag = finished after due. Powers
+// the Tasks Delayed + On-time cards and their detail.
+export async function taskMonthStats(userId, year, month) {
+  const { start, end } = istMonthRange(year, month);
+  const [proj, direct] = await Promise.all([
+    prisma.taskAssignee.findMany({
+      where: { userId, approval: 'approved', status: { not: 'rejected' }, task: { completed: true, completedAt: { gte: start, lt: end } } },
+      include: { task: { include: { event: { select: { name: true, status: true, triggerMonth: true, triggerDay: true } } } } },
+    }),
+    prisma.directTaskAssignee.findMany({
+      where: { userId, approval: 'approved', status: { not: 'rejected' }, task: { completed: true, completedAt: { gte: start, lt: end } } },
+      include: { task: true },
+    }),
+  ]);
+  const completions = [
+    ...proj.map(({ task: t }) => ({ name: t.name, project: t.event?.name, source: 'project', completedAt: t.completedAt, dueAt: effectiveDue(t, triggerDate(t.event)), late: !!t.completedLate })),
+    ...direct.map(({ task: t }) => {
+      const due = directTaskDue(t);
+      return { name: t.title, project: null, source: 'task', completedAt: t.completedAt, dueAt: due, late: !!(due && t.completedAt && t.completedAt > due) };
+    }),
+  ].sort((a, b) => new Date(b.completedAt) - new Date(a.completedAt));
+  const delayed = completions.filter((c) => c.late).length;
+  const total = completions.length;
+  return { year, month, total, delayed, onTimePct: total ? Math.round(((total - delayed) / total) * 100) : 100, habitual: delayed >= 3, completions };
+}
+
+// Currently-pending tasks (project + ad-hoc) assigned to the user, overdue first.
+export async function taskPending(userId) {
+  const now = new Date();
+  const [proj, direct] = await Promise.all([
+    prisma.taskAssignee.findMany({
+      where: { userId, approval: 'approved', status: { not: 'rejected' }, task: { completed: false } },
+      include: { task: { include: { event: { select: { name: true, approval: true, status: true, triggerMonth: true, triggerDay: true } } } } },
+    }),
+    prisma.directTaskAssignee.findMany({
+      where: { userId, approval: 'approved', status: { not: 'rejected' }, task: { completed: false } },
+      include: { task: true },
+    }),
+  ]);
+  const out = [];
+  for (const { task: t } of proj) {
+    if (['pending', 'rejected'].includes(t.event?.approval)) continue; // project not live yet
+    const due = effectiveDue(t, triggerDate(t.event));
+    out.push({ name: t.name, project: t.event?.name, source: 'project', dueAt: due, overdue: !!(due && now > due) });
+  }
+  for (const { task: t } of direct) {
+    const due = directTaskDue(t);
+    out.push({ name: t.title, project: null, source: 'task', dueAt: due, overdue: !!(due && now > due) });
+  }
+  return out.sort((a, b) => (b.overdue ? 1 : 0) - (a.overdue ? 1 : 0));
 }
 
 // Patch either/both auto-approve flags (projects, tasks) for a direct report.

@@ -241,7 +241,7 @@ function ChecklistRow({ it, isSelf, toggle, edit, onDelete }) {
         <span className={`flex-1 text-sm ${done ? 'text-ink-soft line-through' : it.overdue ? 'text-brick' : ''}`}>{it.text}</span>
       )}
 
-      {it.cleared && <span className={`shrink-0 text-[10px] ${it.clearedBlackMark ? 'text-brick' : 'text-steel'}`}>{it.clearedBlackMark ? 'cleared · mark' : 'cleared'}</span>}
+      {it.cleared && <span className={`shrink-0 text-[10px] ${it.clearedBlackMark ? 'text-brick' : 'text-steel'}`}>{it.clearedBlackMark ? 'cleared · delayed' : 'cleared'}</span>}
       {it.overdue && !done && <span className="shrink-0 text-[10px] font-medium text-brick">overdue</span>}
       {!editing && (
         <>
@@ -281,7 +281,7 @@ function HistoryPanel({ userId, onRestored }) {
                 <div key={r.id} className="flex items-center gap-2 border-b border-line/40 py-1 text-sm last:border-0">
                   <span className={`w-16 shrink-0 text-[11px] font-medium ${ACTION[r.action] || 'text-ink-soft'}`}>{r.action}</span>
                   <span className="flex-1 truncate">{r.text}</span>
-                  {r.late && <span className="shrink-0 text-[10px] font-medium text-brick">late</span>}
+                  {r.late && <span className="shrink-0 text-[10px] font-medium text-brick">delayed</span>}
                   <span className="shrink-0 text-[11px] text-ink-soft">{r.actorName ? `${r.actorName} · ` : ''}{new Date(r.at).toLocaleTimeString([], { hour: 'numeric', minute: '2-digit' })}</span>
                   {r.restorable && <button onClick={() => restore.mutate(r.id)} disabled={restore.isPending} className="shrink-0 text-[11px] font-medium text-pine hover:underline disabled:opacity-50">Restore</button>}
                 </div>

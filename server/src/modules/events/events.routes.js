@@ -9,6 +9,8 @@ router.get('/approvals', ctrl.approvals);
 router.get('/approval-modes', ctrl.approvalModes);
 router.patch('/approval-modes/:reportId', ctrl.setApprovalMode);
 router.get('/assigned', ctrl.assignedTasks); // ?userId — tasks assigned to a report
+router.get('/task-stats', ctrl.taskMonthStats); // ?userId&year&month — monthly task delay stats
+router.get('/task-pending', ctrl.taskPending); // ?userId — currently-pending tasks
 router.get('/task-approvals', ctrl.taskApprovals); // project-task assignments pending my approval
 router.get('/owner-approvals', ctrl.ownerApprovals); // ownership transfers pending my approval
 router.post('/', ctrl.create);

@@ -20,6 +20,7 @@ export const setDeadline = (userId, frequency, cfg) => api.put(`/personal/checkl
 export const getChecklistDelays = (userId, days) => api.get('/personal/checklist-delays', { params: { userId, days } }).then((r) => r.data.data);
 export const getChecklistHistory = (userId) => api.get('/personal/checklist/history', { params: { userId } }).then((r) => r.data.data);
 export const getChecklistBlackMarks = (userId, days) => api.get('/personal/checklist/blackmarks', { params: { userId, days } }).then((r) => r.data.data);
+export const getChecklistMonthStats = (userId, year, month) => api.get('/personal/checklist/month-stats', { params: { userId, year, month } }).then((r) => r.data.data);
 export const addChecklistItem = (payload) => api.post('/personal/checklist', payload).then((r) => r.data.data);
 export const updateChecklistItem = (id, text) => api.patch(`/personal/checklist/${id}`, { text }).then((r) => r.data.data);
 export const deleteChecklistItem = (id) => api.delete(`/personal/checklist/${id}`).then((r) => r.data.data);

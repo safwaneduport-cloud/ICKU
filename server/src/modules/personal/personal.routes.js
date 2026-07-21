@@ -20,6 +20,7 @@ router.get('/checklist', ctrl.getChecklist); // ?userId
 router.get('/checklist/pending', ctrl.getPendingChecklist); // ?userId
 router.get('/checklist/history', ctrl.getChecklistHistory); // ?userId — 7-day activity
 router.get('/checklist/blackmarks', ctrl.checklistBlackMarks); // ?userId&days
+router.get('/checklist/month-stats', ctrl.checklistMonthStats); // ?userId&year&month
 router.post('/checklist/clear-all', ctrl.clearAllPending); // manager only
 router.post('/checklist/restore/:activityId', ctrl.restoreChecklistItem);
 router.post('/checklist', ctrl.addChecklistItem);

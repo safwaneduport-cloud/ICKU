@@ -106,6 +106,23 @@ export async function assignedTasks(req, res, next) {
   } catch (e) { next(e); }
 }
 
+export async function taskMonthStats(req, res, next) {
+  try {
+    const t = req.query.userId || req.user.id;
+    if (t !== req.user.id && !canAdmin(req.user) && !(await isManagerOf(req.user.id, t))) throw new ApiError(403, 'Only their manager can view this');
+    const now = new Date();
+    res.json({ data: await service.taskMonthStats(t, Number(req.query.year) || now.getFullYear(), Number(req.query.month) || now.getMonth() + 1), error: null });
+  } catch (e) { next(e); }
+}
+
+export async function taskPending(req, res, next) {
+  try {
+    const t = req.query.userId || req.user.id;
+    if (t !== req.user.id && !canAdmin(req.user) && !(await isManagerOf(req.user.id, t))) throw new ApiError(403, 'Only their manager can view this');
+    res.json({ data: await service.taskPending(t), error: null });
+  } catch (e) { next(e); }
+}
+
 export async function approvalModes(req, res, next) {
   try { res.json({ data: await service.reportsApprovalModes(req.user.id), error: null }); }
   catch (e) { next(e); }

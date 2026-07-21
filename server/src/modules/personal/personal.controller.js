@@ -127,6 +127,13 @@ export async function checklistBlackMarks(req, res, next) {
   try { const t = targetOf(req); await assertManage(req.user, t); res.json({ data: await service.checklistBlackMarks(t, Number(req.query.days) || 30), error: null }); }
   catch (e) { next(e); }
 }
+export async function checklistMonthStats(req, res, next) {
+  try {
+    const t = targetOf(req); await assertManage(req.user, t);
+    const now = new Date();
+    res.json({ data: await service.checklistMonthStats(t, Number(req.query.year) || now.getFullYear(), Number(req.query.month) || now.getMonth() + 1), error: null });
+  } catch (e) { next(e); }
+}
 export async function restoreChecklistItem(req, res, next) {
   try {
     const act = await service.checklistActivityOwner(req.params.activityId);
