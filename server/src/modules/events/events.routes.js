@@ -5,6 +5,7 @@ const router = Router();
 
 router.get('/', ctrl.list); // ?filter&mine
 router.get('/approvals', ctrl.approvals);
+router.get('/approval-history', ctrl.approvalHistory); // projects I've decided
 // Specific GETs before the '/:id' catch-all, or '/:id' swallows them.
 router.get('/approval-modes', ctrl.approvalModes);
 router.patch('/approval-modes/:reportId', ctrl.setApprovalMode);

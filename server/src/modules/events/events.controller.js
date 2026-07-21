@@ -31,6 +31,11 @@ export async function approvals(req, res, next) {
   catch (e) { next(e); }
 }
 
+export async function approvalHistory(req, res, next) {
+  try { res.json({ data: await service.approvalHistory(req.user.id), error: null }); }
+  catch (e) { next(e); }
+}
+
 export async function approve(req, res, next) {
   try { res.json({ data: await service.decide(req.params.id, req.user.id, 'approved'), error: null }); }
   catch (e) { next(e); }

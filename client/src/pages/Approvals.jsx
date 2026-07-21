@@ -1,11 +1,13 @@
+import { useState } from 'react';
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query';
 import {
-  getApprovals, approveEvent, rejectEvent, changeEventOwner,
+  getApprovals, getApprovalHistory, approveEvent, rejectEvent, changeEventOwner,
   getProjectTaskApprovals, decideProjectTaskAssignee, getOwnerApprovals, decideOwnerTransfer,
 } from '../api/events.api.js';
 import { getTaskApprovals, decideDirectTask } from '../api/directTasks.api.js';
 import { getUsers } from '../api/users.api.js';
 import { triggerLabel } from '../features/events/meta.js';
+import EventChat from '../features/messages/EventChat.jsx';
 
 export default function Approvals() {
   const qc = useQueryClient();
@@ -13,6 +15,7 @@ export default function Approvals() {
   const directTaskQ = useQuery({ queryKey: ['task-approvals'], queryFn: getTaskApprovals, retry: false });
   const projTaskQ = useQuery({ queryKey: ['proj-task-approvals'], queryFn: getProjectTaskApprovals, retry: false });
   const ownerQ = useQuery({ queryKey: ['owner-approvals'], queryFn: getOwnerApprovals, retry: false });
+  const historyQ = useQuery({ queryKey: ['approval-history'], queryFn: getApprovalHistory, retry: false });
   const users = useQuery({ queryKey: ['users'], queryFn: getUsers, retry: false });
 
   const approve = useMutation({ mutationFn: approveEvent, onSuccess: () => qc.invalidateQueries() });
@@ -30,6 +33,7 @@ export default function Approvals() {
     ...(projTaskQ.data || []).map((t) => ({ ...t, kind: 'project', label: t.taskName, context: `${t.projectName} · by ${t.assignerName || '—'}` })),
   ];
   const ownerRows = ownerQ.data || [];
+  const history = historyQ.data || [];
 
   const decideTask = (row, decision) => (row.kind === 'direct' ? decideDirect : decideProj)
     .mutate({ taskId: row.taskId, userId: row.userId, decision });
@@ -87,30 +91,63 @@ export default function Approvals() {
 
       <div className="space-y-3">
         {rows.map((e) => (
-          <div key={e.id} className="rounded-2xl border border-line bg-white p-5">
-            <div className="flex flex-wrap items-start justify-between gap-3">
-              <div>
-                <div className="font-serif text-lg font-semibold">{e.name}</div>
-                <div className="text-sm text-ink-soft">
-                  Requested by {e.owner?.name} · {e.status === 'confirmed' ? triggerLabel(e) : 'Date TBD'} · {e.tasksTotal} task(s)
-                </div>
-                {e.writeup && <p className="mt-2 max-w-xl text-sm">{e.writeup}</p>}
-              </div>
-              <div className="flex items-center gap-2">
-                <button onClick={() => reject.mutate(e.id)} className="rounded-lg border border-line px-3 py-1.5 text-sm hover:border-brick hover:text-brick">Reject</button>
-                <button onClick={() => approve.mutate(e.id)} className="rounded-lg bg-pine px-3 py-1.5 text-sm font-medium text-white">Approve</button>
-              </div>
-            </div>
-            <div className="mt-3 flex items-center gap-2 border-t border-line pt-3 text-sm">
-              <span className="text-ink-soft">Reassign owner:</span>
-              <select defaultValue={e.ownerId} onChange={(ev) => owner.mutate({ id: e.id, ownerId: ev.target.value })}
-                className="rounded border border-line px-2 py-1 text-xs">
-                {(users.data || []).map((u) => <option key={u.id} value={u.id}>{u.name}</option>)}
-              </select>
-            </div>
-          </div>
+          <ProjectCard key={e.id} e={e} users={users.data || []}
+            onApprove={() => approve.mutate(e.id)} onReject={() => reject.mutate(e.id)}
+            onOwner={(ownerId) => owner.mutate({ id: e.id, ownerId })} />
         ))}
       </div>
+
+      {/* Decided history — projects you've already approved or rejected. */}
+      {history.length > 0 && (
+        <div className="space-y-2 border-t border-line pt-4">
+          <div className="text-xs font-semibold uppercase tracking-wide text-ink-soft">Decided · {history.length}</div>
+          {history.map((e) => (
+            <div key={e.id} className="flex flex-wrap items-center justify-between gap-3 rounded-2xl border border-line bg-paper/40 px-4 py-3">
+              <div>
+                <div className="font-medium">{e.name}</div>
+                <div className="text-sm text-ink-soft">By {e.owner?.name || '—'}{e.decidedAt ? ` · ${new Date(e.decidedAt).toLocaleDateString([], { month: 'short', day: 'numeric' })}` : ''}</div>
+              </div>
+              <span className={`shrink-0 rounded-full px-2.5 py-0.5 text-xs font-medium ${e.approval === 'approved' ? 'bg-sage/15 text-sage' : 'bg-brick/10 text-brick'}`}>
+                {e.approval === 'approved' ? '✓ Approved' : '✕ Rejected'}
+              </span>
+            </div>
+          ))}
+        </div>
+      )}
+    </div>
+  );
+}
+
+// A pending-project approval card with an inline Discuss panel — the SAME
+// conversation as Messages → Project messages, so questions asked here are
+// visible there (and vice versa).
+function ProjectCard({ e, users, onApprove, onReject, onOwner }) {
+  const [discuss, setDiscuss] = useState(false);
+  return (
+    <div className="rounded-2xl border border-line bg-white p-5">
+      <div className="flex flex-wrap items-start justify-between gap-3">
+        <div>
+          <div className="font-serif text-lg font-semibold">{e.name}</div>
+          <div className="text-sm text-ink-soft">
+            Requested by {e.owner?.name} · {e.status === 'confirmed' ? triggerLabel(e) : 'Date TBD'} · {e.tasksTotal} task(s)
+          </div>
+          {e.writeup && <p className="mt-2 max-w-xl text-sm">{e.writeup}</p>}
+        </div>
+        <div className="flex items-center gap-2">
+          <button onClick={onReject} className="rounded-lg border border-line px-3 py-1.5 text-sm hover:border-brick hover:text-brick">Reject</button>
+          <button onClick={onApprove} className="rounded-lg bg-pine px-3 py-1.5 text-sm font-medium text-white">Approve</button>
+        </div>
+      </div>
+      <div className="mt-3 flex flex-wrap items-center gap-2 border-t border-line pt-3 text-sm">
+        <span className="text-ink-soft">Reassign owner:</span>
+        <select defaultValue={e.ownerId} onChange={(ev) => onOwner(ev.target.value)} className="rounded border border-line px-2 py-1 text-xs">
+          {users.map((u) => <option key={u.id} value={u.id}>{u.name}</option>)}
+        </select>
+        <button onClick={() => setDiscuss((v) => !v)} className="ml-auto font-medium text-pine hover:underline">
+          {discuss ? 'Hide discussion' : '💬 Discuss / ask a question'}
+        </button>
+      </div>
+      {discuss && <EventChat eventId={e.id} />}
     </div>
   );
 }

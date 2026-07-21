@@ -5,6 +5,7 @@ export const getEvents = (filter, mine) =>
 export const getEvent = (id) => api.get(`/events/${id}`).then((r) => r.data.data);
 export const createEvent = (payload) => api.post('/events', payload).then((r) => r.data.data);
 export const getApprovals = () => api.get('/events/approvals').then((r) => r.data.data);
+export const getApprovalHistory = () => api.get('/events/approval-history').then((r) => r.data.data);
 export const approveEvent = (id) => api.post(`/events/${id}/approve`).then((r) => r.data.data);
 export const rejectEvent = (id) => api.post(`/events/${id}/reject`).then((r) => r.data.data);
 export const changeEventOwner = (id, ownerId) => api.post(`/events/${id}/owner`, { ownerId }).then((r) => r.data.data);

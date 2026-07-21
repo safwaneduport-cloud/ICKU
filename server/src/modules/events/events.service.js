@@ -262,6 +262,14 @@ export function approvalsFor(approverId) {
     .then((rows) => rows.map(shape));
 }
 
+// Projects this manager has already decided (approved/rejected) — the approval
+// history, most recent first.
+export function approvalHistory(approverId) {
+  return prisma.event
+    .findMany({ where: { approverId, approval: { in: ['approved', 'rejected'] } }, orderBy: { updatedAt: 'desc' }, take: 50, include: eventInclude })
+    .then((rows) => rows.map((e) => ({ ...shape(e), decidedAt: e.updatedAt })));
+}
+
 // Toggle a task's completion. Allowed for its assignees or the event owner.
 export async function toggleTask(taskId, userId) {
   const task = await prisma.eventTask.findUnique({
