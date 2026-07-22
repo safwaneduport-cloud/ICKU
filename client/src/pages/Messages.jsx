@@ -39,9 +39,27 @@ const DmIcon = () => <Ic><path d="M4 5h12v7H8l-3 2.6V12H4z" /></Ic>;
 const FileIcon = () => <Ic><path d="M6 3.5h5l3.5 3.5V16.5H6zM11 3.5V7h3.5" /></Ic>;
 const SearchIcon = () => <Ic><circle cx="9" cy="9" r="5" /><path d="M12.8 12.8L16.5 16.5" /></Ic>;
 const PlusIcon = () => <Ic strokeWidth="2"><path d="M10 4v12M4 10h12" /></Ic>;
-const Chevron = ({ open }) => (
-  <svg viewBox="0 0 12 12" width="10" height="10" fill="none" stroke="currentColor" strokeWidth="1.8" strokeLinecap="round" strokeLinejoin="round" className={`shrink-0 transition-transform ${open ? '' : '-rotate-90'}`}><path d="M2.5 4.5L6 8l3.5-3.5" /></svg>
+// Collapse chevron shown on the RIGHT of each section header (Slack-style):
+// points up when the section is open, down when collapsed.
+const CollapseChevron = ({ open }) => (
+  <svg viewBox="0 0 16 16" width="16" height="16" fill="none" stroke="currentColor" strokeWidth="1.7" strokeLinecap="round" strokeLinejoin="round"><path d={open ? 'M4 10l4-4 4 4' : 'M4 6l4 4 4-4'} /></svg>
 );
+
+// Slack-style section header: a bold label on the left; the "+" (optional) and
+// the collapse chevron sit together on the right.
+function SectionHeader({ title, open, onToggle, onAdd }) {
+  return (
+    <div className="flex items-center justify-between px-3 py-1.5">
+      <button onClick={onToggle} className="flex items-center gap-1 text-[15px] font-bold text-ink hover:text-pine">
+        {title}<span className="text-ink-soft">›</span>
+      </button>
+      <div className="flex items-center gap-0.5 text-ink-soft">
+        {onAdd && <button onClick={onAdd} title={`New ${title}`} className="rounded p-1 hover:bg-paper hover:text-pine"><PlusIcon /></button>}
+        <button onClick={onToggle} aria-label={open ? 'Collapse' : 'Expand'} className="rounded p-1 hover:bg-paper hover:text-pine"><CollapseChevron open={open} /></button>
+      </div>
+    </div>
+  );
+}
 
 function DateDivider({ at }) {
   const d = new Date(at);
@@ -114,16 +132,16 @@ export default function Messages() {
     // On phones this is one pane at a time: the rail, or the open conversation.
     // From lg up it's the classic rail + chat + thread layout.
     <div className="flex h-[calc(100dvh-3.25rem)] gap-0 sm:h-[calc(100dvh-10rem)] sm:gap-4">
-      {/* ── Left rail (Slack-style dark channel list) ── */}
-      <aside className={`relative w-full shrink-0 flex-col overflow-hidden rounded-none bg-pine text-white sm:rounded-2xl lg:flex lg:w-64 ${paneOpen ? 'hidden lg:flex' : 'flex'}`}>
-        <div className="flex items-center justify-between border-b border-white/10 px-4 py-3">
-          <h1 className="font-serif text-lg font-bold text-white">Messages</h1>
+      {/* ── Left rail (Slack-style, light; ICKU green accent) ── */}
+      <aside className={`relative w-full shrink-0 flex-col overflow-hidden rounded-none bg-white text-ink sm:rounded-2xl sm:border sm:border-line lg:flex lg:w-64 ${paneOpen ? 'hidden lg:flex' : 'flex'}`}>
+        <div className="flex items-center justify-between border-b border-line px-4 py-3">
+          <h1 className="font-serif text-lg font-bold text-pine">Messages</h1>
         </div>
 
         {searchOpen && (
-          <div className="border-b border-white/10 px-3 py-2">
+          <div className="border-b border-line px-3 py-2">
             <input autoFocus value={search} onChange={(e) => setSearch(e.target.value)} placeholder="Search conversations…"
-              className="w-full rounded-lg bg-white/10 px-3 py-1.5 text-sm text-white placeholder-white/50 outline-none focus:bg-white/15" />
+              className="w-full rounded-lg border border-line bg-paper px-3 py-1.5 text-sm text-ink placeholder-ink-soft outline-none focus:border-pine" />
           </div>
         )}
 
@@ -133,7 +151,8 @@ export default function Messages() {
             reminders={(remindersQ.data || []).filter((r) => !r.doneAt).length} drafts={drafts.length} />
         )}
 
-        <div className="flex-1 overflow-y-auto px-2 pb-24 lg:pb-3">
+        {/* Full-width dividers between sections, Slack-style */}
+        <div className="flex-1 divide-y divide-line overflow-y-auto pb-28 lg:pb-3">
           {mobileTab === 'files' ? (
             <FilesView onOpen={openConversation} />
           ) : mobileTab === 'dms' ? (
@@ -170,30 +189,30 @@ export default function Messages() {
                 items={events}
                 selectedId={selectedId}
                 onSelect={openConversation}
-                renderIcon={() => <span className="w-5 shrink-0 text-center text-white/50">🗓</span>}
+                renderIcon={() => <span className="w-5 shrink-0 text-center text-ink-soft">🗓</span>}
                 empty={q ? 'No matches' : 'No project chats yet — join one from any project.'}
               />
             </>
           )}
         </div>
 
-        {/* Floating new + search (Slack-style), phones only */}
-        <div className="absolute bottom-[4.5rem] right-3 z-10 flex flex-col items-center gap-2 lg:hidden">
-          <button onClick={() => setFabOpen(true)} aria-label="New conversation"
-            className="flex h-12 w-12 items-center justify-center rounded-full bg-ochre text-pine shadow-lg active:scale-95"><PlusIcon /></button>
-          <button onClick={() => setSearchOpen((o) => !o)} aria-label="Search"
-            className={`flex h-9 w-9 items-center justify-center rounded-full shadow ${searchOpen ? 'bg-white text-pine' : 'bg-white/15 text-white'}`}><SearchIcon /></button>
-        </div>
-
-        {/* Bottom nav (Home · DMs · Files), phones only */}
-        <div className="shrink-0 border-t border-white/10 bg-pine lg:hidden">
-          <div className="flex">
-            {[['home', 'Home', HomeIcon], ['dms', 'DMs', DmIcon], ['files', 'Files', FileIcon]].map(([key, label, Icon]) => (
-              <button key={key} onClick={() => setMobileTab(key)}
-                className={`flex flex-1 flex-col items-center gap-0.5 py-2 text-[11px] font-medium ${mobileTab === key ? 'text-white' : 'text-white/45'}`}>
-                <Icon /><span>{label}</span>
-              </button>
-            ))}
+        {/* Bottom: floating pill nav + FAB + search (phones only) */}
+        <div className="pointer-events-none absolute inset-x-0 bottom-0 z-10 lg:hidden">
+          <div className="flex justify-end px-4">
+            <button onClick={() => setFabOpen(true)} aria-label="New conversation"
+              className="pointer-events-auto flex h-12 w-12 items-center justify-center rounded-full bg-pine text-white shadow-lg active:scale-95"><PlusIcon /></button>
+          </div>
+          <div className="flex items-center gap-2 p-3">
+            <div className="pointer-events-auto flex flex-1 items-center rounded-full border border-line bg-white p-1 shadow-lg">
+              {[['home', 'Home', HomeIcon], ['dms', 'DMs', DmIcon], ['files', 'Files', FileIcon]].map(([key, label, Icon]) => (
+                <button key={key} onClick={() => setMobileTab(key)}
+                  className={`flex flex-1 items-center justify-center gap-1.5 rounded-full py-2 text-xs font-semibold ${mobileTab === key ? 'bg-pine-tint text-pine' : 'text-ink-soft'}`}>
+                  <Icon /><span>{label}</span>
+                </button>
+              ))}
+            </div>
+            <button onClick={() => setSearchOpen((o) => !o)} aria-label="Search"
+              className={`pointer-events-auto flex h-11 w-11 shrink-0 items-center justify-center rounded-full border shadow-lg ${searchOpen ? 'border-pine bg-pine-tint text-pine' : 'border-line bg-white text-ink-soft'}`}><SearchIcon /></button>
           </div>
         </div>
 
@@ -274,13 +293,13 @@ function TopCards({ active, onPick, unread, threads, reminders, drafts }) {
     ['drafts', 'Drafts', DraftIcon, drafts, ''],
   ];
   return (
-    <div className="flex gap-2 overflow-x-auto border-b border-white/10 px-2 py-2 [-ms-overflow-style:none] [scrollbar-width:none]">
+    <div className="flex gap-2 overflow-x-auto border-b border-line px-3 py-2 [-ms-overflow-style:none] [scrollbar-width:none]">
       {cards.map(([key, label, Icon, count, suffix]) => (
         <button key={key} onClick={() => onPick(key)}
-          className={`flex min-w-[84px] shrink-0 flex-col rounded-xl border px-3 py-2 text-left transition ${active === key ? 'border-white/50 bg-white/20' : 'border-white/10 bg-white/5 hover:bg-white/10'}`}>
-          <span className="text-white/85"><Icon /></span>
-          <span className="mt-1.5 text-xs font-semibold text-white">{label}</span>
-          <span className="text-[11px] text-white/60">{count > 0 ? `${count}${suffix ? ` ${suffix}` : ''}` : '—'}</span>
+          className={`flex min-w-[84px] shrink-0 flex-col rounded-xl border px-3 py-2 text-left transition ${active === key ? 'border-pine bg-pine-tint' : 'border-line bg-white hover:bg-paper'}`}>
+          <span className="text-ink-soft"><Icon /></span>
+          <span className="mt-1.5 text-xs font-semibold text-ink">{label}</span>
+          <span className="text-[11px] text-ink-soft">{count > 0 ? `${count}${suffix ? ` ${suffix}` : ''}` : '—'}</span>
         </button>
       ))}
     </div>
@@ -311,25 +330,25 @@ function FilesView({ onOpen }) {
   const filesQ = useQuery({ queryKey: ['msg-files'], queryFn: getFiles, retry: false });
   const files = filesQ.data || [];
   return (
-    <div className="mt-3">
-      <div className="px-2 pb-1 text-[10px] font-mono font-semibold uppercase tracking-widest text-white/45">Files</div>
-      {filesQ.isLoading && <p className="px-2 py-2 text-xs text-white/50">Loading…</p>}
+    <div className="py-1.5">
+      <div className="px-3 pb-1 pt-1 text-[15px] font-bold text-ink">Files</div>
+      {filesQ.isLoading && <p className="px-3 py-2 text-xs text-ink-soft">Loading…</p>}
       {!filesQ.isLoading && files.length === 0 && (
-        <div className="flex flex-col items-center justify-center py-16 text-center text-white/50">
+        <div className="flex flex-col items-center justify-center py-16 text-center text-ink-soft">
           <span className="opacity-70"><FileIcon /></span>
           <p className="mt-2 text-sm">No files shared yet.</p>
         </div>
       )}
-      <div className="space-y-0.5">
+      <div className="space-y-0.5 px-2">
         {files.map((f) => (
           <button key={f.id} onClick={() => onOpen(f.conversationId)}
-            className="flex w-full items-center gap-2.5 rounded-lg px-2 py-1.5 text-left hover:bg-white/10">
+            className="flex w-full items-center gap-2.5 rounded-lg px-2 py-2 text-left hover:bg-paper">
             {f.kind === 'image'
               ? <img src={f.url} alt="" className="h-9 w-9 shrink-0 rounded object-cover" />
-              : <span className="flex h-9 w-9 shrink-0 items-center justify-center rounded bg-white/10 text-white/80"><FileIcon /></span>}
+              : <span className="flex h-9 w-9 shrink-0 items-center justify-center rounded bg-paper text-ink-soft"><FileIcon /></span>}
             <span className="min-w-0 flex-1">
-              <span className="block truncate text-[13px] font-medium text-white">{f.name}</span>
-              <span className="block truncate text-[11px] text-white/50">{f.author} · {f.conversationName || 'Direct message'}</span>
+              <span className="block truncate text-[13px] font-medium text-ink">{f.name}</span>
+              <span className="block truncate text-[11px] text-ink-soft">{f.author} · {f.conversationName || 'Direct message'}</span>
             </span>
           </button>
         ))}
@@ -451,22 +470,25 @@ function DraftsView({ drafts, conversations, onBack, onOpen }) {
 // Slack-style "Unreads" group pinned above the channel list: every conversation
 // with unread messages, whatever its type, so you can clear them top-down.
 function UnreadsSection({ items, selectedId, onSelect }) {
+  const [open, setOpen] = useState(true);
   if (!items.length) return null;
   return (
-    <div className="mt-3">
-      <div className="px-2 text-[10px] font-mono font-semibold uppercase tracking-widest text-white/45">Unreads</div>
-      <div className="mt-1 space-y-0.5">
-        {items.map((c) => (
-          <button key={c.id} onClick={() => onSelect(c.id)}
-            className={`flex w-full items-center gap-2 rounded-lg px-2 py-1.5 text-left ${selectedId === c.id ? 'bg-white/20' : 'hover:bg-white/10'}`}>
-            {c.type === 'dm'
-              ? <Avatar id={c.id} name={c.name} photoUrl={c.photoUrl} size={20} rounded="rounded" />
-              : <span className="w-5 shrink-0 text-center text-white/50">{c.type === 'event' ? '🗓' : '#'}</span>}
-            <span className="min-w-0 flex-1 truncate text-[15px] font-bold text-white">{c.name}</span>
-            <span className="flex h-[18px] min-w-[18px] items-center justify-center rounded-full bg-sage px-1 text-[10px] font-bold text-white">{c.unread > 99 ? '99+' : c.unread}</span>
-          </button>
-        ))}
-      </div>
+    <div className="py-1.5">
+      <SectionHeader title="Unreads" open={open} onToggle={() => setOpen((o) => !o)} />
+      {open && (
+        <div className="space-y-0.5 px-2">
+          {items.map((c) => (
+            <button key={c.id} onClick={() => onSelect(c.id)}
+              className={`flex w-full items-center gap-2 rounded-lg px-2 py-2 text-left ${selectedId === c.id ? 'bg-pine-tint' : 'hover:bg-paper'}`}>
+              {c.type === 'dm'
+                ? <Avatar id={c.id} name={c.name} photoUrl={c.photoUrl} size={20} rounded="rounded" />
+                : <span className="w-5 shrink-0 text-center text-ink-soft">{c.type === 'event' ? '🗓' : '#'}</span>}
+              <span className="min-w-0 flex-1 truncate text-[15px] font-bold text-ink">{c.name}</span>
+              <span className="flex h-[18px] min-w-[18px] items-center justify-center rounded-full bg-sage px-1 text-[10px] font-bold text-white">{c.unread > 99 ? '99+' : c.unread}</span>
+            </button>
+          ))}
+        </div>
+      )}
     </div>
   );
 }
@@ -474,36 +496,33 @@ function UnreadsSection({ items, selectedId, onSelect }) {
 function RailSection({ title, onAdd, items, selectedId, onSelect, renderIcon, empty }) {
   const [open, setOpen] = useState(true);
   return (
-    <div className="mt-3">
-      <div className="flex items-center justify-between px-2">
-        <button onClick={() => setOpen((o) => !o)} className="flex items-center gap-1.5 text-[10px] font-mono font-semibold uppercase tracking-widest text-white/45 hover:text-white/70">
-          <Chevron open={open} />{title}
-        </button>
-        {onAdd && <button onClick={onAdd} title={`New ${title}`} className="text-lg leading-none text-white/55 hover:text-white">＋</button>}
-      </div>
-      <div className={`mt-1 space-y-0.5 ${open ? '' : 'hidden'}`}>
-        {items.length === 0 && <p className="px-2 py-1 text-xs text-white/40">{empty}</p>}
-        {items.map((c) => (
-          <button
-            key={c.id}
-            onClick={() => onSelect(c.id)}
-            className={`flex w-full items-center gap-2 rounded-lg px-2 py-1.5 text-left ${
-              selectedId === c.id ? 'bg-white/20' : 'hover:bg-white/10'
-            }`}
-          >
-            {renderIcon(c)}
-            <span className={`min-w-0 flex-1 truncate text-[15px] ${c.unread > 0 ? 'font-bold text-white' : selectedId === c.id ? 'font-semibold text-white' : 'font-medium text-white/70'}`}>{c.name}</span>
-            {selectedId !== c.id && readDraft(c.id) && (
-              <span className="rounded bg-white/15 px-1 text-[9px] font-semibold uppercase tracking-wide text-white/70">draft</span>
-            )}
-            {c.unread > 0 && (
-              <span className={`flex h-[18px] min-w-[18px] items-center justify-center rounded-full px-1 text-[10px] font-bold ${selectedId === c.id ? 'bg-white/30 text-white' : 'bg-sage text-white'}`}>
-                {c.unread > 99 ? '99+' : c.unread}
-              </span>
-            )}
-          </button>
-        ))}
-      </div>
+    <div className="py-1.5">
+      <SectionHeader title={title} open={open} onToggle={() => setOpen((o) => !o)} onAdd={onAdd} />
+      {open && (
+        <div className="space-y-0.5 px-2">
+          {items.length === 0 && <p className="px-2 py-1 text-xs text-ink-soft">{empty}</p>}
+          {items.map((c) => (
+            <button
+              key={c.id}
+              onClick={() => onSelect(c.id)}
+              className={`flex w-full items-center gap-2 rounded-lg px-2 py-2 text-left ${
+                selectedId === c.id ? 'bg-pine-tint' : 'hover:bg-paper'
+              }`}
+            >
+              {renderIcon(c)}
+              <span className={`min-w-0 flex-1 truncate text-[15px] ${c.unread > 0 ? 'font-bold text-ink' : selectedId === c.id ? 'font-semibold text-pine' : 'font-medium text-ink'}`}>{c.name}</span>
+              {selectedId !== c.id && readDraft(c.id) && (
+                <span className="rounded bg-line/60 px-1 text-[9px] font-semibold uppercase tracking-wide text-ink-soft">draft</span>
+              )}
+              {c.unread > 0 && (
+                <span className="flex h-[18px] min-w-[18px] items-center justify-center rounded-full bg-sage px-1 text-[10px] font-bold text-white">
+                  {c.unread > 99 ? '99+' : c.unread}
+                </span>
+              )}
+            </button>
+          ))}
+        </div>
+      )}
     </div>
   );
 }
@@ -520,25 +539,22 @@ function GroupRail({ items, selectedId, onSelect, onAddGroup }) {
     <ChannelRow key={c.id} c={c} selected={selectedId === c.id} onSelect={onSelect} sections={sections} onMove={(section) => move.mutate({ id: c.id, section })} />
   ));
   return (
-    <div className="mt-3">
-      <div className="flex items-center justify-between px-2">
-        <button onClick={() => setOpen((o) => !o)} className="flex items-center gap-1.5 text-[10px] font-mono font-semibold uppercase tracking-widest text-white/45 hover:text-white/70">
-          <Chevron open={open} />Groups
-        </button>
-        <button onClick={onAddGroup} title="New group" className="text-lg leading-none text-white/55 hover:text-white">＋</button>
-      </div>
-      <div className={open ? '' : 'hidden'}>
-        <div className="mt-1 space-y-0.5">
-          {items.length === 0 && <p className="px-2 py-1 text-xs text-white/40">No groups yet</p>}
-          {rows(ungrouped)}
-        </div>
-        {sections.map((sec) => (
-          <div key={sec} className="mt-2">
-            <div className="px-2 text-[10px] font-semibold uppercase tracking-wide text-white/40">{sec}</div>
-            <div className="mt-1 space-y-0.5">{rows(items.filter((c) => c.section === sec))}</div>
+    <div className="py-1.5">
+      <SectionHeader title="Groups" open={open} onToggle={() => setOpen((o) => !o)} onAdd={onAddGroup} />
+      {open && (
+        <div className="px-2">
+          <div className="space-y-0.5">
+            {items.length === 0 && <p className="px-2 py-1 text-xs text-ink-soft">No groups yet</p>}
+            {rows(ungrouped)}
           </div>
-        ))}
-      </div>
+          {sections.map((sec) => (
+            <div key={sec} className="mt-2">
+              <div className="px-2 text-[10px] font-semibold uppercase tracking-wide text-ink-soft">{sec}</div>
+              <div className="mt-1 space-y-0.5">{rows(items.filter((c) => c.section === sec))}</div>
+            </div>
+          ))}
+        </div>
+      )}
     </div>
   );
 }
@@ -546,18 +562,18 @@ function GroupRail({ items, selectedId, onSelect, onAddGroup }) {
 function ChannelRow({ c, selected, onSelect, sections, onMove }) {
   const [menu, setMenu] = useState(false);
   return (
-    <div className={`group/row relative flex items-center rounded-lg pr-1 ${selected ? 'bg-white/20' : 'hover:bg-white/10'}`}>
+    <div className={`group/row relative flex items-center rounded-lg pr-1 ${selected ? 'bg-pine-tint' : 'hover:bg-paper'}`}>
       <button onClick={() => onSelect(c.id)}
-        className="flex min-w-0 flex-1 items-center gap-2 px-2 py-1.5 text-left">
-        <span className="text-white/50">#</span>
-        <span className={`min-w-0 flex-1 truncate text-[15px] ${c.unread > 0 ? 'font-bold text-white' : selected ? 'font-semibold text-white' : 'font-medium text-white/70'}`}>{c.name}</span>
-        {!selected && readDraft(c.id) && <span className="rounded bg-white/15 px-1 text-[9px] font-semibold uppercase tracking-wide text-white/70">draft</span>}
+        className="flex min-w-0 flex-1 items-center gap-2 px-2 py-2 text-left">
+        <span className="text-ink-soft">#</span>
+        <span className={`min-w-0 flex-1 truncate text-[15px] ${c.unread > 0 ? 'font-bold text-ink' : selected ? 'font-semibold text-pine' : 'font-medium text-ink'}`}>{c.name}</span>
+        {!selected && readDraft(c.id) && <span className="rounded bg-line/60 px-1 text-[9px] font-semibold uppercase tracking-wide text-ink-soft">draft</span>}
         {c.unread > 0 && (
-          <span className={`flex h-[18px] min-w-[18px] items-center justify-center rounded-full px-1 text-[10px] font-bold ${selected ? 'bg-white/30 text-white' : 'bg-sage text-white'}`}>{c.unread > 99 ? '99+' : c.unread}</span>
+          <span className="flex h-[18px] min-w-[18px] items-center justify-center rounded-full bg-sage px-1 text-[10px] font-bold text-white">{c.unread > 99 ? '99+' : c.unread}</span>
         )}
       </button>
       <button onClick={() => setMenu((v) => !v)} title="Move to section"
-        className="shrink-0 px-1 text-white/40 opacity-0 hover:text-white group-hover/row:opacity-100">⋯</button>
+        className="shrink-0 px-1 text-ink-soft opacity-0 hover:text-pine group-hover/row:opacity-100">⋯</button>
       {menu && (
         <div className="absolute right-1 top-9 z-30 w-48 rounded-lg border border-line bg-white py-1 text-sm text-ink shadow-lg">
           <div className="px-3 pb-1 text-[10px] font-semibold uppercase tracking-wide text-ink-soft">Move to section</div>
