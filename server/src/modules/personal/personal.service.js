@@ -4,20 +4,9 @@ import { istParts, istInstant, istMonthRange } from '../../lib/ist.js';
 
 export const FREQS = ['Daily', 'Weekly', 'Monthly', 'Yearly'];
 
-const CHECKLIST_BASE = {
-  Daily: ['Review My Day dashboard & clear overdue tasks', 'Check announcements & notifications', 'Update progress on assigned tasks'],
-  Weekly: ['Sync with reporting manager', 'Review team / department board', "Plan next week's priorities"],
-  Monthly: ['Submit monthly progress report', 'Review KPIs against targets', 'Update the SOPs I own'],
-  Yearly: ['Complete annual performance review', 'Refresh yearly objectives', 'Archive completed institutional events'],
-};
-const DEFAULT_DUTIES = [
-  'Execute department objectives', 'Coordinate with cross-functional teams',
-  'Maintain SOP compliance', 'Report progress to reporting manager',
-];
-const OKR_DEFAULT = [
-  { objective: 'Improve on-time task completion', target: '95%' },
-  { objective: 'Maintain SOP compliance', target: '100%' },
-];
+// Responsibilities, OKRs and checklists start empty — people/managers add their
+// own real items. (We used to auto-seed starter templates on first open, but that
+// filled every account with placeholder content; removed after the pilot.)
 
 // ── Recurrence ──
 const weekStart = (d) => { const x = new Date(d); const off = (x.getDay() + 6) % 7; x.setDate(x.getDate() - off); x.setHours(0, 0, 0, 0); return x; };
@@ -31,27 +20,14 @@ function samePeriod(a, now, freq) {
 }
 
 // ── Duties ──
-async function ensureDuties(userId) {
-  if ((await prisma.duty.count({ where: { userId } })) === 0) {
-    await prisma.duty.createMany({ data: DEFAULT_DUTIES.map((text, i) => ({ userId, text, sort: i })) });
-  }
-}
 export async function getDuties(userId) {
-  await ensureDuties(userId);
   return prisma.duty.findMany({ where: { userId }, orderBy: [{ sort: 'asc' }, { createdAt: 'asc' }] });
 }
 export const addDuty = (userId, text, by) => prisma.duty.create({ data: { userId, text: text.trim(), createdById: by } });
 export const deleteDuty = (id) => prisma.duty.delete({ where: { id } }).catch(() => { throw new ApiError(404, 'Duty not found'); });
 
 // ── OKRs ──
-async function ensureOkrs(userId, year, month) {
-  if ((await prisma.okr.count({ where: { userId, year, month } })) === 0) {
-    await prisma.okr.createMany({ data: OKR_DEFAULT.map((o) => ({ userId, year, month, objective: o.objective, target: o.target })) });
-  }
-}
 export async function getOkrs(userId, year, month) {
-  const now = new Date();
-  if (year === now.getFullYear() && month === now.getMonth() + 1) await ensureOkrs(userId, year, month);
   const items = await prisma.okr.findMany({ where: { userId, year, month }, orderBy: { createdAt: 'asc' } });
   const approval = await prisma.okrApproval.findUnique({ where: { userId_year_month: { userId, year, month } } });
   return { items, approved: approval?.approved || false, allFilled: items.length > 0 && items.every((i) => i.percent != null) };
@@ -129,15 +105,7 @@ async function logActivity(userId, { itemId = null, actorId = null, action, text
 }
 
 // ── Checklists ──
-async function ensureChecklist(userId) {
-  if ((await prisma.checklistItem.count({ where: { userId } })) === 0) {
-    const rows = [];
-    FREQS.forEach((f) => CHECKLIST_BASE[f].forEach((text, i) => rows.push({ userId, frequency: f, text, sort: i })));
-    await prisma.checklistItem.createMany({ data: rows });
-  }
-}
 export async function getChecklist(userId) {
-  await ensureChecklist(userId);
   const now = new Date();
   const currentKeys = [...new Set(FREQS.map((f) => periodKey(now, f)))];
   const [items, cfgs, comps] = await Promise.all([
