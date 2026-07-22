@@ -31,11 +31,18 @@ would not stick. Push to `main`, wait for Render to finish deploying.
 
 **2. Back up the database.** Snapshot in Supabase.
 
-**3. Run `01-wipe-work-and-planning.sql`** in the **Supabase SQL Editor**
-(projects, tasks, project messages, checklists, OKRs, responsibilities):
-   - Run the **STEP A** dry-run block first and eyeball the counts.
-   - Then run the **STEP B** transaction; confirm the post-delete counts are all
-     `0` and `COMMIT` (or `ROLLBACK` if anything looks wrong).
+**3. Wipe projects, tasks, project messages, checklists, OKRs, responsibilities.**
+Two equivalent ways — pick one:
+
+   - **Render Shell (simplest — no password to copy):** open the API service →
+     Shell tab and run
+     ```bash
+     node server/scripts/pilot-reset/01-wipe-work-and-planning.mjs            # dry run — counts only
+     node server/scripts/pilot-reset/01-wipe-work-and-planning.mjs --confirm  # actually delete
+     ```
+   - **Supabase SQL Editor:** paste `01-wipe-work-and-planning.sql`, run the
+     **STEP A** dry-run block, then the **STEP B** transaction; confirm the
+     post-delete counts are all `0` and `COMMIT` (or `ROLLBACK`).
 
 **4. Run `02-wipe-meetings.mjs`** from the **Render Shell** of the API service
 (the Microsoft Graph env vars live there, so Teams events can be cancelled):
