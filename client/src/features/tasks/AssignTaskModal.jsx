@@ -7,10 +7,12 @@ import AssignPicker from '../events/AssignPicker.jsx';
 // assigner's task-approval mode is manual, the task stays pending their manager.
 export default function AssignTaskModal({ onClose, onCreated }) {
   const qc = useQueryClient();
+  const today = new Date();
+  const todayYmd = `${today.getFullYear()}-${String(today.getMonth() + 1).padStart(2, '0')}-${String(today.getDate()).padStart(2, '0')}`;
   const [title, setTitle] = useState('');
   const [assignees, setAssignees] = useState([]);
-  const [dueDate, setDueDate] = useState('');
-  const [dueTime, setDueTime] = useState('');
+  const [dueDate, setDueDate] = useState(todayYmd); // default: today
+  const [dueTime, setDueTime] = useState('18:00');   // default: 6:00 PM
 
   const mut = useMutation({
     mutationFn: () => createDirectTask({ title: title.trim(), assigneeIds: assignees, dueDate: dueDate || null, dueTime: dueTime || null }),

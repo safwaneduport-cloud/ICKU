@@ -3,6 +3,7 @@ import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query';
 import {
   getApprovals, getApprovalHistory, approveEvent, rejectEvent, changeEventOwner,
   getProjectTaskApprovals, decideProjectTaskAssignee, getOwnerApprovals, decideOwnerTransfer,
+  getExtensionApprovals, decideExtension,
 } from '../api/events.api.js';
 import { getTaskApprovals, decideDirectTask } from '../api/directTasks.api.js';
 import { getUsers } from '../api/users.api.js';
@@ -15,6 +16,7 @@ export default function Approvals() {
   const directTaskQ = useQuery({ queryKey: ['task-approvals'], queryFn: getTaskApprovals, retry: false });
   const projTaskQ = useQuery({ queryKey: ['proj-task-approvals'], queryFn: getProjectTaskApprovals, retry: false });
   const ownerQ = useQuery({ queryKey: ['owner-approvals'], queryFn: getOwnerApprovals, retry: false });
+  const extQ = useQuery({ queryKey: ['extension-approvals'], queryFn: getExtensionApprovals, retry: false });
   const historyQ = useQuery({ queryKey: ['approval-history'], queryFn: getApprovalHistory, retry: false });
   const users = useQuery({ queryKey: ['users'], queryFn: getUsers, retry: false });
 
@@ -24,8 +26,10 @@ export default function Approvals() {
   const decideDirect = useMutation({ mutationFn: ({ taskId, userId, decision }) => decideDirectTask(taskId, userId, decision), onSuccess: () => qc.invalidateQueries() });
   const decideProj = useMutation({ mutationFn: ({ taskId, userId, decision }) => decideProjectTaskAssignee(taskId, userId, decision), onSuccess: () => qc.invalidateQueries() });
   const decideOwner = useMutation({ mutationFn: ({ id, decision }) => decideOwnerTransfer(id, decision), onSuccess: () => qc.invalidateQueries() });
+  const decideExt = useMutation({ mutationFn: ({ taskId, decision }) => decideExtension(taskId, decision), onSuccess: () => qc.invalidateQueries() });
 
   const rows = q.data || [];
+  const extRows = extQ.data || [];
   // Both task queues are per-recipient rows; tag them so each row calls the right
   // mutation, and normalise the label fields (direct: title / project: taskName).
   const taskRows = [
@@ -38,7 +42,7 @@ export default function Approvals() {
   const decideTask = (row, decision) => (row.kind === 'direct' ? decideDirect : decideProj)
     .mutate({ taskId: row.taskId, userId: row.userId, decision });
 
-  const nothing = !q.isLoading && rows.length === 0 && taskRows.length === 0 && ownerRows.length === 0;
+  const nothing = !q.isLoading && rows.length === 0 && taskRows.length === 0 && ownerRows.length === 0 && extRows.length === 0;
 
   return (
     <div className="space-y-5">
@@ -77,6 +81,25 @@ export default function Approvals() {
               <div className="flex items-center gap-2">
                 <button onClick={() => decideOwner.mutate({ id: o.eventId, decision: 'rejected' })} className="rounded-lg border border-line px-3 py-1.5 text-sm hover:border-brick hover:text-brick">Reject</button>
                 <button onClick={() => decideOwner.mutate({ id: o.eventId, decision: 'approved' })} className="rounded-lg bg-pine px-3 py-1.5 text-sm font-medium text-white">Approve</button>
+              </div>
+            </div>
+          ))}
+        </div>
+      )}
+
+      {/* Deadline-extension requests on tasks in projects you own. */}
+      {extRows.length > 0 && (
+        <div className="space-y-2">
+          <div className="text-xs font-semibold uppercase tracking-wide text-ink-soft">Extension requests · {extRows.length}</div>
+          {extRows.map((x) => (
+            <div key={x.taskId} className="flex flex-wrap items-center justify-between gap-3 rounded-2xl border border-line bg-white p-4">
+              <div>
+                <div className="font-medium">{x.taskName} <span className="text-ink-soft">— {x.projectName}</span></div>
+                <div className="text-sm text-ink-soft">{x.requestedBy} wants to move the due date {x.currentDue} → <span className="font-medium text-ink">{x.requestedDue}</span></div>
+              </div>
+              <div className="flex items-center gap-2">
+                <button onClick={() => decideExt.mutate({ taskId: x.taskId, decision: 'rejected' })} className="rounded-lg border border-line px-3 py-1.5 text-sm hover:border-brick hover:text-brick">Decline</button>
+                <button onClick={() => decideExt.mutate({ taskId: x.taskId, decision: 'approved' })} className="rounded-lg bg-pine px-3 py-1.5 text-sm font-medium text-white">Approve</button>
               </div>
             </div>
           ))}

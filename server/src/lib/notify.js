@@ -54,6 +54,18 @@ export function notifyApprovalNeeded(approverId, { kind, title, by }) {
   });
 }
 
+export function notifyExtensionRequest(ownerId, { task, project, by, newDate }) {
+  emailUser(ownerId, `Extension requested: ${task}`, {
+    heading: 'A deadline extension was requested',
+    lines: [
+      `<strong>${esc(task)}</strong>${project ? ` in <em>${esc(project)}</em>` : ''}`,
+      by ? `Requested by ${esc(by)}.` : '',
+      newDate ? `Proposed new due date: ${esc(newDate)}.` : '',
+    ],
+    cta: { label: 'Review in Approvals', path: '/approvals' },
+  });
+}
+
 export function notifyMention(userId, { by, where, snippet }) {
   emailUser(userId, `${by} mentioned you`, {
     heading: `${esc(by)} mentioned you`,

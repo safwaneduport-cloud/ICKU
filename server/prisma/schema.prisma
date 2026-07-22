@@ -399,6 +399,7 @@ model TicketComment {
 model Event {
   id           String  @id @default(uuid())
   name         String
+  description  String  @default("") // optional short description, shown above the SOP
   ownerId      String?
   owner        User?   @relation("EventOwner", fields: [ownerId], references: [id])
   recurrence   String  @default("yearly")
@@ -421,12 +422,27 @@ model Event {
   comments     EventComment[]
   conversation Conversation? // Stage 2: the event's chat thread (Messages)
   meetings     Meeting[] // meetings tagged to this event
+  activities   EventActivity[] // edit / extension history
 
   createdAt DateTime @default(now())
   updatedAt DateTime @updatedAt
 
   @@index([ownerId])
   @@index([approverId])
+}
+
+// Human-readable audit trail for a project: edits to the project or its tasks,
+// and approved deadline extensions — so "who changed what, when" is viewable.
+model EventActivity {
+  id        String   @id @default(uuid())
+  eventId   String
+  event     Event    @relation(fields: [eventId], references: [id], onDelete: Cascade)
+  actorId   String?
+  actorName String   @default("")
+  text      String // e.g. "extended 'Book venue' to Jul 27"
+  createdAt DateTime @default(now())
+
+  @@index([eventId])
 }
 
 model EventTask {

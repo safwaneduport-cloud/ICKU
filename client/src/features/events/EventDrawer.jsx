@@ -1,11 +1,21 @@
 import { useState } from 'react';
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query';
 import { useAuth } from '../../store/AuthContext.jsx';
-import { getEvent, toggleTask, updateEventSop, rejectAssignment, requestExtension, decideExtension, changeEventOwner, addTaskAssignees, removeTaskAssignee, addProjectTask, deleteEvent, deleteProjectTask } from '../../api/events.api.js';
+import { getEvent, toggleTask, updateEventSop, rejectAssignment, requestExtension, decideExtension, changeEventOwner, addTaskAssignees, removeTaskAssignee, addProjectTask, deleteEvent, deleteProjectTask, updateEvent, updateProjectTask } from '../../api/events.api.js';
 import { getUsers } from '../../api/users.api.js';
 import ReassignControl from '../tasks/ReassignControl.jsx';
 import AssignPicker from './AssignPicker.jsx';
-import { STATE, triggerLabel, dueLabel, anchorDate } from './meta.js';
+import { STATE, MONTHS, triggerLabel, dueLabel, anchorDate } from './meta.js';
+
+// A new task's default due — today at 6 PM as an offset from the project trigger.
+const todayDueFor = (e) => {
+  if (e.status !== 'confirmed' || !e.triggerMonth) return { dueOffset: null, dueTime: null };
+  const anchor = anchorDate(e.triggerMonth, e.triggerDay || 1);
+  const now = new Date();
+  const off = Math.round((new Date(now.getFullYear(), now.getMonth(), now.getDate()) - new Date(anchor.getFullYear(), anchor.getMonth(), anchor.getDate())) / 86400000);
+  return { dueOffset: Math.max(0, off), dueTime: '18:00' };
+};
+const fmtWhen = (iso) => new Date(iso).toLocaleString([], { month: 'short', day: 'numeric', hour: 'numeric', minute: '2-digit' });
 
 const triggerLabelDate = (d) => (d ? new Date(`${d}T00:00:00`).toLocaleDateString(undefined, { day: 'numeric', month: 'short' }) : '');
 import EventChat from '../messages/EventChat.jsx';
@@ -31,6 +41,7 @@ export default function EventDrawer({ id, onClose }) {
 
   const del = useMutation({ mutationFn: () => deleteEvent(id), onSuccess: () => { qc.invalidateQueries({ queryKey: ['events'] }); qc.invalidateQueries({ queryKey: ['task-list'] }); onClose(); } });
   const [confirmDel, setConfirmDel] = useState(false);
+  const [editing, setEditing] = useState(false);
 
   const e = q.data;
   const isAdmin = user?.id === 'ceo' || user?.id === 'EP002' || user?.role === 'HR Head';
@@ -56,8 +67,9 @@ export default function EventDrawer({ id, onClose }) {
               <button onClick={onClose} className="rounded-lg border border-line px-3 py-1 text-sm">Close</button>
             </div>
 
-            {canDelete && (
+            {canDelete && !editing && (
               <div className="mt-3 flex items-center justify-end gap-2">
+                <button onClick={() => setEditing(true)} className="rounded-lg border border-line px-3 py-1 text-sm hover:border-pine">✎ Edit</button>
                 {confirmDel ? (
                   <>
                     <span className="text-xs text-ink-soft">Delete this project and all its tasks?</span>
@@ -69,6 +81,12 @@ export default function EventDrawer({ id, onClose }) {
                 )}
               </div>
             )}
+
+            {editing
+              ? <EditProjectForm e={e} onClose={() => setEditing(false)} onSaved={() => qc.invalidateQueries()} />
+              : e.description
+                ? <p className="mt-3 whitespace-pre-wrap rounded-xl border border-line bg-white p-3 text-sm text-ink">{e.description}</p>
+                : null}
 
             <OwnerControl e={e} user={user} onDone={() => qc.invalidateQueries()} />
 
@@ -108,6 +126,20 @@ export default function EventDrawer({ id, onClose }) {
               {(e.ownerId === user?.id || isAdmin) && <AddTaskForm e={e} onAdded={() => qc.invalidateQueries()} />}
             </section>
 
+            {e.activity?.length > 0 && (
+              <section className="mt-4 rounded-2xl border border-line bg-white p-4">
+                <div className="text-xs font-semibold uppercase tracking-wide text-ink-soft">History</div>
+                <div className="mt-2 space-y-1.5">
+                  {e.activity.map((a) => (
+                    <div key={a.id} className="flex items-baseline justify-between gap-3 text-xs">
+                      <span className="min-w-0 text-ink"><span className="font-medium">{a.actorName || 'Someone'}</span> {a.text}</span>
+                      <span className="shrink-0 text-ink-soft">{fmtWhen(a.at)}</span>
+                    </div>
+                  ))}
+                </div>
+              </section>
+            )}
+
             <EventChat eventId={id} />
           </>
         )}
@@ -118,6 +150,57 @@ export default function EventDrawer({ id, onClose }) {
 
 // One task row: completion + assignee statuses, plus the assignee's reject /
 // request-extension controls and the owner's approve-extension controls.
+// Edit a project's core values (owner/admin): title, description, date. SOP has
+// its own inline editor below; tasks are edited on their own rows.
+function EditProjectForm({ e, onClose, onSaved }) {
+  const qc = useQueryClient();
+  const [name, setName] = useState(e.name);
+  const [description, setDescription] = useState(e.description || '');
+  const [dated, setDated] = useState(e.status === 'confirmed');
+  const [month, setMonth] = useState(e.triggerMonth || 7);
+  const [day, setDay] = useState(e.triggerDay || 1);
+  const save = useMutation({
+    mutationFn: () => updateEvent(e.id, {
+      name: name.trim(), description,
+      status: dated ? 'confirmed' : 'tbd',
+      triggerMonth: dated ? month : null,
+      triggerDay: dated ? Math.min(31, Math.max(1, parseInt(day, 10) || 1)) : null,
+    }),
+    onSuccess: () => { qc.invalidateQueries(); onSaved?.(); onClose(); },
+  });
+  return (
+    <div className="mt-3 rounded-2xl border border-pine/40 bg-white p-4">
+      <div className="text-xs font-semibold uppercase tracking-wide text-ink-soft">Edit project</div>
+      <label className="mt-2 block text-sm"><span className="text-ink-soft">Title</span>
+        <input value={name} onChange={(ev) => setName(ev.target.value)} className="mt-1 w-full rounded-lg border border-line px-3 py-2 text-sm outline-none focus:border-pine" /></label>
+      <label className="mt-2 block text-sm"><span className="text-ink-soft">Description</span>
+        <textarea value={description} onChange={(ev) => setDescription(ev.target.value)} rows={2} placeholder="Optional" className="mt-1 w-full rounded-lg border border-line px-3 py-2 text-sm outline-none focus:border-pine" /></label>
+      <div className="mt-2 grid grid-cols-3 gap-2">
+        <label className="block text-sm"><span className="text-ink-soft">Date</span>
+          <select value={dated ? 'fixed' : 'tbd'} onChange={(ev) => setDated(ev.target.value === 'fixed')} className="mt-1 w-full rounded-lg border border-line px-2 py-2 text-sm">
+            <option value="fixed">Fixed</option><option value="tbd">TBD</option>
+          </select></label>
+        {dated && (
+          <>
+            <label className="block text-sm"><span className="text-ink-soft">Month</span>
+              <select value={month} onChange={(ev) => setMonth(+ev.target.value)} className="mt-1 w-full rounded-lg border border-line px-2 py-2 text-sm">
+                {MONTHS.map((mn, i) => <option key={i} value={i + 1}>{mn}</option>)}
+              </select></label>
+            <label className="block text-sm"><span className="text-ink-soft">Day</span>
+              <input type="text" inputMode="numeric" value={day} onChange={(ev) => setDay(ev.target.value.replace(/\D/g, ''))}
+                onBlur={() => setDay(Math.min(31, Math.max(1, parseInt(day, 10) || 1)))} className="mt-1 w-full rounded-lg border border-line px-2 py-2 text-sm" /></label>
+          </>
+        )}
+      </div>
+      {save.error && <p className="mt-1 text-xs text-brick">{save.error.response?.data?.error?.message || 'Could not save'}</p>}
+      <div className="mt-3 flex justify-end gap-2">
+        <button onClick={onClose} className="rounded-lg border border-line px-3 py-1.5 text-sm">Cancel</button>
+        <button onClick={() => save.mutate()} disabled={!name.trim() || save.isPending} className="rounded-lg bg-pine px-4 py-1.5 text-sm font-medium text-white disabled:opacity-50">{save.isPending ? 'Saving…' : 'Save changes'}</button>
+      </div>
+    </div>
+  );
+}
+
 function TaskItem({ e, t, user, toggle, reject, extend, decideExt }) {
   const qc = useQueryClient();
   const [rejecting, setRejecting] = useState(false);
@@ -130,6 +213,10 @@ function TaskItem({ e, t, user, toggle, reject, extend, decideExt }) {
   const removeAssignee = useMutation({ mutationFn: (userId) => removeTaskAssignee(t.id, userId), onSuccess: () => qc.invalidateQueries() });
   const delTask = useMutation({ mutationFn: () => deleteProjectTask(t.id), onSuccess: () => qc.invalidateQueries() });
   const [confirmDel, setConfirmDel] = useState(false);
+  const editT = useMutation({ mutationFn: (patch) => updateProjectTask(t.id, patch), onSuccess: () => qc.invalidateQueries() });
+  const [editing, setEditing] = useState(false);
+  const [ename, setEname] = useState(t.name);
+  const [edue, setEdue] = useState({ dueOffset: t.dueOffset, dueTime: t.dueTime });
 
   const mine = t.assignees.find((a) => a.id === user?.id);
   // "Live for me" needs both: my manager approved the assignment AND I haven't declined it.
@@ -186,9 +273,10 @@ function TaskItem({ e, t, user, toggle, reject, extend, decideExt }) {
             </div>
           )}
 
-          {/* owner reassign — add/drop recipients; each new one is re-gated — and delete */}
+          {/* owner controls — edit, reassign (each new recipient re-gated), delete */}
           {isOwner && (
             <div className="mt-1.5 flex items-center gap-3 text-[11px]">
+              <button onClick={() => { setEditing((v) => !v); setEname(t.name); setEdue({ dueOffset: t.dueOffset, dueTime: t.dueTime }); }} className={`hover:text-pine ${editing ? 'text-pine' : 'text-ink-soft'}`}>Edit</button>
               <button onClick={() => setReassigning((v) => !v)} className={`hover:text-pine ${reassigning ? 'text-pine' : 'text-ink-soft'}`}>Reassign</button>
               {confirmDel ? (
                 <span className="flex items-center gap-1.5">
@@ -198,6 +286,18 @@ function TaskItem({ e, t, user, toggle, reject, extend, decideExt }) {
               ) : (
                 <button onClick={() => setConfirmDel(true)} className="text-ink-soft hover:text-brick">Delete task</button>
               )}
+            </div>
+          )}
+          {editing && (
+            <div className="mt-1.5 space-y-2 rounded-lg border border-pine/30 bg-white p-2">
+              <input value={ename} onChange={(ev) => setEname(ev.target.value)} placeholder="Task name"
+                className="w-full rounded border border-line px-2 py-1 text-xs outline-none focus:border-pine" />
+              {dated && <DueDatePicker anchor={anchorDate(e.triggerMonth, e.triggerDay)} value={edue} onChange={setEdue} required />}
+              <div className="flex gap-2 text-[11px]">
+                <button disabled={editT.isPending || !ename.trim()} onClick={() => editT.mutate({ name: ename.trim(), dueOffset: edue.dueOffset, dueTime: edue.dueTime }, { onSuccess: () => setEditing(false) })}
+                  className="rounded bg-pine px-2 py-0.5 font-medium text-white disabled:opacity-50">Save</button>
+                <button onClick={() => setEditing(false)} className="text-ink-soft">Cancel</button>
+              </div>
             </div>
           )}
           {reassigning && (
@@ -239,7 +339,7 @@ function TaskItem({ e, t, user, toggle, reject, extend, decideExt }) {
 function AddTaskForm({ e, onAdded }) {
   const [open, setOpen] = useState(false);
   const [name, setName] = useState('');
-  const [due, setDue] = useState({ dueOffset: null, dueTime: null });
+  const [due, setDue] = useState(() => todayDueFor(e)); // default: today at 6 PM
   const [assignees, setAssignees] = useState([]);
   const dated = e.status === 'confirmed' && !!e.triggerMonth;
   const add = useMutation({

@@ -2,7 +2,7 @@ import { prisma } from '../../config/prisma.js';
 import { ApiError } from '../../middleware/errorHandler.js';
 import { canAdmin } from '../../lib/access.js';
 import { gateFor } from '../../lib/taskGate.js';
-import { notifyAssignments, notifyApprovalNeeded, notifyTaskAssigned } from '../../lib/notify.js';
+import { notifyAssignments, notifyApprovalNeeded, notifyTaskAssigned, notifyExtensionRequest } from '../../lib/notify.js';
 import { istInstant, istMonthRange } from '../../lib/ist.js';
 import { computeState, triggerDate, isTaskPastDue, effectiveDue, isUndated } from './events.lib.js';
 
@@ -65,6 +65,29 @@ const eventInclude = {
   },
 };
 
+const MON = ['Jan', 'Feb', 'Mar', 'Apr', 'May', 'Jun', 'Jul', 'Aug', 'Sep', 'Oct', 'Nov', 'Dec'];
+// Human date for a task's offset+time, e.g. "Jul 27, 6:00 PM" (plain calendar
+// arithmetic — no timezone nuance since we only need the wall-clock date/time).
+function fmtDueText(event, offset, time) {
+  if (!event?.triggerMonth || offset == null) return 'no due date';
+  const yr = event.triggerMonth >= 4 ? 2026 : 2027; // academic cycle (mirrors triggerDate)
+  const d = new Date(yr, event.triggerMonth - 1, (event.triggerDay || 1) + Number(offset));
+  let s = `${MON[d.getMonth()]} ${d.getDate()}`;
+  if (time && /^\d{1,2}:\d{2}$/.test(time)) {
+    const [h, m] = time.split(':').map(Number);
+    s += `, ${((h + 11) % 12) + 1}:${String(m).padStart(2, '0')} ${h >= 12 ? 'PM' : 'AM'}`;
+  }
+  return s;
+}
+
+// Append one line to a project's activity/edit history (best-effort). Keeps the
+// actor's name as a snapshot so the log reads correctly even if they leave.
+async function logActivity(eventId, actor, text) {
+  let actorName = actor?.name;
+  if (!actorName && actor?.id) actorName = (await prisma.user.findUnique({ where: { id: actor.id }, select: { name: true } }))?.name || '';
+  await prisma.eventActivity.create({ data: { eventId, actorId: actor?.id || null, actorName: actorName || '', text } }).catch(() => {});
+}
+
 // Shape a raw event row into an API payload (adds computed state + task summary).
 function shape(e) {
   const tasks = (e.tasks || []).map((t) => ({
@@ -78,7 +101,7 @@ function shape(e) {
   }));
   const done = tasks.filter((t) => t.completed).length;
   return {
-    id: e.id, name: e.name, ownerId: e.ownerId, owner: e.owner,
+    id: e.id, name: e.name, description: e.description || '', ownerId: e.ownerId, owner: e.owner,
     status: e.status, triggerMonth: e.triggerMonth, triggerDay: e.triggerDay,
     writeup: e.writeup, approval: e.approval, approverId: e.approverId, createdById: e.createdById,
     pendingOwnerId: e.pendingOwnerId, ownerApproverId: e.ownerApproverId,
@@ -157,14 +180,18 @@ export async function get(id) {
         orderBy: [{ date: 'asc' }, { time: 'asc' }],
         select: { id: true, title: true, date: true, time: true, mode: true, minutes: true, minutesFileUrl: true, owner: { select: { name: true } } },
       },
+      activities: { orderBy: { createdAt: 'desc' }, take: 40 },
     },
   });
   if (!e) throw new ApiError(404, 'Project not found');
-  return { ...shape(e), attachments: e.attachments, comments: e.comments, meetings: e.meetings };
+  return {
+    ...shape(e), attachments: e.attachments, comments: e.comments, meetings: e.meetings,
+    activity: e.activities.map((a) => ({ id: a.id, actorName: a.actorName, text: a.text, at: a.createdAt })),
+  };
 }
 
 export async function create(creator, payload) {
-  const { name, status, triggerMonth, triggerDay, writeup, tasks = [], attachments = [] } = payload;
+  const { name, description = '', status, triggerMonth, triggerDay, writeup, tasks = [], attachments = [] } = payload;
   if (!name?.trim()) throw new ApiError(400, 'Project name is required');
 
   // A dated project's tasks each need a due date on or after the trigger day.
@@ -201,6 +228,7 @@ export async function create(creator, payload) {
   const event = await prisma.event.create({
     data: {
       name: name.trim(),
+      description: (description || '').trim(),
       ownerId: creator.id,
       status: status || 'confirmed',
       triggerMonth: status === 'confirmed' ? triggerMonth : null,
@@ -417,25 +445,115 @@ export async function rejectAssignment(actor, taskId, { forUserId, reason } = {}
 // An assignee proposes a new deadline (offset from the project trigger + time,
 // same shape as dueOffset/dueTime); it waits for the Project Owner's decision.
 export async function requestExtension(actor, taskId, { dueOffset, dueTime } = {}) {
-  const task = await prisma.eventTask.findUnique({ where: { id: taskId }, include: { assignees: true } });
+  const task = await prisma.eventTask.findUnique({ where: { id: taskId }, include: { assignees: true, event: { select: { name: true, ownerId: true, triggerMonth: true, triggerDay: true, status: true } } } });
   if (!task) throw new ApiError(404, 'Task not found');
   if (!task.assignees.some((a) => a.userId === actor.id)) throw new ApiError(403, 'Only an assignee can request an extension');
-  return prisma.eventTask.update({
+  const updated = await prisma.eventTask.update({
     where: { id: taskId },
     data: { extReqOffset: dueOffset ?? null, extReqTime: dueTime ?? null, extReqById: actor.id, extReqStatus: 'pending' },
   });
+  // Surface to the owner: the Approvals page picks it up, and we email them too.
+  const by = (await prisma.user.findUnique({ where: { id: actor.id }, select: { name: true } }))?.name;
+  notifyExtensionRequest(task.event.ownerId, { task: task.name, project: task.event.name, by, newDate: fmtDueText(task.event, dueOffset, dueTime) });
+  return updated;
 }
 
 // The Project Owner (or admin) approves/rejects a pending extension. On approve
 // the task's due date becomes the proposed one; either way the request clears.
 export async function decideExtension(actor, taskId, decision) {
-  const task = await prisma.eventTask.findUnique({ where: { id: taskId }, include: { event: { select: { ownerId: true } } } });
+  const task = await prisma.eventTask.findUnique({ where: { id: taskId }, include: { event: { select: { id: true, ownerId: true, triggerMonth: true, triggerDay: true, status: true } } } });
   if (!task) throw new ApiError(404, 'Task not found');
   if (task.extReqStatus !== 'pending') throw new ApiError(409, 'No pending extension request');
   if (task.event.ownerId !== actor.id && !canAdmin(actor)) throw new ApiError(403, 'Only the project owner can decide extension requests');
   const clear = { extReqOffset: null, extReqTime: null, extReqById: null, extReqStatus: null };
   const data = decision === 'approved' ? { dueOffset: task.extReqOffset, dueTime: task.extReqTime, ...clear } : clear;
-  return prisma.eventTask.update({ where: { id: taskId }, data });
+  const updated = await prisma.eventTask.update({ where: { id: taskId }, data });
+  if (decision === 'approved') await logActivity(task.eventId, actor, `extended “${task.name}” to ${fmtDueText(task.event, task.extReqOffset, task.extReqTime)}`);
+  return updated;
+}
+
+// Pending extension requests on tasks in projects I own (Approvals queue).
+export async function extensionApprovals(ownerId) {
+  const tasks = await prisma.eventTask.findMany({
+    where: { extReqStatus: 'pending', event: { ownerId } },
+    include: {
+      event: { select: { id: true, name: true, triggerMonth: true, triggerDay: true, status: true } },
+      assignees: { include: { user: { select: { id: true, name: true } } } },
+    },
+    orderBy: { id: 'asc' },
+  });
+  return tasks.map((t) => ({
+    taskId: t.id, taskName: t.name, projectId: t.eventId, projectName: t.event.name,
+    currentDue: fmtDueText(t.event, t.dueOffset, t.dueTime),
+    requestedDue: fmtDueText(t.event, t.extReqOffset, t.extReqTime),
+    requestedBy: t.assignees.find((a) => a.userId === t.extReqById)?.user.name || 'an assignee',
+  }));
+}
+
+// Edit a project (owner/admin): name, description, status, trigger date. Logs
+// each meaningful change to the activity history.
+export async function update(actor, id, patch = {}) {
+  const e = await prisma.event.findUnique({ where: { id } });
+  if (!e) throw new ApiError(404, 'Project not found');
+  if (e.ownerId !== actor.id && !canAdmin(actor)) throw new ApiError(403, 'Only the project owner can edit this project');
+  const data = {};
+  const logs = [];
+  if (patch.name !== undefined && patch.name.trim() && patch.name.trim() !== e.name) {
+    data.name = patch.name.trim();
+    logs.push(`renamed the project to “${data.name}”`);
+  }
+  if (patch.description !== undefined && (patch.description || '').trim() !== (e.description || '')) {
+    data.description = (patch.description || '').trim();
+    logs.push('edited the description');
+  }
+  if (patch.status !== undefined && patch.status !== e.status) {
+    data.status = patch.status;
+    if (patch.status !== 'confirmed') { data.triggerMonth = null; data.triggerDay = null; }
+    logs.push(patch.status === 'confirmed' ? 'set a fixed date' : 'set the date to TBD');
+  }
+  const statusNow = data.status ?? e.status;
+  if (statusNow === 'confirmed' && (patch.triggerMonth !== undefined || patch.triggerDay !== undefined)) {
+    const m = patch.triggerMonth ?? e.triggerMonth;
+    const d = Math.min(31, Math.max(1, patch.triggerDay ?? e.triggerDay ?? 1));
+    if (m !== e.triggerMonth || d !== e.triggerDay) {
+      data.triggerMonth = m; data.triggerDay = d;
+      logs.push(`changed the trigger date to ${MON[(m || 1) - 1]} ${d}`);
+    }
+  }
+  if (Object.keys(data).length) {
+    await prisma.event.update({ where: { id }, data });
+    for (const t of logs) await logActivity(id, actor, t);
+  }
+  return get(id);
+}
+
+// Edit a project task (owner/admin): name and/or due date. Logs the change.
+export async function updateTask(actor, taskId, patch = {}) {
+  const t = await prisma.eventTask.findUnique({ where: { id: taskId }, include: { event: { select: { id: true, ownerId: true, status: true, triggerMonth: true, triggerDay: true } } } });
+  if (!t) throw new ApiError(404, 'Task not found');
+  if (t.event.ownerId !== actor.id && !canAdmin(actor)) throw new ApiError(403, 'Only the project owner can edit tasks');
+  const data = {};
+  const logs = [];
+  const newName = patch.name !== undefined ? patch.name.trim() : t.name;
+  if (patch.name !== undefined && newName && newName !== t.name) {
+    data.name = newName;
+    logs.push(`renamed task “${t.name}” to “${newName}”`);
+  }
+  const dated = t.event.status === 'confirmed' && !!t.event.triggerMonth;
+  if (dated && (patch.dueOffset !== undefined || patch.dueTime !== undefined)) {
+    const off = patch.dueOffset !== undefined ? patch.dueOffset : t.dueOffset;
+    const tm = patch.dueTime !== undefined ? patch.dueTime : t.dueTime;
+    if (off != null && off < 0) throw new ApiError(400, 'Due date can’t be before the project date');
+    if (off !== t.dueOffset || tm !== t.dueTime) {
+      data.dueOffset = off; data.dueTime = tm;
+      logs.push(`changed “${newName}” due date to ${fmtDueText(t.event, off, tm)}`);
+    }
+  }
+  if (Object.keys(data).length) {
+    await prisma.eventTask.update({ where: { id: taskId }, data });
+    for (const l of logs) await logActivity(t.eventId, actor, l);
+  }
+  return get(t.eventId);
 }
 
 // Reassign a project task: the project owner adds new recipients. Each new

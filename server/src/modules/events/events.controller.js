@@ -108,6 +108,21 @@ export async function remove(req, res, next) {
   catch (e) { next(e); }
 }
 
+export async function update(req, res, next) {
+  try { res.json({ data: await service.update(req.user, req.params.id, req.body || {}), error: null }); }
+  catch (e) { next(e); }
+}
+
+export async function updateTask(req, res, next) {
+  try { res.json({ data: await service.updateTask(req.user, req.params.taskId, req.body || {}), error: null }); }
+  catch (e) { next(e); }
+}
+
+export async function extensionApprovals(req, res, next) {
+  try { res.json({ data: await service.extensionApprovals(req.user.id), error: null }); }
+  catch (e) { next(e); }
+}
+
 export async function removeTask(req, res, next) {
   try { res.json({ data: await service.removeTask(req.user, req.params.taskId), error: null }); }
   catch (e) { next(e); }

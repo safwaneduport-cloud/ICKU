@@ -9,26 +9,37 @@ import DueDatePicker from './DueDatePicker.jsx';
 // Shared by Tasks & Events and the Institutional Calendar (which prefills the
 // date from the clicked day). The footer is sticky so Create is always reachable,
 // and the people picker expands inline so it can't cover it.
+// A new task's default due: today at 6 PM, expressed as an offset from the
+// project's trigger date (clamped to 0 if today is before the trigger).
+const todayDue = (m, d) => {
+  const anchor = anchorDate(m, Math.min(31, Math.max(1, parseInt(d, 10) || 1)));
+  const now = new Date();
+  const off = Math.round((new Date(now.getFullYear(), now.getMonth(), now.getDate()) - new Date(anchor.getFullYear(), anchor.getMonth(), anchor.getDate())) / 86400000);
+  return { dueOffset: Math.max(0, off), dueTime: '18:00' };
+};
+
 export default function NewEventModal({ onClose, onCreated, initialMonth, initialDay }) {
   const qc = useQueryClient();
   const [name, setName] = useState('');
+  const [description, setDescription] = useState('');
   const [dated, setDated] = useState(true);
   const [month, setMonth] = useState(initialMonth ?? 7);
   const [day, setDay] = useState(initialDay ?? 1);
   const [writeup, setWriteup] = useState('');
   const [sop, setSop] = useState([]); // SOP PDFs + links -> event attachments
-  const [tasks, setTasks] = useState([{ name: '', assignees: [], dueOffset: null, dueTime: null }]);
+  const [tasks, setTasks] = useState([{ name: '', assignees: [], ...todayDue(initialMonth ?? 7, initialDay ?? 1) }]);
   const taskRefs = useRef([]);
 
   const setTask = (i, patch) => setTasks((ts) => ts.map((t, idx) => (idx === i ? { ...t, ...patch } : t)));
   const addTask = (focusIt = true) => {
-    setTasks((ts) => [...ts, { name: '', assignees: [], dueOffset: null, dueTime: null }]);
+    setTasks((ts) => [...ts, { name: '', assignees: [], ...todayDue(month, day) }]);
     if (focusIt) setTimeout(() => taskRefs.current[tasks.length]?.focus(), 0);
   };
 
   const mut = useMutation({
     mutationFn: () => createEvent({
       name: name.trim(),
+      description: description.trim(),
       status: dated ? 'confirmed' : 'tbd',
       triggerMonth: dated ? month : null,
       // day may be '' while the field is being edited — settle it here too.
@@ -95,8 +106,14 @@ export default function NewEventModal({ onClose, onCreated, initialMonth, initia
           )}
         </div>
 
+        <label className="mt-3 block text-sm"><span className="text-ink-soft">Description <span className="text-xs">(optional)</span></span>
+          <textarea value={description} onChange={(e) => setDescription(e.target.value)} rows={2}
+            placeholder="A short summary of what this project is about"
+            className="mt-1 w-full rounded-lg border border-line px-3 py-2 text-sm outline-none focus:border-pine" />
+        </label>
+
         <div className="mt-3 text-sm">
-          <span className="text-ink-soft">SOP write-up</span>
+          <span className="text-ink-soft">SOP write-up <span className="text-xs">(optional)</span></span>
           <div className="mt-1">
             <SopFields writeup={writeup} onWriteup={setWriteup} attachments={sop} onAttachments={setSop} />
           </div>

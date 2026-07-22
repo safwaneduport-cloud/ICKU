@@ -15,6 +15,7 @@ router.get('/task-stats', ctrl.taskMonthStats); // ?userId&year&month — monthl
 router.get('/task-pending', ctrl.taskPending); // ?userId — currently-pending tasks
 router.get('/task-approvals', ctrl.taskApprovals); // project-task assignments pending my approval
 router.get('/owner-approvals', ctrl.ownerApprovals); // ownership transfers pending my approval
+router.get('/extension-approvals', ctrl.extensionApprovals); // deadline-extension requests on my projects
 router.post('/', ctrl.create);
 router.get('/:id', ctrl.get);
 router.post('/:id/approve', ctrl.approve);
@@ -24,7 +25,9 @@ router.post('/:id/tasks', ctrl.addTask); // add a task to an existing project
 router.post('/:id/owner/decision/:decision', ctrl.decideOwnerTransfer); // approve/reject a held transfer
 router.patch('/:id/sop', ctrl.updateSop);
 router.post('/:id/comments', ctrl.addComment);
+router.patch('/tasks/:taskId', ctrl.updateTask); // owner edits a task (name / due date)
 router.delete('/tasks/:taskId', ctrl.removeTask); // owner deletes a project task
+router.patch('/:id', ctrl.update); // owner edits the project (name / date / description)
 router.delete('/:id', ctrl.remove); // owner deletes a whole project
 router.post('/tasks/:taskId/toggle', ctrl.toggleTask);
 router.post('/tasks/:taskId/reject-assignment', ctrl.rejectAssignment);
