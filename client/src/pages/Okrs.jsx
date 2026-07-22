@@ -8,6 +8,9 @@ import {
   getChecklist, addChecklistItem, updateChecklistItem, deleteChecklistItem, toggleChecklistItem, getPendingChecklist,
   getChecklistHistory, restoreChecklistItem,
 } from '../api/personal.api.js';
+import { getTaskList, toggleTask } from '../api/events.api.js';
+import { getMyTasks, toggleDirectTask } from '../api/directTasks.api.js';
+import { STATE, dueLabel } from '../features/events/meta.js';
 
 const MONTHS = ['Jan', 'Feb', 'Mar', 'Apr', 'May', 'Jun', 'Jul', 'Aug', 'Sep', 'Oct', 'Nov', 'Dec'];
 const FREQS = ['Daily', 'Weekly', 'Monthly', 'Yearly'];
@@ -281,12 +284,120 @@ function ChecklistTab({ userId, isSelf, reports = [] }) {
         ))}
       </div>
 
+      {/* The viewer's own tasks, mirrored from Projects and Tasks. Only shown when
+          looking at your own page — ticking here can only mark your own tasks done. */}
+      {isSelf && <TaskChecklists />}
+
       {confirm && (
         <ConfirmModal title="Delete this checklist item?" body={confirm.text}
           onCancel={() => setConfirm(null)}
           onConfirm={() => { del.mutate(confirm.id); setConfirm(null); }} />
       )}
     </div>
+  );
+}
+
+// ── Task Checklists ──
+// The same tasks as Projects and Tasks (project + ad-hoc, assigned to me), shown
+// as a tickable checklist. Status is two-way synced: these queries share the same
+// cache keys as that page, and a toggle here broadly invalidates both. Filters
+// mirror the Tasks view — Undated is a projects-only concept, so undated tasks
+// surface only under "All".
+const TASK_FILTERS = [['overdue', 'Overdue'], ['current', 'Current'], ['upcoming', 'Upcoming'], ['completed', 'Completed'], ['all', 'All']];
+const countTaskStates = (rows) => rows.reduce((a, r) => { a[r.state] = (a[r.state] || 0) + 1; a.all += 1; return a; }, { all: 0 });
+const directDueDate = (t) => (t.dueDate ? (() => { const d = new Date(`${t.dueDate}T${t.dueTime || '00:00'}:00`); return isNaN(d) ? null : d; })() : null);
+const taskDueText = (r) => {
+  if (r.kind === 'project') return dueLabel({ status: r.eventStatus, triggerMonth: r.triggerMonth, triggerDay: r.triggerDay }, r);
+  const d = directDueDate(r.raw);
+  if (!d) return '';
+  const date = d.toLocaleDateString([], { month: 'short', day: 'numeric' });
+  return r.raw.dueTime ? `${date}, ${d.toLocaleTimeString([], { hour: 'numeric', minute: '2-digit' })}` : date;
+};
+
+function TaskChecklists() {
+  const { user } = useAuth();
+  const qc = useQueryClient();
+  // Shared keys with Projects and Tasks so the two views stay in lock-step.
+  const projQ = useQuery({ queryKey: ['task-list', 'all', true], queryFn: () => getTaskList('all', true), retry: false });
+  const dirQ = useQuery({ queryKey: ['direct-tasks-mine'], queryFn: getMyTasks, retry: false });
+  const [filter, setFilter] = useState('all');
+
+  const invalidate = () => {
+    qc.invalidateQueries({ queryKey: ['task-list'] });
+    qc.invalidateQueries({ queryKey: ['direct-tasks-mine'] });
+    qc.invalidateQueries({ queryKey: ['direct-tasks-assigned'] });
+    qc.invalidateQueries({ queryKey: ['events'] });
+  };
+  const toggleProj = useMutation({ mutationFn: toggleTask, onSuccess: invalidate });
+  const toggleDir = useMutation({ mutationFn: toggleDirectTask, onSuccess: invalidate });
+
+  const now = new Date();
+  const rows = [
+    ...(projQ.data || []).map((t) => ({
+      key: `p${t.taskId}`, kind: 'project', id: t.taskId, title: t.name, sub: t.projectName,
+      completed: t.completed, overdue: t.overdue, state: t.state,
+      eventStatus: t.eventStatus, triggerMonth: t.triggerMonth, triggerDay: t.triggerDay, dueOffset: t.dueOffset, dueTime: t.dueTime,
+    })),
+    ...(dirQ.data || [])
+      .filter((t) => (t.assignees?.find((a) => a.id === user?.id) || {}).status !== 'rejected')
+      .map((t) => {
+        const d = directDueDate(t);
+        const overdue = !t.completed && !!d && d < now;
+        const state = t.completed ? 'completed' : overdue ? 'overdue' : (!d || d <= now) ? 'current' : 'upcoming';
+        return { key: `d${t.id}`, kind: 'direct', id: t.id, title: t.title, sub: 'Direct task', completed: t.completed, overdue, state, raw: t };
+      }),
+  ];
+  const order = { overdue: 0, current: 1, upcoming: 2, undated: 3, completed: 4 };
+  rows.sort((a, b) => (order[a.state] - order[b.state]) || a.title.localeCompare(b.title));
+  const counts = countTaskStates(rows);
+  const shown = filter === 'all' ? rows : rows.filter((r) => r.state === filter);
+  const loading = projQ.isLoading || dirQ.isLoading;
+
+  return (
+    <section className="rounded-2xl border border-line bg-white p-5">
+      <div className="flex flex-wrap items-baseline justify-between gap-2">
+        <h2 className="font-serif text-lg font-semibold text-pine">Task Checklists</h2>
+        <span className="text-xs text-ink-soft">Your tasks from Projects and Tasks — tick to complete, synced both ways</span>
+      </div>
+
+      {/* Status filters, with per-filter counts (mirrors Projects and Tasks) */}
+      <div className="mt-3 flex flex-wrap items-center gap-1.5">
+        {TASK_FILTERS.map(([f, label]) => {
+          const active = filter === f;
+          return (
+            <button key={f} onClick={() => setFilter(f)}
+              className={`flex items-center gap-1.5 rounded-full px-3 py-1 text-sm ${active ? 'bg-pine text-white' : 'border border-line bg-white text-ink-soft hover:border-pine'}`}>
+              {label}
+              <span className={`inline-flex min-w-[1.15rem] justify-center rounded-full px-1 text-[10px] font-semibold tabular-nums ${active ? 'bg-white/25 text-white' : 'bg-line/60 text-ink-soft'}`}>{counts[f] || 0}</span>
+            </button>
+          );
+        })}
+      </div>
+
+      <div className="mt-3 space-y-1.5">
+        {loading && <p className="py-4 text-sm text-ink-soft">Loading…</p>}
+        {!loading && shown.length === 0 && <p className="py-6 text-center text-sm text-ink-soft">Nothing here.</p>}
+        {shown.map((r) => {
+          const st = STATE[r.state] || STATE.current;
+          const busy = (r.kind === 'project' ? toggleProj : toggleDir).isPending;
+          const due = taskDueText(r);
+          return (
+            <div key={r.key} className="flex items-center gap-2.5 border-b border-line/60 py-1.5 last:border-0">
+              <button onClick={() => (r.kind === 'project' ? toggleProj : toggleDir).mutate(r.id)} disabled={busy}
+                title={r.completed ? 'Mark not done' : 'Mark done'}
+                className={`flex h-4 w-4 shrink-0 items-center justify-center rounded-full border text-[10px] ${r.completed ? 'border-sage bg-sage text-white' : r.overdue ? 'border-brick' : 'border-line'} disabled:opacity-50`}>
+                {r.completed ? '✓' : ''}
+              </button>
+              <span className={`min-w-0 flex-1 truncate text-sm ${r.completed ? 'text-ink-soft line-through' : r.overdue ? 'text-brick' : ''}`}>
+                {r.title} <span className="text-ink-soft">· {r.sub}</span>
+              </span>
+              {due && <span className="hidden shrink-0 text-[11px] text-ink-soft sm:inline">{due}</span>}
+              <span className="shrink-0 rounded-full px-2 py-0.5 text-[10px] font-semibold" style={{ color: st.c, backgroundColor: st.b }}>{st.label}</span>
+            </div>
+          );
+        })}
+      </div>
+    </section>
   );
 }
 
