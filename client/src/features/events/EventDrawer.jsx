@@ -3,6 +3,7 @@ import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query';
 import { useAuth } from '../../store/AuthContext.jsx';
 import { getEvent, toggleTask, updateEventSop, rejectAssignment, requestExtension, decideExtension, changeEventOwner, addTaskAssignees, removeTaskAssignee, addProjectTask, deleteEvent, deleteProjectTask, updateEvent, updateProjectTask } from '../../api/events.api.js';
 import { getUsers } from '../../api/users.api.js';
+import { groupByDept } from '../../lib/orgGroups.js';
 import ReassignControl from '../tasks/ReassignControl.jsx';
 import AssignPicker from './AssignPicker.jsx';
 import { STATE, MONTHS, triggerLabel, dueLabel, anchorDate } from './meta.js';
@@ -380,29 +381,55 @@ function AddTaskForm({ e, onAdded }) {
 function OwnerControl({ e, user, onDone }) {
   const isAdmin = user?.id === 'ceo' || user?.id === 'EP002' || user?.role === 'HR Head';
   const canTransfer = e.ownerId === user?.id || isAdmin;
-  const usersQ = useQuery({ queryKey: ['users'], queryFn: getUsers, retry: false, enabled: canTransfer || !!e.pendingOwnerId });
+  const [open, setOpen] = useState(false);
+  const [q, setQ] = useState('');
+  // Lazy: only pull the (large) directory once the picker is opened.
+  const usersQ = useQuery({ queryKey: ['users'], queryFn: getUsers, retry: false, enabled: (canTransfer && open) || !!e.pendingOwnerId });
   const move = useMutation({ mutationFn: (ownerId) => changeEventOwner(e.id, ownerId), onSuccess: onDone });
   const nameOf = (id) => (usersQ.data || []).find((u) => u.id === id)?.name || id;
 
   if (!canTransfer && !e.pendingOwnerId) return null;
+  const groups = groupByDept((usersQ.data || []).filter((u) => u.id !== e.ownerId), q);
+
   return (
     <section className="mt-4 rounded-2xl border border-line bg-white p-4">
-      <div className="text-xs font-semibold uppercase tracking-wide text-ink-soft">Ownership</div>
+      <div className="flex items-center justify-between">
+        <div className="text-xs font-semibold uppercase tracking-wide text-ink-soft">Ownership</div>
+        {canTransfer && !e.pendingOwnerId && (
+          <button onClick={() => { setOpen((v) => !v); setQ(''); }} className="text-xs font-medium text-pine hover:underline">{open ? 'Cancel' : 'Change owner'}</button>
+        )}
+      </div>
       {e.pendingOwnerId ? (
         <p className="mt-2 text-sm text-ochre">⏳ Transfer to {nameOf(e.pendingOwnerId)} is pending their manager's approval. The project stays with {e.owner?.name || '—'} until then.</p>
-      ) : canTransfer ? (
-        <>
-          <div className="mt-2 flex items-center gap-2 text-sm">
-            <span className="text-ink-soft">Change owner:</span>
-            <select defaultValue={e.ownerId} disabled={move.isPending}
-              onChange={(ev) => ev.target.value !== e.ownerId && move.mutate(ev.target.value)}
-              className="rounded border border-line px-2 py-1 text-xs">
-              {(usersQ.data || []).map((u) => <option key={u.id} value={u.id}>{u.name}</option>)}
-            </select>
+      ) : (
+        <p className="mt-1 text-sm text-ink">Current owner · <span className="font-medium">{e.owner?.name || '—'}</span></p>
+      )}
+
+      {open && canTransfer && !e.pendingOwnerId && (
+        <div className="mt-2">
+          {/* Same searchable, department-grouped picker as task assignment. */}
+          <input value={q} onChange={(ev) => setQ(ev.target.value)} autoFocus placeholder="Search name, role or department…"
+            className="w-full rounded-lg border border-line px-3 py-2 text-sm outline-none focus:border-pine" />
+          <div className="mt-1 max-h-60 overflow-y-auto rounded-lg border border-line">
+            {usersQ.isLoading && <p className="px-3 py-2 text-xs text-ink-soft">Loading people…</p>}
+            {!usersQ.isLoading && groups.length === 0 && <p className="px-3 py-2 text-xs text-ink-soft">No matches.</p>}
+            {groups.map(([dept, members]) => (
+              <div key={dept}>
+                <div className="sticky top-0 bg-paper px-2 py-1 text-[11px] font-semibold uppercase tracking-wide text-ink-soft">{dept} · {members.length}</div>
+                {members.map((u) => (
+                  <button key={u.id} disabled={move.isPending}
+                    onClick={() => move.mutate(u.id, { onSuccess: () => { setOpen(false); setQ(''); } })}
+                    className="flex w-full items-center justify-between gap-2 px-3 py-2 text-left text-sm hover:bg-pine-tint disabled:opacity-50">
+                    <span className="truncate">{u.name}</span>
+                    <span className="shrink-0 truncate text-xs text-ink-soft">{u.role}</span>
+                  </button>
+                ))}
+              </div>
+            ))}
           </div>
           <p className="mt-1 text-[11px] text-ink-soft">If the new owner's projects need approval, the transfer waits for their manager.</p>
-        </>
-      ) : null}
+        </div>
+      )}
     </section>
   );
 }

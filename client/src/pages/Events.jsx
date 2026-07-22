@@ -1,10 +1,10 @@
-import { useMemo, useState } from 'react';
+import { useEffect, useMemo, useState } from 'react';
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query';
-import { getEvents, getTaskList, deleteEvent } from '../api/events.api.js';
+import { getEvents, getTaskList, deleteEvent, toggleTask } from '../api/events.api.js';
 import { getMyTasks, getTasksIAssigned, toggleDirectTask, rejectDirectAssignment, deleteDirectTask, addDirectAssignees, removeDirectAssignee } from '../api/directTasks.api.js';
 import ReassignControl from '../features/tasks/ReassignControl.jsx';
 import { useAuth } from '../store/AuthContext.jsx';
-import { STATE, FILTERS, triggerLabel, dueLabel, taskDueDate, MONTHS, ymd } from '../features/events/meta.js';
+import { STATE, triggerLabel, dueLabel, taskDueDate, MONTHS, ymd } from '../features/events/meta.js';
 import EventDrawer from '../features/events/EventDrawer.jsx';
 import NewEventModal from '../features/events/NewEventModal.jsx';
 import AssignTaskModal from '../features/tasks/AssignTaskModal.jsx';
@@ -12,14 +12,22 @@ import AssignTaskModal from '../features/tasks/AssignTaskModal.jsx';
 const DOW = ['Sun', 'Mon', 'Tue', 'Wed', 'Thu', 'Fri', 'Sat'];
 const isCeoAdmin = (u) => u?.id === 'ceo' || u?.id === 'EP002' || u?.role === 'HR Head';
 
-function Badge({ state }) {
+// The status colour is the primary signal on every card — so this badge is bold.
+function StatusBadge({ state }) {
   const m = STATE[state] || STATE.upcoming;
-  return <span className="rounded px-2 py-0.5 text-xs font-medium" style={{ color: m.c, background: m.b }}>{m.label}</span>;
+  return <span className="shrink-0 rounded-full px-2.5 py-1 text-xs font-semibold" style={{ color: m.c, background: m.b }}>{m.label}</span>;
 }
-function Dot({ state }) {
-  const m = STATE[state] || STATE.upcoming;
-  return <span className="inline-block h-2 w-2 shrink-0 rounded-full" style={{ background: m.c }} />;
-}
+
+// Filter chips — the order people asked for: what needs attention first, All last.
+// Undated only applies to projects (every task lands on a date or is "current").
+const TASK_FILTERS = [['overdue', 'Overdue'], ['current', 'Current'], ['upcoming', 'Upcoming'], ['completed', 'Completed'], ['all', 'All']];
+const PROJ_FILTERS = [['overdue', 'Overdue'], ['current', 'Current'], ['upcoming', 'Upcoming'], ['completed', 'Completed'], ['undated', 'Undated'], ['all', 'All']];
+
+const countByState = (list) => {
+  const c = { overdue: 0, current: 0, upcoming: 0, completed: 0, undated: 0, all: list.length };
+  for (const x of list) if (c[x.state] !== undefined) c[x.state] += 1;
+  return c;
+};
 
 // Absolute due for a flat project-task row (from the Tasks-view backend shape).
 const projTaskDue = (t) => taskDueDate({ status: t.eventStatus, triggerMonth: t.triggerMonth, triggerDay: t.triggerDay }, t);
@@ -69,24 +77,25 @@ function directRow(t, { toMe, byMe }) {
 
 export default function Events() {
   const { user } = useAuth();
-  const [view, setView] = useState('board'); // 'board' (Projects) | 'tasks' | 'calendar'
+  const [view, setView] = useState('projects'); // 'projects' | 'tasks'
+  const [taskView, setTaskView] = useState('list'); // 'list' | 'calendar' — inside Tasks
   const [filter, setFilter] = useState('all');
-  const [scope, setScope] = useState('me'); // 'me' | 'by' | 'all' — Tasks + Calendar
-  const [projScope, setProjScope] = useState('mine'); // 'mine' | 'all' — Projects view
+  const [scope, setScope] = useState('me'); // 'me' | 'by' | 'all' — Tasks
+  const [projScope, setProjScope] = useState('mine'); // 'mine' | 'all' — Projects
   const [openId, setOpenId] = useState(null);
   const [showNew, setShowNew] = useState(false);
   const [showNewTask, setShowNewTask] = useState(false);
 
-  const qc = useQueryClient();
-  // Projects view: My projects (owned or I'm assigned) vs every project in the org.
-  const projectsQ = useQuery({ queryKey: ['events', filter, projScope], queryFn: () => getEvents(filter, projScope === 'mine'), retry: false, enabled: view === 'board' });
-  // Tasks + Calendar read all project tasks for the filter, then split to/by client-side.
-  const needTasks = view === 'tasks' || view === 'calendar';
-  const projTasksQ = useQuery({ queryKey: ['task-list', filter, false], queryFn: () => getTaskList(filter, false), retry: false, enabled: needTasks });
-  const myDirectQ = useQuery({ queryKey: ['direct-tasks-mine'], queryFn: getMyTasks, retry: false, enabled: needTasks });
-  const iAssignedQ = useQuery({ queryKey: ['direct-tasks-assigned'], queryFn: getTasksIAssigned, retry: false, enabled: needTasks });
+  // Undated only exists for projects — don't leave it stuck when moving to Tasks.
+  useEffect(() => { if (view === 'tasks' && filter === 'undated') setFilter('all'); }, [view]); // eslint-disable-line
 
-  const projects = projectsQ.data || [];
+  const qc = useQueryClient();
+  // Fetch the full set (no server-side state filter) so we can show per-filter counts.
+  const projectsQ = useQuery({ queryKey: ['events', 'all', projScope], queryFn: () => getEvents('all', projScope === 'mine'), retry: false, enabled: view === 'projects' });
+  const projTasksQ = useQuery({ queryKey: ['task-list', 'all', false], queryFn: () => getTaskList('all', false), retry: false, enabled: view === 'tasks' });
+  const myDirectQ = useQuery({ queryKey: ['direct-tasks-mine'], queryFn: getMyTasks, retry: false, enabled: view === 'tasks' });
+  const iAssignedQ = useQuery({ queryKey: ['direct-tasks-assigned'], queryFn: getTasksIAssigned, retry: false, enabled: view === 'tasks' });
+
   const invalidateTasks = () => {
     qc.invalidateQueries({ queryKey: ['task-list'] });
     qc.invalidateQueries({ queryKey: ['direct-tasks-mine'] });
@@ -94,17 +103,13 @@ export default function Events() {
     qc.invalidateQueries({ queryKey: ['events'] });
   };
 
-  // Unified rows for the active scope:
-  //  · To me  = tasks assigned to me (incl. ones I assigned to myself)
-  //  · By me  = tasks I handed to someone else (excludes self-only assignments)
-  //  · All    = To me ∪ By me (everything involving me, deduped)
+  // Unified rows for the active scope (To me / By me / All), all states.
   const rows = useMemo(() => {
     const uid = user?.id;
-    const soleMe = (as = []) => as.length > 0 && as.every((a) => a.id === uid); // assigned only to myself
+    const soleMe = (as = []) => as.length > 0 && as.every((a) => a.id === uid);
     const pt = (projTasksQ.data || []);
     const mine = (myDirectQ.data || []).filter((t) => (t.assignees?.find((a) => a.id === uid) || {}).status !== 'rejected');
     const assigned = (iAssignedQ.data || []);
-    // project tasks: assigned to me → To me; in a project I own & handed out → By me
     const isByMeProj = (t) => t.ownerId === uid && !soleMe(t.assignees);
     if (scope === 'me') {
       return [...pt.filter((t) => t.mine).map((t) => projectRow(t, uid)), ...mine.map((t) => directRow(t, { toMe: true, byMe: false }))];
@@ -112,7 +117,6 @@ export default function Events() {
     if (scope === 'by') {
       return [...pt.filter(isByMeProj).map((t) => projectRow(t, uid)), ...assigned.filter((t) => !soleMe(t.assignees)).map((t) => directRow(t, { toMe: false, byMe: true }))];
     }
-    // all = to me ∪ by me
     const projRows = pt.filter((t) => t.mine || isByMeProj(t)).map((t) => projectRow(t, uid));
     const seen = new Set();
     const direct = [];
@@ -124,10 +128,16 @@ export default function Events() {
   const order = { overdue: 0, current: 1, upcoming: 2, undated: 3, completed: 4 };
   const sortedRows = useMemo(() => [...rows].sort((a, b) => (order[a.state] - order[b.state]) || ((a.dueAt?.getTime() || Infinity) - (b.dueAt?.getTime() || Infinity)) || a.title.localeCompare(b.title)), [rows]);
 
-  const loading = view === 'board' ? projectsQ.isLoading : (projTasksQ.isLoading || myDirectQ.isLoading || iAssignedQ.isLoading);
+  const projects = projectsQ.data || [];
+  // Per-filter counts + the state-filtered view of the current dataset.
+  const counts = view === 'projects' ? countByState(projects) : countByState(rows);
+  const shownProjects = filter === 'all' ? projects : projects.filter((p) => p.state === filter);
+  const shownRows = filter === 'all' ? sortedRows : sortedRows.filter((r) => r.state === filter);
+  const filterList = view === 'projects' ? PROJ_FILTERS : TASK_FILTERS;
+  const loading = view === 'projects' ? projectsQ.isLoading : (projTasksQ.isLoading || myDirectQ.isLoading || iAssignedQ.isLoading);
 
   return (
-    <div className="space-y-5">
+    <div className="space-y-4">
       <div className="flex flex-wrap items-center justify-between gap-2">
         <h1 className="font-serif text-3xl font-bold text-pine">Projects and Tasks</h1>
         <div className="flex gap-2">
@@ -136,16 +146,16 @@ export default function Events() {
         </div>
       </div>
 
-      {/* View switch */}
-      <div className="flex flex-wrap items-center gap-3">
+      {/* Primary: Projects | Tasks */}
+      <div className="flex flex-wrap items-center gap-2 sm:gap-3">
         <div className="inline-flex rounded-lg border border-line bg-white p-0.5">
-          {[['board', '▤ Projects'], ['tasks', '☰ Tasks'], ['calendar', '🗓 Calendar']].map(([v, label]) => (
+          {[['projects', '▤ Projects'], ['tasks', '☰ Tasks']].map(([v, label]) => (
             <button key={v} onClick={() => setView(v)}
               className={`rounded-md px-3 py-1.5 text-sm font-medium ${view === v ? 'bg-pine text-white' : 'text-ink-soft hover:text-pine'}`}>{label}</button>
           ))}
         </div>
-        {/* Projects view: My projects / All projects */}
-        {view === 'board' && (
+
+        {view === 'projects' && (
           <div className="inline-flex rounded-lg border border-line bg-white p-0.5">
             {[['mine', 'My projects'], ['all', 'All projects']].map(([s, label]) => (
               <button key={s} onClick={() => setProjScope(s)}
@@ -153,35 +163,49 @@ export default function Events() {
             ))}
           </div>
         )}
-        {/* To me / By me / All — Tasks + Calendar */}
-        {view !== 'board' && (
-          <div className="inline-flex rounded-lg border border-line bg-white p-0.5">
-            {[['me', 'To me'], ['by', 'By me'], ['all', 'All']].map(([s, label]) => (
-              <button key={s} onClick={() => setScope(s)}
-                className={`rounded-md px-3 py-1.5 text-sm font-medium ${scope === s ? 'bg-pine text-white' : 'text-ink-soft hover:text-pine'}`}>{label}</button>
-            ))}
-          </div>
+
+        {view === 'tasks' && (
+          <>
+            {/* Calendar is a *view of* tasks, not a peer of Projects */}
+            <div className="inline-flex rounded-lg border border-line bg-white p-0.5">
+              {[['list', '☰ List'], ['calendar', '🗓 Calendar']].map(([v, label]) => (
+                <button key={v} onClick={() => setTaskView(v)}
+                  className={`rounded-md px-3 py-1.5 text-sm font-medium ${taskView === v ? 'bg-pine text-white' : 'text-ink-soft hover:text-pine'}`}>{label}</button>
+              ))}
+            </div>
+            <div className="inline-flex rounded-lg border border-line bg-white p-0.5">
+              {[['me', 'To me'], ['by', 'By me'], ['all', 'All']].map(([s, label]) => (
+                <button key={s} onClick={() => setScope(s)}
+                  className={`rounded-md px-3 py-1.5 text-sm font-medium ${scope === s ? 'bg-pine text-white' : 'text-ink-soft hover:text-pine'}`}>{label}</button>
+              ))}
+            </div>
+          </>
         )}
       </div>
 
-      {/* Filter chips (state) */}
-      <div className="flex flex-wrap items-center gap-2">
-        {FILTERS.map(([f, label]) => (
-          <button key={f} onClick={() => setFilter(f)}
-            className={`rounded-full px-3 py-1 text-sm ${filter === f ? 'bg-pine text-white' : 'border border-line bg-white text-ink-soft'}`}>{label}</button>
-        ))}
+      {/* Status filters, with per-filter counts */}
+      <div className="flex flex-wrap items-center gap-1.5">
+        {filterList.map(([f, label]) => {
+          const active = filter === f;
+          return (
+            <button key={f} onClick={() => setFilter(f)}
+              className={`flex items-center gap-1.5 rounded-full px-3 py-1 text-sm ${active ? 'bg-pine text-white' : 'border border-line bg-white text-ink-soft hover:border-pine'}`}>
+              {label}
+              <span className={`inline-flex min-w-[1.15rem] justify-center rounded-full px-1 text-[10px] font-semibold tabular-nums ${active ? 'bg-white/25 text-white' : 'bg-line/60 text-ink-soft'}`}>{counts[f] || 0}</span>
+            </button>
+          );
+        })}
       </div>
 
-      {view === 'board' && (
-        <BoardView projects={projects} loading={loading} userId={user?.id} isAdmin={isCeoAdmin(user)}
-          onOpen={setOpenId} onChanged={() => { qc.invalidateQueries({ queryKey: ['events'] }); }} />
+      {view === 'projects' && (
+        <BoardView projects={shownProjects} loading={loading} userId={user?.id} isAdmin={isCeoAdmin(user)}
+          onOpen={setOpenId} onChanged={() => qc.invalidateQueries({ queryKey: ['events'] })} />
       )}
-      {view === 'tasks' && (
-        <TasksView rows={sortedRows} scope={scope} loading={loading} userId={user?.id}
-          onOpenProject={setOpenId} onChanged={invalidateTasks} />
+      {view === 'tasks' && taskView === 'list' && (
+        <TasksView rows={shownRows} scope={scope} loading={loading} onOpenProject={setOpenId} onChanged={invalidateTasks} />
       )}
-      {view === 'calendar' && (
-        <TaskCalendar rows={rows.filter((r) => (filter === 'all' || r.state === filter))} loading={loading} onOpenProject={setOpenId} />
+      {view === 'tasks' && taskView === 'calendar' && (
+        <TaskCalendar rows={shownRows} loading={loading} onOpenProject={setOpenId} />
       )}
 
       {openId && <EventDrawer id={openId} onClose={() => setOpenId(null)} />}
@@ -191,29 +215,32 @@ export default function Events() {
   );
 }
 
-// ── Board: project list with owner-only delete ───────────────────────
+// ── Projects (Board): owner + completion prominent, trigger muted ─────
 function BoardView({ projects, loading, userId, isAdmin, onOpen, onChanged }) {
   const del = useMutation({ mutationFn: deleteEvent, onSuccess: onChanged });
   const [confirmId, setConfirmId] = useState(null);
   return (
     <div className="overflow-hidden rounded-2xl border border-line bg-white">
       {loading && <p className="px-4 py-6 text-ink-soft">Loading…</p>}
-      {!loading && projects.length === 0 && <p className="px-4 py-6 text-ink-soft">No projects match this filter.</p>}
+      {!loading && projects.length === 0 && <p className="px-4 py-8 text-center text-ink-soft">No projects match this filter.</p>}
       {projects.map((e) => {
         const canDelete = e.ownerId === userId || isAdmin;
         return (
           <div key={e.id} className="group flex items-stretch border-b border-line/60 last:border-0 hover:bg-paper">
             <CompletionBar done={e.tasksDone} total={e.tasksTotal} />
-            <button onClick={() => onOpen(e.id)} className="flex flex-1 flex-col gap-1 px-4 py-3 text-left sm:flex-row sm:items-center sm:gap-4">
-              <div className="flex items-center gap-2 sm:contents">
-                <div className="font-mono text-xs text-ink-soft sm:w-16 sm:shrink-0">{triggerLabel(e)}</div>
-                <div className="ml-auto sm:hidden"><Badge state={e.state} /></div>
-              </div>
+            <button onClick={() => onOpen(e.id)} className="flex min-w-0 flex-1 items-center gap-3 px-4 py-3 text-left">
               <div className="min-w-0 flex-1">
-                <div className="font-medium">{e.name}{e.approval === 'pending' && <span className="ml-2 rounded bg-ochre-tint px-1.5 py-0.5 text-[10px] font-medium text-ochre">pending</span>}</div>
-                <div className="text-xs text-ink-soft">Owner · {e.owner?.name || '—'}{e.tasksTotal ? ` · ${e.tasksDone}/${e.tasksTotal} tasks` : ''}</div>
+                <div className="truncate text-[15px] font-semibold">
+                  {e.name}
+                  {e.approval === 'pending' && <span className="ml-2 rounded bg-ochre-tint px-1.5 py-0.5 text-[10px] font-medium text-ochre">pending</span>}
+                </div>
+                <div className="mt-0.5 flex flex-wrap items-center gap-x-1.5 text-xs text-ink-soft">
+                  <span className="max-w-full truncate">Owner · <span className="font-medium text-ink">{e.owner?.name || '—'}</span></span>
+                  <span className="shrink-0">· {e.tasksTotal ? <><span className="font-medium text-ink">{e.tasksDone}/{e.tasksTotal}</span> tasks done</> : 'no tasks yet'}</span>
+                  <span className="shrink-0 font-mono text-ink-soft/80">· {triggerLabel(e)}</span>
+                </div>
               </div>
-              <div className="hidden sm:block"><Badge state={e.state} /></div>
+              <StatusBadge state={e.state} />
             </button>
             {canDelete && (
               <div className="flex items-center pr-3">
@@ -235,15 +262,12 @@ function BoardView({ projects, loading, userId, isAdmin, onOpen, onChanged }) {
   );
 }
 
-// ── Tasks: unified list, split by To me / By me / All ────────────────
-function TasksView({ rows, scope, loading, userId, onOpenProject }) {
+// ── Tasks list: colour-coded status, prominent due + source, completion box ─
+function TasksView({ rows, scope, loading, onOpenProject, onChanged }) {
   const qc = useQueryClient();
-  const invalidate = () => {
-    qc.invalidateQueries({ queryKey: ['task-list'] });
-    qc.invalidateQueries({ queryKey: ['direct-tasks-mine'] });
-    qc.invalidateQueries({ queryKey: ['direct-tasks-assigned'] });
-  };
-  const toggleDirect = useMutation({ mutationFn: toggleDirectTask, onSuccess: invalidate });
+  const invalidate = onChanged || (() => qc.invalidateQueries());
+  const toggleDir = useMutation({ mutationFn: toggleDirectTask, onSuccess: invalidate });
+  const toggleProj = useMutation({ mutationFn: toggleTask, onSuccess: invalidate });
   const rejectDirect = useMutation({ mutationFn: (id) => rejectDirectAssignment(id, {}), onSuccess: invalidate });
   const delDirect = useMutation({ mutationFn: deleteDirectTask, onSuccess: invalidate });
   const addAssignees = useMutation({ mutationFn: ({ id, userIds }) => addDirectAssignees(id, userIds), onSuccess: invalidate });
@@ -256,50 +280,64 @@ function TasksView({ rows, scope, loading, userId, onOpenProject }) {
   return (
     <div className="overflow-hidden rounded-2xl border border-line bg-white">
       {rows.map((r) => {
-        const showByLine = scope === 'by' || (scope === 'all' && r.byMe); // recipients shown in By-me / All, not in To-me
+        const canToggle = r.toMe || r.byMe;
+        const showTo = (scope === 'by' || (scope === 'all' && r.byMe)) && r.assignees?.length;
+        const meta = [];
+        if (r.kind === 'project' && r.ownerName) meta.push(`Owner · ${r.ownerName}`);
+        if (r.kind === 'direct' && r.by) meta.push(`by ${r.by}`);
+        if (showTo) meta.push(`to ${r.assignees.map((a) => a.name).join(', ')}`);
         return (
-          <div key={r.key} className="group flex items-center gap-3 border-b border-line/60 px-4 py-2.5 last:border-0 hover:bg-paper">
-            {/* status */}
-            {r.kind === 'direct' && r.toMe ? (
-              <button onClick={() => toggleDirect.mutate(r.id)} title="Mark done"
-                className={`flex h-4 w-4 shrink-0 items-center justify-center rounded-full border ${r.completed ? 'border-sage bg-sage text-white' : r.overdue ? 'border-brick' : 'border-line'}`}>{r.completed ? '✓' : ''}</button>
-            ) : <Dot state={r.state} />}
+          <div key={r.key} className="group border-b border-line/60 px-3 py-3 last:border-0 hover:bg-paper sm:px-4">
+            <div className="flex items-start gap-3">
+              <button disabled={!canToggle}
+                onClick={() => canToggle && (r.kind === 'direct' ? toggleDir.mutate(r.id) : toggleProj.mutate(r.id))}
+                title={canToggle ? (r.completed ? 'Mark not done' : 'Mark done') : 'Only the assignee or owner can update this'}
+                className={`mt-0.5 flex h-5 w-5 shrink-0 items-center justify-center rounded-full border-2 text-[11px] ${r.completed ? 'border-sage bg-sage text-white' : r.overdue ? 'border-brick text-brick' : 'border-line'} ${canToggle ? 'hover:border-sage' : 'cursor-default opacity-60'}`}>
+                {r.completed ? '✓' : ''}
+              </button>
 
-            <button onClick={() => r.kind === 'project' ? onOpenProject(r.projectId) : undefined}
-              className={`min-w-0 flex-1 text-left ${r.kind === 'project' ? 'cursor-pointer' : 'cursor-default'}`}>
-              <div className={`truncate font-medium ${r.completed ? 'text-ink-soft line-through' : r.overdue ? 'text-brick' : ''}`}>{r.title}</div>
-              <div className="truncate text-xs text-ink-soft">
-                <span className={r.kind === 'direct' ? 'text-ochre' : ''}>{r.kind === 'direct' ? 'Direct task' : r.projectName}</span>
-                {r.toMe && r.by ? ` · by ${r.by}` : ''}
-                {showByLine && r.assignees?.length ? ` · to ${r.assignees.map((a) => a.name).join(', ')}` : ''}
-                {r.dueText ? ` · due ${r.dueText}` : ''}
+              <div className="min-w-0 flex-1">
+                <div className="flex items-start justify-between gap-2">
+                  <button onClick={() => r.kind === 'project' && onOpenProject(r.projectId)}
+                    className={`min-w-0 text-left ${r.kind === 'project' ? '' : 'cursor-default'}`}>
+                    <span className={`block truncate text-[15px] font-semibold ${r.completed ? 'text-ink-soft line-through' : ''}`}>{r.title}</span>
+                  </button>
+                  <StatusBadge state={r.state} />
+                </div>
+
+                {/* prominent: source tag + due date/time */}
+                <div className="mt-1 flex flex-wrap items-center gap-x-2 gap-y-1 text-xs">
+                  {r.kind === 'direct'
+                    ? <span className="rounded bg-ochre-tint/50 px-1.5 py-0.5 font-medium text-ochre">Direct task</span>
+                    : <button onClick={() => onOpenProject(r.projectId)} className="max-w-[16rem] truncate rounded bg-pine-tint px-1.5 py-0.5 font-medium text-pine hover:opacity-80">{r.projectName}</button>}
+                  {r.dueText && <span className={`font-semibold ${r.overdue && !r.completed ? 'text-brick' : 'text-ink'}`}>🕑 {r.dueText}</span>}
+                </div>
+
+                {meta.length > 0 && <div className="mt-0.5 truncate text-[11px] text-ink-soft">{meta.join(' · ')}</div>}
+
+                {/* row actions */}
+                {(r.toMe || r.byMe) && (
+                  <div className="mt-1 flex items-center gap-3 text-[11px]">
+                    {r.kind === 'direct' && r.toMe && !r.completed && <button onClick={() => rejectDirect.mutate(r.id)} className="text-ink-soft hover:text-brick">reject</button>}
+                    {r.byMe && r.kind === 'direct' && (
+                      <>
+                        <button onClick={() => setReassignId(reassignId === r.key ? null : r.key)} className={`hover:text-pine ${reassignId === r.key ? 'text-pine' : 'text-ink-soft'}`}>reassign</button>
+                        <button onClick={() => delDirect.mutate(r.id)} className="text-ink-soft hover:text-brick">delete</button>
+                      </>
+                    )}
+                    {r.byMe && r.kind === 'project' && <button onClick={() => onOpenProject(r.projectId)} className="text-ink-soft hover:text-pine">edit</button>}
+                  </div>
+                )}
+
+                {reassignId === r.key && r.raw && (
+                  <div className="mt-1.5">
+                    <ReassignControl assignees={r.raw.assignees || []} busy={addAssignees.isPending || removeAssignee.isPending}
+                      onAdd={(userIds) => addAssignees.mutate({ id: r.id, userIds })}
+                      onRemove={(uid) => removeAssignee.mutate({ id: r.id, userId: uid })} />
+                  </div>
+                )}
               </div>
-            </button>
-
-            {!r.completed && r.overdue && <span className="shrink-0 rounded bg-brick/10 px-1.5 py-0.5 text-[10px] font-medium text-brick">overdue</span>}
-            <div className="hidden sm:block"><Badge state={r.state} /></div>
-
-            {/* Row actions: reject (direct to me), reassign + delete (mine to give out) */}
-            {r.kind === 'direct' && r.toMe && !r.completed && (
-              <button onClick={() => rejectDirect.mutate(r.id)} className="text-[11px] text-ink-soft opacity-0 hover:text-brick group-hover:opacity-100">reject</button>
-            )}
-            {r.byMe && r.kind === 'direct' && (
-              <>
-                <button onClick={() => setReassignId(reassignId === r.key ? null : r.key)} className={`text-[11px] hover:text-pine ${reassignId === r.key ? 'text-pine' : 'text-ink-soft'} opacity-0 group-hover:opacity-100`}>reassign</button>
-                <button onClick={() => delDirect.mutate(r.id)} title="Delete task" className="text-[11px] text-ink-soft opacity-0 hover:text-brick group-hover:opacity-100">🗑</button>
-              </>
-            )}
-            {r.byMe && r.kind === 'project' && (
-              <button onClick={() => onOpenProject(r.projectId)} title="Open project to delete this task" className="text-[11px] text-ink-soft opacity-0 hover:text-pine group-hover:opacity-100">edit</button>
-            )}
-
-            {reassignId === r.key && r.raw && (
-              <div className="w-full basis-full pl-7">
-                <ReassignControl assignees={r.raw.assignees || []} busy={addAssignees.isPending || removeAssignee.isPending}
-                  onAdd={(userIds) => addAssignees.mutate({ id: r.id, userIds })}
-                  onRemove={(uid) => removeAssignee.mutate({ id: r.id, userId: uid })} />
-              </div>
-            )}
+            </div>
           </div>
         );
       })}
