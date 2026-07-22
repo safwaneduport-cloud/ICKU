@@ -102,6 +102,11 @@ export default function Messages() {
           unread={totalUnread} threads={(threadsQ.data || []).length}
           reminders={(remindersQ.data || []).filter((r) => !r.doneAt).length} drafts={drafts.length} />
         <div className="flex-1 overflow-y-auto px-2 pb-3">
+          <UnreadsSection
+            items={(conversations.data || []).filter((c) => c.unread > 0)}
+            selectedId={selectedId}
+            onSelect={openConversation}
+          />
           <ChannelRail
             items={groups}
             selectedId={selectedId}
@@ -319,6 +324,29 @@ function DraftsView({ drafts, conversations, onBack, onOpen }) {
   );
 }
 
+// Slack-style "Unreads" group pinned above the channel list: every conversation
+// with unread messages, whatever its type, so you can clear them top-down.
+function UnreadsSection({ items, selectedId, onSelect }) {
+  if (!items.length) return null;
+  return (
+    <div className="mt-3">
+      <div className="px-2 text-[10px] font-mono font-semibold uppercase tracking-widest text-white/45">Unreads</div>
+      <div className="mt-1 space-y-0.5">
+        {items.map((c) => (
+          <button key={c.id} onClick={() => onSelect(c.id)}
+            className={`flex w-full items-center gap-2 rounded-lg px-2 py-1.5 text-left ${selectedId === c.id ? 'bg-white/20' : 'hover:bg-white/10'}`}>
+            {c.type === 'dm'
+              ? <Avatar id={c.id} name={c.name} photoUrl={c.photoUrl} size={20} rounded="rounded" />
+              : <span className="w-5 shrink-0 text-center text-white/50">{c.type === 'event' ? '🗓' : '#'}</span>}
+            <span className="min-w-0 flex-1 truncate text-[15px] font-bold text-white">{c.name}</span>
+            <span className="flex h-[18px] min-w-[18px] items-center justify-center rounded-full bg-sage px-1 text-[10px] font-bold text-white">{c.unread > 99 ? '99+' : c.unread}</span>
+          </button>
+        ))}
+      </div>
+    </div>
+  );
+}
+
 function RailSection({ title, onAdd, items, selectedId, onSelect, renderIcon, empty }) {
   return (
     <div className="mt-3">
@@ -332,12 +360,12 @@ function RailSection({ title, onAdd, items, selectedId, onSelect, renderIcon, em
           <button
             key={c.id}
             onClick={() => onSelect(c.id)}
-            className={`flex w-full items-center gap-2 rounded-lg px-2 py-1.5 text-left text-sm ${
-              selectedId === c.id ? 'bg-white/20 font-medium text-white' : 'text-white/80 hover:bg-white/10'
+            className={`flex w-full items-center gap-2 rounded-lg px-2 py-1.5 text-left ${
+              selectedId === c.id ? 'bg-white/20' : 'hover:bg-white/10'
             }`}
           >
             {renderIcon(c)}
-            <span className="min-w-0 flex-1 truncate">{c.name}</span>
+            <span className={`min-w-0 flex-1 truncate text-[15px] ${c.unread > 0 ? 'font-bold text-white' : selectedId === c.id ? 'font-semibold text-white' : 'font-medium text-white/70'}`}>{c.name}</span>
             {selectedId !== c.id && readDraft(c.id) && (
               <span className="rounded bg-white/15 px-1 text-[9px] font-semibold uppercase tracking-wide text-white/70">draft</span>
             )}
@@ -388,9 +416,9 @@ function ChannelRow({ c, selected, onSelect, sections, onMove }) {
   return (
     <div className={`group/row relative flex items-center rounded-lg pr-1 ${selected ? 'bg-white/20' : 'hover:bg-white/10'}`}>
       <button onClick={() => onSelect(c.id)}
-        className={`flex min-w-0 flex-1 items-center gap-2 px-2 py-1.5 text-left text-sm ${selected ? 'font-medium text-white' : 'text-white/80'}`}>
+        className="flex min-w-0 flex-1 items-center gap-2 px-2 py-1.5 text-left">
         <span className="text-white/50">#</span>
-        <span className="min-w-0 flex-1 truncate">{c.name}</span>
+        <span className={`min-w-0 flex-1 truncate text-[15px] ${c.unread > 0 ? 'font-bold text-white' : selected ? 'font-semibold text-white' : 'font-medium text-white/70'}`}>{c.name}</span>
         {!selected && readDraft(c.id) && <span className="rounded bg-white/15 px-1 text-[9px] font-semibold uppercase tracking-wide text-white/70">draft</span>}
         {c.unread > 0 && (
           <span className={`flex h-[18px] min-w-[18px] items-center justify-center rounded-full px-1 text-[10px] font-bold ${selected ? 'bg-white/30 text-white' : 'bg-sage text-white'}`}>{c.unread > 99 ? '99+' : c.unread}</span>
