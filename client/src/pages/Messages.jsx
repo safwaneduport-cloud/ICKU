@@ -4,7 +4,7 @@ import { getUsers } from '../api/users.api.js';
 import {
   getConversations, getConversation, getMessages, postMessage,
   getThread, getMyThreads, createGroup, addMembers, openDm, markRead,
-  getReminders, completeReminder, setSection,
+  getReminders, completeReminder, setSection, getFiles,
 } from '../api/messages.api.js';
 import { useProfile } from '../store/ProfileContext.jsx';
 import MessageComposer, { readDraft, listDrafts, clearDraft } from '../features/messages/MessageComposer.jsx';
@@ -28,6 +28,21 @@ function dueLabel(at) {
   return `in ${Math.round(hr / 24)} day${Math.round(hr / 24) === 1 ? '' : 's'}`;
 }
 
+// ── Minimal line icons (Slack-style); stroke follows the current text colour ──
+const Ic = (p) => <svg viewBox="0 0 20 20" width="18" height="18" fill="none" stroke="currentColor" strokeWidth="1.6" strokeLinecap="round" strokeLinejoin="round" {...p} />;
+const CatchUpIcon = () => <Ic><path d="M3 12l2.2-7h9.6L17 12M3 12v4h14v-4M3 12h4l1 1.8h4l1-1.8h4" /></Ic>;
+const ThreadIcon = () => <Ic><path d="M4 4.5h12v8H8.5L5.5 15.5v-3H4z" /></Ic>;
+const LaterIcon = () => <Ic><path d="M6 3.5h8v13l-4-3-4 3z" /></Ic>;
+const DraftIcon = () => <Ic><path d="M12.5 3.5l4 4M4 16l.9-3.6 8-8L16.5 8l-8 8L4 16z" /></Ic>;
+const HomeIcon = () => <Ic><path d="M3.5 9.5L10 4l6.5 5.5M5.5 8.6V16h9V8.6" /></Ic>;
+const DmIcon = () => <Ic><path d="M4 5h12v7H8l-3 2.6V12H4z" /></Ic>;
+const FileIcon = () => <Ic><path d="M6 3.5h5l3.5 3.5V16.5H6zM11 3.5V7h3.5" /></Ic>;
+const SearchIcon = () => <Ic><circle cx="9" cy="9" r="5" /><path d="M12.8 12.8L16.5 16.5" /></Ic>;
+const PlusIcon = () => <Ic strokeWidth="2"><path d="M10 4v12M4 10h12" /></Ic>;
+const Chevron = ({ open }) => (
+  <svg viewBox="0 0 12 12" width="10" height="10" fill="none" stroke="currentColor" strokeWidth="1.8" strokeLinecap="round" strokeLinejoin="round" className={`shrink-0 transition-transform ${open ? '' : '-rotate-90'}`}><path d="M2.5 4.5L6 8l3.5-3.5" /></svg>
+);
+
 function DateDivider({ at }) {
   const d = new Date(at);
   const today = new Date();
@@ -50,6 +65,10 @@ export default function Messages() {
   const [selectedId, setSelectedId] = useState(null);
   const [thread, setThread] = useState(null);   // the top-level message whose thread is open
   const [modal, setModal] = useState(null);      // 'group' | 'dm' | null
+  const [mobileTab, setMobileTab] = useState('home'); // phone footer: 'home' | 'dms' | 'files'
+  const [searchOpen, setSearchOpen] = useState(false);
+  const [search, setSearch] = useState('');
+  const [fabOpen, setFabOpen] = useState(false);
 
   const conversations = useQuery({ queryKey: ['conversations'], queryFn: getConversations, retry: false, refetchInterval: 5000 });
   const users = useQuery({ queryKey: ['users'], queryFn: getUsers, retry: false });
@@ -63,9 +82,11 @@ export default function Messages() {
   }, []);
   const userOpts = (users.data || []).map((u) => ({ id: u.id, name: u.name, role: u.role }));
 
-  const groups = (conversations.data || []).filter((c) => c.type === 'group');
-  const dms = (conversations.data || []).filter((c) => c.type === 'dm');
-  const events = (conversations.data || []).filter((c) => c.type === 'event');
+  const q = search.trim().toLowerCase();
+  const match = (c) => !q || (c.name || '').toLowerCase().includes(q);
+  const groups = (conversations.data || []).filter((c) => c.type === 'group' && match(c));
+  const dms = (conversations.data || []).filter((c) => c.type === 'dm' && match(c));
+  const events = (conversations.data || []).filter((c) => c.type === 'event' && match(c));
 
   // ── Top cards (Slack-style): Catch Up · Threads · Later · Drafts ──
   const [activeCard, setActiveCard] = useState(null); // 'catchup'|'threads'|'later'|'drafts'|null
@@ -94,43 +115,95 @@ export default function Messages() {
     // From lg up it's the classic rail + chat + thread layout.
     <div className="flex h-[calc(100dvh-3.25rem)] gap-0 sm:h-[calc(100dvh-10rem)] sm:gap-4">
       {/* ── Left rail (Slack-style dark channel list) ── */}
-      <aside className={`w-full shrink-0 flex-col overflow-hidden rounded-none bg-pine text-white sm:rounded-2xl lg:flex lg:w-64 ${paneOpen ? 'hidden lg:flex' : 'flex'}`}>
+      <aside className={`relative w-full shrink-0 flex-col overflow-hidden rounded-none bg-pine text-white sm:rounded-2xl lg:flex lg:w-64 ${paneOpen ? 'hidden lg:flex' : 'flex'}`}>
         <div className="flex items-center justify-between border-b border-white/10 px-4 py-3">
           <h1 className="font-serif text-lg font-bold text-white">Messages</h1>
         </div>
-        <TopCards active={activeCard} onPick={pickCard}
-          unread={totalUnread} threads={(threadsQ.data || []).length}
-          reminders={(remindersQ.data || []).filter((r) => !r.doneAt).length} drafts={drafts.length} />
-        <div className="flex-1 overflow-y-auto px-2 pb-3">
-          <UnreadsSection
-            items={(conversations.data || []).filter((c) => c.unread > 0)}
-            selectedId={selectedId}
-            onSelect={openConversation}
-          />
-          <ChannelRail
-            items={groups}
-            selectedId={selectedId}
-            onSelect={openConversation}
-            onAddChannel={() => setModal('group')}
-          />
-          <RailSection
-            title="Direct messages"
-            onAdd={() => setModal('dm')}
-            items={dms}
-            selectedId={selectedId}
-            onSelect={openConversation}
-            renderIcon={(c) => <Avatar id={c.id} name={c.name} photoUrl={c.photoUrl} size={20} rounded="rounded" />}
-            empty="No direct messages yet"
-          />
-          <RailSection
-            title="Project messages"
-            items={events}
-            selectedId={selectedId}
-            onSelect={openConversation}
-            renderIcon={() => <span>🗓</span>}
-            empty="No project chats yet — join one from any project."
-          />
+
+        {searchOpen && (
+          <div className="border-b border-white/10 px-3 py-2">
+            <input autoFocus value={search} onChange={(e) => setSearch(e.target.value)} placeholder="Search conversations…"
+              className="w-full rounded-lg bg-white/10 px-3 py-1.5 text-sm text-white placeholder-white/50 outline-none focus:bg-white/15" />
+          </div>
+        )}
+
+        {mobileTab === 'home' && (
+          <TopCards active={activeCard} onPick={pickCard}
+            unread={totalUnread} threads={(threadsQ.data || []).length}
+            reminders={(remindersQ.data || []).filter((r) => !r.doneAt).length} drafts={drafts.length} />
+        )}
+
+        <div className="flex-1 overflow-y-auto px-2 pb-24 lg:pb-3">
+          {mobileTab === 'files' ? (
+            <FilesView onOpen={openConversation} />
+          ) : mobileTab === 'dms' ? (
+            <RailSection
+              title="Direct messages" onAdd={() => setModal('dm')} items={dms}
+              selectedId={selectedId} onSelect={openConversation}
+              renderIcon={(c) => <Avatar id={c.id} name={c.name} photoUrl={c.photoUrl} size={20} rounded="rounded" />}
+              empty={q ? 'No matches' : 'No direct messages yet'}
+            />
+          ) : (
+            <>
+              <UnreadsSection
+                items={(conversations.data || []).filter((c) => c.unread > 0 && match(c))}
+                selectedId={selectedId}
+                onSelect={openConversation}
+              />
+              <GroupRail
+                items={groups}
+                selectedId={selectedId}
+                onSelect={openConversation}
+                onAddGroup={() => setModal('group')}
+              />
+              <RailSection
+                title="Direct messages"
+                onAdd={() => setModal('dm')}
+                items={dms}
+                selectedId={selectedId}
+                onSelect={openConversation}
+                renderIcon={(c) => <Avatar id={c.id} name={c.name} photoUrl={c.photoUrl} size={20} rounded="rounded" />}
+                empty={q ? 'No matches' : 'No direct messages yet'}
+              />
+              <RailSection
+                title="Project messages"
+                items={events}
+                selectedId={selectedId}
+                onSelect={openConversation}
+                renderIcon={() => <span className="w-5 shrink-0 text-center text-white/50">🗓</span>}
+                empty={q ? 'No matches' : 'No project chats yet — join one from any project.'}
+              />
+            </>
+          )}
         </div>
+
+        {/* Floating new + search (Slack-style), phones only */}
+        <div className="absolute bottom-[4.5rem] right-3 z-10 flex flex-col items-center gap-2 lg:hidden">
+          <button onClick={() => setFabOpen(true)} aria-label="New conversation"
+            className="flex h-12 w-12 items-center justify-center rounded-full bg-ochre text-pine shadow-lg active:scale-95"><PlusIcon /></button>
+          <button onClick={() => setSearchOpen((o) => !o)} aria-label="Search"
+            className={`flex h-9 w-9 items-center justify-center rounded-full shadow ${searchOpen ? 'bg-white text-pine' : 'bg-white/15 text-white'}`}><SearchIcon /></button>
+        </div>
+
+        {/* Bottom nav (Home · DMs · Files), phones only */}
+        <div className="shrink-0 border-t border-white/10 bg-pine lg:hidden">
+          <div className="flex">
+            {[['home', 'Home', HomeIcon], ['dms', 'DMs', DmIcon], ['files', 'Files', FileIcon]].map(([key, label, Icon]) => (
+              <button key={key} onClick={() => setMobileTab(key)}
+                className={`flex flex-1 flex-col items-center gap-0.5 py-2 text-[11px] font-medium ${mobileTab === key ? 'text-white' : 'text-white/45'}`}>
+                <Icon /><span>{label}</span>
+              </button>
+            ))}
+          </div>
+        </div>
+
+        {fabOpen && (
+          <NewSheet
+            onClose={() => setFabOpen(false)}
+            onGroup={() => { setFabOpen(false); setModal('group'); }}
+            onDm={() => { setFabOpen(false); setModal('dm'); }}
+          />
+        )}
       </aside>
 
       {/* ── Chat pane (or an active card view) ── */}
@@ -195,21 +268,72 @@ export default function Messages() {
 // ── Top cards (Catch Up · Threads · Later · Drafts), horizontal scroll ──
 function TopCards({ active, onPick, unread, threads, reminders, drafts }) {
   const cards = [
-    ['catchup', 'Catch Up', '🗂', unread, 'new'],
-    ['threads', 'Threads', '🧵', threads, ''],
-    ['later', 'Later', '🔖', reminders, ''],
-    ['drafts', 'Drafts', '✏️', drafts, ''],
+    ['catchup', 'Catch Up', CatchUpIcon, unread, 'new'],
+    ['threads', 'Threads', ThreadIcon, threads, ''],
+    ['later', 'Later', LaterIcon, reminders, ''],
+    ['drafts', 'Drafts', DraftIcon, drafts, ''],
   ];
   return (
     <div className="flex gap-2 overflow-x-auto border-b border-white/10 px-2 py-2 [-ms-overflow-style:none] [scrollbar-width:none]">
-      {cards.map(([key, label, icon, count, suffix]) => (
+      {cards.map(([key, label, Icon, count, suffix]) => (
         <button key={key} onClick={() => onPick(key)}
           className={`flex min-w-[84px] shrink-0 flex-col rounded-xl border px-3 py-2 text-left transition ${active === key ? 'border-white/50 bg-white/20' : 'border-white/10 bg-white/5 hover:bg-white/10'}`}>
-          <span className="text-base leading-none">{icon}</span>
+          <span className="text-white/85"><Icon /></span>
           <span className="mt-1.5 text-xs font-semibold text-white">{label}</span>
           <span className="text-[11px] text-white/60">{count > 0 ? `${count}${suffix ? ` ${suffix}` : ''}` : '—'}</span>
         </button>
       ))}
+    </div>
+  );
+}
+
+// The FAB "+" action sheet — new group or new direct message.
+function NewSheet({ onClose, onGroup, onDm }) {
+  return (
+    <div className="absolute inset-0 z-20 flex flex-col justify-end bg-ink/30 lg:hidden" onClick={onClose}>
+      <div className="rounded-t-2xl bg-white p-2 text-ink" onClick={(e) => e.stopPropagation()}>
+        <button onClick={onGroup} className="flex w-full items-center gap-3 rounded-xl px-4 py-3 text-left text-sm hover:bg-paper">
+          <span className="flex h-9 w-9 items-center justify-center rounded-lg bg-pine-tint text-pine">#</span>
+          <span><span className="block font-semibold">New group</span><span className="block text-xs text-ink-soft">Start a group channel</span></span>
+        </button>
+        <button onClick={onDm} className="flex w-full items-center gap-3 rounded-xl px-4 py-3 text-left text-sm hover:bg-paper">
+          <span className="flex h-9 w-9 items-center justify-center rounded-lg bg-pine-tint text-pine"><DmIcon /></span>
+          <span><span className="block font-semibold">New direct message</span><span className="block text-xs text-ink-soft">Message a colleague</span></span>
+        </button>
+        <button onClick={onClose} className="mt-1 w-full rounded-xl px-4 py-2.5 text-sm font-medium text-ink-soft hover:bg-paper">Cancel</button>
+      </div>
+    </div>
+  );
+}
+
+// Files tab — every image/file shared in my conversations, newest first.
+function FilesView({ onOpen }) {
+  const filesQ = useQuery({ queryKey: ['msg-files'], queryFn: getFiles, retry: false });
+  const files = filesQ.data || [];
+  return (
+    <div className="mt-3">
+      <div className="px-2 pb-1 text-[10px] font-mono font-semibold uppercase tracking-widest text-white/45">Files</div>
+      {filesQ.isLoading && <p className="px-2 py-2 text-xs text-white/50">Loading…</p>}
+      {!filesQ.isLoading && files.length === 0 && (
+        <div className="flex flex-col items-center justify-center py-16 text-center text-white/50">
+          <span className="opacity-70"><FileIcon /></span>
+          <p className="mt-2 text-sm">No files shared yet.</p>
+        </div>
+      )}
+      <div className="space-y-0.5">
+        {files.map((f) => (
+          <button key={f.id} onClick={() => onOpen(f.conversationId)}
+            className="flex w-full items-center gap-2.5 rounded-lg px-2 py-1.5 text-left hover:bg-white/10">
+            {f.kind === 'image'
+              ? <img src={f.url} alt="" className="h-9 w-9 shrink-0 rounded object-cover" />
+              : <span className="flex h-9 w-9 shrink-0 items-center justify-center rounded bg-white/10 text-white/80"><FileIcon /></span>}
+            <span className="min-w-0 flex-1">
+              <span className="block truncate text-[13px] font-medium text-white">{f.name}</span>
+              <span className="block truncate text-[11px] text-white/50">{f.author} · {f.conversationName || 'Direct message'}</span>
+            </span>
+          </button>
+        ))}
+      </div>
     </div>
   );
 }
@@ -348,13 +472,16 @@ function UnreadsSection({ items, selectedId, onSelect }) {
 }
 
 function RailSection({ title, onAdd, items, selectedId, onSelect, renderIcon, empty }) {
+  const [open, setOpen] = useState(true);
   return (
     <div className="mt-3">
       <div className="flex items-center justify-between px-2">
-        <span className="text-[10px] font-mono font-semibold uppercase tracking-widest text-white/45">{title}</span>
-        {onAdd && <button onClick={onAdd} title={`New ${title}`} className="text-white/55 hover:text-white">＋</button>}
+        <button onClick={() => setOpen((o) => !o)} className="flex items-center gap-1.5 text-[10px] font-mono font-semibold uppercase tracking-widest text-white/45 hover:text-white/70">
+          <Chevron open={open} />{title}
+        </button>
+        {onAdd && <button onClick={onAdd} title={`New ${title}`} className="text-lg leading-none text-white/55 hover:text-white">＋</button>}
       </div>
-      <div className="mt-1 space-y-0.5">
+      <div className={`mt-1 space-y-0.5 ${open ? '' : 'hidden'}`}>
         {items.length === 0 && <p className="px-2 py-1 text-xs text-white/40">{empty}</p>}
         {items.map((c) => (
           <button
@@ -381,10 +508,11 @@ function RailSection({ title, onAdd, items, selectedId, onSelect, renderIcon, em
   );
 }
 
-// Channels rail with personal grouping: ungrouped channels first, then each
-// named section. Every channel has a "⋯" to move it between sections.
-function ChannelRail({ items, selectedId, onSelect, onAddChannel }) {
+// Groups rail with personal grouping: ungrouped groups first, then each named
+// section. Every group has a "⋯" to move it between sections. Collapsible.
+function GroupRail({ items, selectedId, onSelect, onAddGroup }) {
   const qc = useQueryClient();
+  const [open, setOpen] = useState(true);
   const move = useMutation({ mutationFn: ({ id, section }) => setSection(id, section), onSuccess: () => qc.invalidateQueries({ queryKey: ['conversations'] }) });
   const sections = [...new Set(items.map((c) => c.section).filter(Boolean))].sort();
   const ungrouped = items.filter((c) => !c.section);
@@ -394,19 +522,23 @@ function ChannelRail({ items, selectedId, onSelect, onAddChannel }) {
   return (
     <div className="mt-3">
       <div className="flex items-center justify-between px-2">
-        <span className="text-[10px] font-mono font-semibold uppercase tracking-widest text-white/45">Channels</span>
-        <button onClick={onAddChannel} title="New channel" className="text-white/55 hover:text-white">＋</button>
+        <button onClick={() => setOpen((o) => !o)} className="flex items-center gap-1.5 text-[10px] font-mono font-semibold uppercase tracking-widest text-white/45 hover:text-white/70">
+          <Chevron open={open} />Groups
+        </button>
+        <button onClick={onAddGroup} title="New group" className="text-lg leading-none text-white/55 hover:text-white">＋</button>
       </div>
-      <div className="mt-1 space-y-0.5">
-        {items.length === 0 && <p className="px-2 py-1 text-xs text-white/40">No channels yet</p>}
-        {rows(ungrouped)}
-      </div>
-      {sections.map((sec) => (
-        <div key={sec} className="mt-2">
-          <div className="px-2 text-[10px] font-semibold uppercase tracking-wide text-white/40">{sec}</div>
-          <div className="mt-1 space-y-0.5">{rows(items.filter((c) => c.section === sec))}</div>
+      <div className={open ? '' : 'hidden'}>
+        <div className="mt-1 space-y-0.5">
+          {items.length === 0 && <p className="px-2 py-1 text-xs text-white/40">No groups yet</p>}
+          {rows(ungrouped)}
         </div>
-      ))}
+        {sections.map((sec) => (
+          <div key={sec} className="mt-2">
+            <div className="px-2 text-[10px] font-semibold uppercase tracking-wide text-white/40">{sec}</div>
+            <div className="mt-1 space-y-0.5">{rows(items.filter((c) => c.section === sec))}</div>
+          </div>
+        ))}
+      </div>
     </div>
   );
 }
@@ -589,8 +721,9 @@ function NewGroupModal({ onClose, onCreated }) {
   return (
     <ModalShell title="New group" onClose={onClose}>
       <label className="mt-4 block text-sm"><span className="text-ink-soft">Group name</span>
-        <input value={name} onChange={(e) => setName(e.target.value)} autoFocus placeholder="e.g. Class 7-8 Team"
-          className="mt-1 w-full rounded-lg border border-line px-3 py-2 text-sm outline-none focus:border-pine" />
+        <input value={name} onChange={(e) => setName(e.target.value.toLowerCase())} autoFocus placeholder="e.g. class-7-8-team"
+          className="mt-1 w-full rounded-lg border border-line px-3 py-2 text-sm lowercase outline-none focus:border-pine" />
+        <span className="mt-1 block text-[11px] text-ink-soft">Group names are lowercase, so they're easy to scan.</span>
       </label>
       <div className="mt-3 text-sm"><span className="text-ink-soft">Add people</span>
         <div className="mt-1"><AssignPicker value={memberIds} onChange={setMemberIds} /></div>

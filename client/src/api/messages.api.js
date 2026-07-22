@@ -21,6 +21,9 @@ export const getThread = (messageId) =>
 export const getMyThreads = () =>
   api.get('/messages/threads/mine').then((r) => r.data.data);
 
+export const getFiles = () =>
+  api.get('/messages/files').then((r) => r.data.data);
+
 export const createGroup = (name, memberIds) =>
   api.post('/messages/groups', { name, memberIds }).then((r) => r.data.data);
 

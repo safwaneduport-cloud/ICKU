@@ -163,7 +163,9 @@ export async function getConversation(userId, conversationId) {
 }
 
 export async function createGroup(userId, name, memberIds = []) {
-  const clean = (name || '').trim();
+  // Group names are stored lowercase (like Slack channels) so they're quick to
+  // scan and there's one canonical form.
+  const clean = (name || '').trim().toLowerCase();
   if (!clean) throw new ApiError(400, 'Group name is required');
   const ids = Array.from(new Set([userId, ...memberIds])); // creator always included
   return prisma.conversation.create({
@@ -275,6 +277,44 @@ export async function myThreads(userId) {
   }));
   shaped.sort((a, b) => new Date(b.lastReplyAt || b.at) - new Date(a.lastReplyAt || a.at));
   return shaped;
+}
+
+// Every file/image shared in the conversations I'm part of — powers the "Files"
+// tab. Flattened so one message with several attachments yields several rows,
+// newest first.
+export async function filesFor(userId) {
+  const memberships = await prisma.conversationMember.findMany({ where: { userId }, select: { conversationId: true } });
+  const convIds = memberships.map((m) => m.conversationId);
+  if (!convIds.length) return [];
+  const msgs = await prisma.message.findMany({
+    where: { conversationId: { in: convIds }, deletedAt: null },
+    include: {
+      author: { select: { id: true, name: true, photoUrl: true } },
+      conversation: { select: { id: true, type: true, name: true } },
+    },
+    orderBy: { createdAt: 'desc' },
+    take: 400,
+  });
+  const files = [];
+  for (const m of msgs) {
+    const atts = Array.isArray(m.attachments) ? m.attachments : [];
+    atts.forEach((a, i) => {
+      if (!a || !a.url) return;
+      files.push({
+        id: `${m.id}:${i}`,
+        kind: a.kind === 'image' ? 'image' : 'file',
+        name: a.name || 'file',
+        url: a.url,
+        at: m.createdAt,
+        author: m.author?.name || '—',
+        authorId: m.authorId,
+        conversationId: m.conversationId,
+        conversationName: m.conversation.name || (m.conversation.type === 'dm' ? 'Direct message' : ''),
+        conversationType: m.conversation.type,
+      });
+    });
+  }
+  return files.slice(0, 120);
 }
 
 export async function postMessage(userId, conversationId, { body = '', parentId = null, attachments = null, mentions = [] } = {}) {

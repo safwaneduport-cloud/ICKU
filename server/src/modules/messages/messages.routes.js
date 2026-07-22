@@ -21,6 +21,8 @@ router.patch('/conversations/:id/section', ctrl.setSection);
 
 // Threads I'm part of (Threads card) — before the '/thread/:messageId' param route
 router.get('/threads/mine', ctrl.myThreads);
+// Files shared across my conversations (Files tab)
+router.get('/files', ctrl.listFiles);
 // Thread (a message's replies)
 router.get('/thread/:messageId', ctrl.listThread);
 
