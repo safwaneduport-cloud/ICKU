@@ -1,4 +1,4 @@
-import { useEffect, useState } from 'react';
+import { useState } from 'react';
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query';
 import { useAuth } from '../store/AuthContext.jsx';
 import { useProfile } from '../store/ProfileContext.jsx';
@@ -17,8 +17,7 @@ export default function MyTeam() {
   const { user } = useAuth();
   const reportsQ = useQuery({ queryKey: ['my-reports', user?.id], queryFn: () => getReports(user.id), enabled: !!user?.id, retry: false });
   const reports = reportsQ.data || [];
-  const [selId, setSelId] = useState(null);
-  useEffect(() => { if (!selId && reports.length) setSelId(reports[0].id); }, [reports]); // eslint-disable-line
+  const [selId, setSelId] = useState('all'); // 'all' (team overview) | a report id
 
   if (reportsQ.isLoading) return <p className="text-ink-soft">Loading…</p>;
   if (!reports.length) return (
@@ -35,8 +34,12 @@ export default function MyTeam() {
         <p className="text-sm text-ink-soft">Your direct reports — their pending checklists, tasks, and approval settings.</p>
       </div>
 
-      {/* oval selectors */}
+      {/* oval selectors — "All" first for a team-wide overview */}
       <div className="flex flex-wrap gap-2">
+        <button onClick={() => setSelId('all')}
+          className={`flex items-center gap-2 rounded-full border py-1 pl-2.5 pr-3 text-sm font-medium ${selId === 'all' ? 'border-pine bg-pine text-white' : 'border-line bg-white text-ink hover:border-pine'}`}>
+          👥 All
+        </button>
         {reports.map((r) => {
           const on = r.id === selId;
           return (
@@ -49,7 +52,60 @@ export default function MyTeam() {
         })}
       </div>
 
-      {selId && <ReportDashboard key={selId} report={reports.find((r) => r.id === selId)} me={user?.id} />}
+      {selId === 'all'
+        ? <AllTeamOverview reports={reports} onPick={setSelId} />
+        : <ReportDashboard key={selId} report={reports.find((r) => r.id === selId)} me={user?.id} />}
+    </div>
+  );
+}
+
+// Team-wide overview (the "All" tab): one row per report with their pending
+// checklist + task counts, overdue in red. Click a row to drill into that person.
+// Deliberately omits per-person controls (deadlines, auto-approval) — those only
+// make sense when a specific employee is selected.
+function AllTeamOverview({ reports, onPick }) {
+  return (
+    <section className="overflow-hidden rounded-2xl border border-line bg-white">
+      <div className="hidden items-center border-b border-line bg-paper/50 px-4 py-2 text-[11px] font-semibold uppercase tracking-wide text-ink-soft sm:flex">
+        <span className="flex-1">Employee</span><span className="w-20 text-center sm:w-24">Checklists</span><span className="w-20 text-center sm:w-24">Tasks</span>
+      </div>
+      {reports.map((r) => <TeamRow key={r.id} report={r} onPick={onPick} />)}
+    </section>
+  );
+}
+
+function TeamRow({ report, onPick }) {
+  const cl = useQuery({ queryKey: ['team-pending', report.id], queryFn: () => getPendingChecklist(report.id), retry: false });
+  const tk = useQuery({ queryKey: ['team-tasks', report.id], queryFn: () => getAssignedTasks(report.id), retry: false });
+  const clRows = cl.data || [];
+  const tasks = tk.data || [];
+  const clPending = clRows.length;
+  const clOverdue = clRows.filter((x) => x.overdue).length;
+  const tkPending = tasks.filter((t) => !t.completed && t.status !== 'rejected').length;
+  const tkOverdue = tasks.filter((t) => t.overdue && !t.completed).length;
+  const loading = cl.isLoading || tk.isLoading;
+  return (
+    <button onClick={() => onPick(report.id)} className="flex w-full items-center gap-2.5 border-b border-line/60 px-3 py-3 text-left last:border-0 hover:bg-paper sm:gap-3 sm:px-4">
+      <span className="flex h-8 w-8 shrink-0 items-center justify-center rounded-full bg-pine-tint text-[11px] font-semibold text-pine">{initials(report.name)}</span>
+      <div className="min-w-0 flex-1">
+        <div className="truncate font-medium text-ink">{report.name}</div>
+        <div className="truncate text-xs text-ink-soft">{report.designation}</div>
+      </div>
+      {loading ? <span className="text-xs text-ink-soft">…</span> : (
+        <>
+          <Count value={clPending} overdue={clOverdue} label="pending" />
+          <Count value={tkPending} overdue={tkOverdue} label="pending" />
+        </>
+      )}
+    </button>
+  );
+}
+
+function Count({ value, overdue, label }) {
+  return (
+    <div className="w-20 shrink-0 text-center sm:w-24">
+      <div className={`text-lg font-bold leading-none ${overdue ? 'text-brick' : value ? 'text-ink' : 'text-ink-soft'}`}>{value}</div>
+      <div className="mt-0.5 text-[10px] text-ink-soft">{overdue ? <span className="font-medium text-brick">{overdue} overdue</span> : label}</div>
     </div>
   );
 }
