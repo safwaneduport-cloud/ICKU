@@ -20,14 +20,17 @@ const todayDue = (m, d) => {
 
 export default function NewEventModal({ onClose, onCreated, initialMonth, initialDay }) {
   const qc = useQueryClient();
+  const now = new Date();
+  const defMonth = initialMonth ?? (now.getMonth() + 1); // default trigger = today
+  const defDay = initialDay ?? now.getDate();
   const [name, setName] = useState('');
   const [description, setDescription] = useState('');
   const [dated, setDated] = useState(true);
-  const [month, setMonth] = useState(initialMonth ?? 7);
-  const [day, setDay] = useState(initialDay ?? 1);
+  const [month, setMonth] = useState(defMonth);
+  const [day, setDay] = useState(defDay);
   const [writeup, setWriteup] = useState('');
   const [sop, setSop] = useState([]); // SOP PDFs + links -> event attachments
-  const [tasks, setTasks] = useState([{ name: '', assignees: [], ...todayDue(initialMonth ?? 7, initialDay ?? 1) }]);
+  const [tasks, setTasks] = useState([{ name: '', assignees: [], ...todayDue(defMonth, defDay) }]);
   const taskRefs = useRef([]);
 
   const setTask = (i, patch) => setTasks((ts) => ts.map((t, idx) => (idx === i ? { ...t, ...patch } : t)));

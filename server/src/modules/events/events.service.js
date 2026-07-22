@@ -301,6 +301,7 @@ export async function removeTask(actor, taskId) {
   if (!t) throw new ApiError(404, 'Task not found');
   if (t.event.ownerId !== actor.id && !canAdmin(actor)) throw new ApiError(403, 'Only the project owner can delete this task');
   await prisma.eventTask.delete({ where: { id: taskId } });
+  await logActivity(t.event.id, actor, `removed task “${t.name}”`);
   return { ok: true };
 }
 
@@ -325,11 +326,16 @@ export async function changeOwner(actor, id, newOwnerId) {
   const nu = await prisma.user.findUnique({ where: { id: newOwnerId }, select: { autoApproveProjects: true, reportsToId: true } });
   const managerId = nu?.reportsToId || null;
   const auto = admin || nu?.autoApproveProjects !== false || !managerId || managerId === actor.id;
+  const nm = (await prisma.user.findUnique({ where: { id: newOwnerId }, select: { name: true } }))?.name || newOwnerId;
   if (auto) {
-    return prisma.event.update({ where: { id }, data: { ownerId: newOwnerId, pendingOwnerId: null, ownerApproverId: null } });
+    const r = await prisma.event.update({ where: { id }, data: { ownerId: newOwnerId, pendingOwnerId: null, ownerApproverId: null } });
+    await logActivity(id, actor, `transferred ownership to ${nm}`);
+    return r;
   }
   // Held for the new owner's manager; ownerId stays put so the project runs on.
-  return prisma.event.update({ where: { id }, data: { pendingOwnerId: newOwnerId, ownerApproverId: managerId } });
+  const r = await prisma.event.update({ where: { id }, data: { pendingOwnerId: newOwnerId, ownerApproverId: managerId } });
+  await logActivity(id, actor, `requested ownership transfer to ${nm} (pending their manager)`);
+  return r;
 }
 
 // The new owner's manager approves/rejects a held ownership transfer.
@@ -341,7 +347,12 @@ export async function decideOwnerTransfer(actor, id, decision) {
   const data = decision === 'approved'
     ? { ownerId: e.pendingOwnerId, pendingOwnerId: null, ownerApproverId: null }
     : { pendingOwnerId: null, ownerApproverId: null };
-  return prisma.event.update({ where: { id }, data });
+  const r = await prisma.event.update({ where: { id }, data });
+  if (decision === 'approved') {
+    const nm = (await prisma.user.findUnique({ where: { id: e.pendingOwnerId }, select: { name: true } }))?.name || e.pendingOwnerId;
+    await logActivity(id, actor, `ownership transferred to ${nm}`);
+  }
+  return r;
 }
 
 // Ownership transfers awaiting my approval (I'm the proposed new owner's manager).
@@ -398,6 +409,7 @@ export async function addTask(actor, eventId, { name, dueOffset = null, dueTime 
     },
   });
   notifyAssignments(links, { title: name.trim(), project: e.name, assignerId: actor.id });
+  await logActivity(eventId, actor, `added task “${name.trim()}”`);
   return get(eventId);
 }
 
