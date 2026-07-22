@@ -79,11 +79,29 @@ export default function ChatMessage({ m, conversationId, compact, reminderAt, on
     return () => document.removeEventListener('mousedown', close);
   }, [menuOpen, pickerOpen]);
 
+  // ── Mobile: there's no hover on touch, so a long-press opens a bottom action
+  // sheet (Slack-style) with the same reactions + actions as the hover toolbar. ──
+  const [sheetOpen, setSheetOpen] = useState(false);
+  const [sheetRemind, setSheetRemind] = useState(false);
+  const [sheetPicker, setSheetPicker] = useState(false);
+  const pressTimer = useRef(null);
+  const didLong = useRef(false);
+  const startPress = () => {
+    if (m.deleted || editing) return;
+    didLong.current = false;
+    pressTimer.current = setTimeout(() => { didLong.current = true; setSheetOpen(true); navigator.vibrate?.(8); }, 480);
+  };
+  const endPress = (e) => { clearTimeout(pressTimer.current); if (didLong.current) e.preventDefault(); };
+  const movePress = () => clearTimeout(pressTimer.current);
+  const closeSheet = () => { setSheetOpen(false); setSheetRemind(false); setSheetPicker(false); };
+
   const copyText = () => { navigator.clipboard?.writeText(m.body); setMenuOpen(false); };
   const copyLink = () => { navigator.clipboard?.writeText(`${window.location.origin}/messages#msg-${m.id}`); setMenuOpen(false); };
 
   return (
-    <div id={`msg-${m.id}`} className="group relative flex gap-2 px-4 py-0.5 hover:bg-paper/60">
+    <div id={`msg-${m.id}`}
+      onTouchStart={startPress} onTouchEnd={endPress} onTouchMove={movePress} onTouchCancel={movePress}
+      className="group relative flex gap-2 px-4 py-0.5 hover:bg-paper/60 [-webkit-touch-callout:none]">
       {/* gutter: avatar (first of run) or hover-time (grouped) */}
       <div className="w-9 shrink-0">
         {compact ? (
@@ -209,6 +227,41 @@ export default function ChatMessage({ m, conversationId, compact, reminderAt, on
           )}
         </div>
       )}
+
+      {/* mobile long-press action sheet */}
+      {sheetOpen && !m.deleted && (
+        <div className="fixed inset-0 z-50 flex flex-col justify-end bg-ink/40 lg:hidden" onClick={closeSheet}>
+          <div className="max-h-[80vh] overflow-y-auto rounded-t-2xl bg-white p-2 pb-[max(0.75rem,env(safe-area-inset-bottom))]" onClick={(e) => e.stopPropagation()}>
+            {sheetPicker ? (
+              <div className="p-1"><EmojiPicker onPick={(e) => { react.mutate(e); closeSheet(); }} /></div>
+            ) : (
+              <>
+                <div className="flex items-center justify-around px-1 py-2">
+                  {QUICK.map((e) => (
+                    <button key={e} onClick={() => { react.mutate(e); closeSheet(); }} className="text-[26px] leading-none active:scale-90">{e}</button>
+                  ))}
+                  <button onClick={() => setSheetPicker(true)} title="More reactions" className="flex h-9 w-9 items-center justify-center rounded-full bg-paper text-lg text-ink-soft">＋</button>
+                </div>
+                <div className="my-1 h-px bg-line" />
+                {onOpenThread && <SheetItem icon="💬" label="Reply in thread" onClick={() => { closeSheet(); onOpenThread(m); }} />}
+                <SheetItem icon="⏰" label="Remind me" chevron onClick={() => setSheetRemind((v) => !v)} />
+                {sheetRemind && (
+                  <div className="mb-1 rounded-xl bg-paper/60">
+                    {remindOptions().map(([label, when]) => (
+                      <button key={label} onClick={() => { remind.mutate(when); closeSheet(); }} className="block w-full px-11 py-2.5 text-left text-[14px] hover:bg-white">{label}</button>
+                    ))}
+                  </div>
+                )}
+                {m.body && <SheetItem icon="📋" label="Copy text" onClick={() => { copyText(); closeSheet(); }} />}
+                <SheetItem icon="🔗" label="Copy link" onClick={() => { copyLink(); closeSheet(); }} />
+                {mine && <SheetItem icon="✏️" label="Edit message" onClick={() => { setEditing(true); closeSheet(); }} />}
+                {mine && <SheetItem icon="🗑" label="Delete message" danger onClick={() => { closeSheet(); if (confirm('Delete this message?')) del.mutate(); }} />}
+                <button onClick={closeSheet} className="mt-1 w-full rounded-xl py-3 text-[15px] font-medium text-ink-soft hover:bg-paper">Cancel</button>
+              </>
+            )}
+          </div>
+        </div>
+      )}
     </div>
   );
 }
@@ -217,6 +270,14 @@ function MenuItem({ icon, label, onClick, danger }) {
   return (
     <button onClick={onClick} className={`flex w-full items-center gap-2 px-3 py-1.5 text-left hover:bg-paper ${danger ? 'text-brick' : 'text-ink'}`}>
       <span>{icon}</span>{label}
+    </button>
+  );
+}
+
+function SheetItem({ icon, label, onClick, danger, chevron }) {
+  return (
+    <button onClick={onClick} className={`flex w-full items-center gap-3 rounded-xl px-4 py-3 text-left text-[15px] hover:bg-paper ${danger ? 'text-brick' : 'text-ink'}`}>
+      <span className="w-5 text-center">{icon}</span><span className="flex-1">{label}</span>{chevron && <span className="text-ink-soft">›</span>}
     </button>
   );
 }
