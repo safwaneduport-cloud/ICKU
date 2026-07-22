@@ -70,7 +70,6 @@ export default function Meetings() {
   const { user } = useAuth();
   const meta = useQuery({ queryKey: ['meetings-meta'], queryFn: meetingsMeta, retry: false });
   const [view, setView] = useState('week'); // week | calendar (month) | list
-  const [scope, setScope] = useState('all');
   const [cursor, setCursor] = useState(() => { const d = new Date(); return new Date(d.getFullYear(), d.getMonth(), 1); });
   const [weekCursor, setWeekCursor] = useState(() => new Date());
   const [openId, setOpenId] = useState(null);
@@ -80,7 +79,8 @@ export default function Meetings() {
 
   const y = cursor.getFullYear(); const mo = cursor.getMonth();
   const weekStart = useMemo(() => startOfWeek(weekCursor), [weekCursor]);
-  const list = useQuery({ queryKey: ['meetings', scope], queryFn: () => getMeetings(scope), retry: false });
+  // Only meetings you're part of (own or attend) — no org-wide "All" view.
+  const list = useQuery({ queryKey: ['meetings', 'mine'], queryFn: () => getMeetings('mine'), retry: false });
 
   // Pull the signed-in user's own Outlook/Teams calendar for the visible range
   // (a week in week view, otherwise the month).
@@ -113,10 +113,6 @@ export default function Meetings() {
       </div>
 
       <div className="flex flex-wrap items-center gap-2">
-        {[['all', 'All'], ['mine', 'My meetings']].map(([s, label]) => (
-          <button key={s} onClick={() => setScope(s)}
-            className={`rounded-full px-4 py-1.5 text-sm font-medium ${scope === s ? 'bg-pine text-white' : 'border border-line bg-white text-ink-soft'}`}>{label}</button>
-        ))}
         {view !== 'list' && (
           <div className="ml-2 flex items-center gap-1">
             <button onClick={() => view === 'week' ? setWeekCursor(addDays(weekStart, -7)) : setCursor(new Date(y, mo - 1, 1))} className="rounded-lg border border-line bg-white px-2.5 py-1.5 text-sm">←</button>
@@ -131,13 +127,13 @@ export default function Meetings() {
       </div>
 
       {view === 'week'
-        ? <WeekCalendar weekStart={weekStart} rows={rows} onOpen={open} onNewOn={(date) => meta.data?.canCreate && setModal({ initialDate: date })} />
+        ? <WeekCalendar weekStart={weekStart} rows={rows} onOpen={open} onNewOn={(date, time) => meta.data?.canCreate && setModal({ initialDate: date, initialTime: time })} />
         : view === 'calendar'
         ? <MonthCalendar year={y} month={mo} rows={rows} onOpen={open} onNewOn={(date) => meta.data?.canCreate && setModal({ initialDate: date })} />
         : <MeetingList rows={rows} loading={list.isLoading} onOpen={open} />}
 
       {openId && <MeetingDrawer id={openId} onClose={() => setOpenId(null)} onEdit={(m) => { setOpenId(null); setModal({ meeting: m }); }} />}
-      {modal && <MeetingModal recurrences={meta.data?.recurrences || []} rooms={meta.data?.rooms || []} meeting={modal.meeting} initialDate={modal.initialDate} onClose={() => setModal(null)} onToast={setToast} />}
+      {modal && <MeetingModal recurrences={meta.data?.recurrences || []} rooms={meta.data?.rooms || []} meeting={modal.meeting} initialDate={modal.initialDate} initialTime={modal.initialTime} onClose={() => setModal(null)} onToast={setToast} />}
 
       {toast && <div className="fixed bottom-6 left-1/2 z-[60] -translate-x-1/2 rounded-full bg-pine px-5 py-2.5 text-sm text-white shadow-lg">{toast}</div>}
     </div>
@@ -178,10 +174,15 @@ function layoutDay(events) {
   return out;
 }
 
-const hourLabel = (h) => (h === 0 ? '12a' : h < 12 ? `${h}a` : h === 12 ? '12p' : `${h - 12}p`);
-const GRID_COLS = '3.25rem repeat(7, minmax(0, 1fr))';
+// "8:00 AM" / "8:30 AM" — full AM/PM with minutes, half-hour granularity.
+const fmtHM = (mins) => {
+  const h = Math.floor(mins / 60), m = mins % 60;
+  return `${((h + 11) % 12) + 1}:${String(m).padStart(2, '0')} ${h >= 12 ? 'PM' : 'AM'}`;
+};
+const pad2 = (n) => String(n).padStart(2, '0');
+const GRID_COLS = '4.25rem repeat(7, minmax(0, 1fr))';
 
-// ── Week calendar (Teams-style time grid: hours down the Y axis, days across) ──
+// ── Week calendar (Teams-style time grid: 30-min slots down the Y axis) ──
 function WeekCalendar({ weekStart, rows, onOpen, onNewOn }) {
   const days = useMemo(() => Array.from({ length: 7 }, (_, i) => addDays(weekStart, i)), [weekStart]);
   const todayStr = ymd(new Date());
@@ -205,18 +206,20 @@ function WeekCalendar({ weekStart, rows, onOpen, onNewOn }) {
     return set;
   }, [byDay]);
 
-  // Hour window: business hours (8a–7p), widened to fit anything outside them.
-  let minH = 8, maxH = 19, hasAllDay = false;
+  // Visible window: 8 AM–9 PM by default (so evening meetings can be created too),
+  // widened to fit anything scheduled earlier or later.
+  let minH = 8, maxH = 21, hasAllDay = false;
   for (const list of byDay.values()) for (const r of list) {
     if (r.allDay) { hasAllDay = true; continue; }
     minH = Math.min(minH, Math.floor(r.startMin / 60));
     maxH = Math.max(maxH, Math.ceil(r.endMin / 60));
   }
   minH = Math.max(0, minH); maxH = Math.min(24, Math.max(maxH, minH + 1));
-  const hours = Array.from({ length: maxH - minH }, (_, i) => minH + i);
-  const HOUR = 48; // px per hour
-  const gridTop = minH * 60;
-  const gridHeight = (maxH - minH) * HOUR;
+  const SLOT = 26; // px per 30 minutes
+  const startMin0 = minH * 60;
+  const slots = [];
+  for (let m = startMin0; m < maxH * 60; m += 30) slots.push(m);
+  const gridHeight = slots.length * SLOT;
 
   return (
     <div className="overflow-hidden rounded-2xl border border-line bg-white">
@@ -248,9 +251,9 @@ function WeekCalendar({ weekStart, rows, onOpen, onNewOn }) {
 
       <div className="grid" style={{ gridTemplateColumns: GRID_COLS }}>
         <div className="border-r border-line/60">
-          {hours.map((h) => (
-            <div key={h} className="relative border-b border-line/40" style={{ height: HOUR }}>
-              <span className="absolute -top-2 right-1.5 text-[10px] tabular-nums text-ink-soft">{hourLabel(h)}</span>
+          {slots.map((m) => (
+            <div key={m} className={`relative ${m % 60 === 0 ? 'border-b border-line/40' : 'border-b border-line/20'}`} style={{ height: SLOT }}>
+              <span className="absolute -top-2 right-1.5 text-[9px] tabular-nums text-ink-soft">{fmtHM(m)}</span>
             </div>
           ))}
         </div>
@@ -259,13 +262,13 @@ function WeekCalendar({ weekStart, rows, onOpen, onNewOn }) {
           const isToday = ymd(d) === todayStr;
           return (
             <div key={ymd(d)} className={`relative border-r border-line/50 last:border-r-0 ${isToday ? 'bg-pine-tint/10' : ''}`} style={{ height: gridHeight }}>
-              {hours.map((h) => (
-                <button key={h} onClick={() => onNewOn?.(ymd(d))} tabIndex={-1}
-                  className="block w-full border-b border-line/40 hover:bg-pine-tint/20" style={{ height: HOUR }} aria-label={`New meeting ${ymd(d)}`} />
+              {slots.map((m) => (
+                <button key={m} onClick={() => onNewOn?.(ymd(d), `${pad2(Math.floor(m / 60))}:${pad2(m % 60)}`)} tabIndex={-1}
+                  className={`block w-full hover:bg-pine-tint/20 ${m % 60 === 0 ? 'border-b border-line/40' : 'border-b border-line/20'}`} style={{ height: SLOT }} aria-label={`New meeting ${ymd(d)} ${fmtHM(m)}`} />
               ))}
               {laid.map(({ row: r, lane, lanes }) => {
-                const top = (r.startMin - gridTop) * (HOUR / 60);
-                const height = Math.max(18, r.durationMin * (HOUR / 60) - 2);
+                const top = ((r.startMin - startMin0) / 30) * SLOT;
+                const height = Math.max(16, (r.durationMin / 30) * SLOT - 2);
                 const w = 100 / lanes;
                 const conflict = conflictIds.has(r.id);
                 const s = SRC[r.kind];
@@ -645,17 +648,17 @@ function EventTagPicker({ value, onChange }) {
 }
 
 // ── Create / edit modal ─────────────────────────────────────────────
-function MeetingModal({ recurrences, rooms = [], meeting, initialDate, onClose, onToast }) {
+function MeetingModal({ recurrences, rooms = [], meeting, initialDate, initialTime, onClose, onToast }) {
   const qc = useQueryClient();
   const editing = !!meeting;
   const [f, setF] = useState(() => meeting ? {
-    title: meeting.title, date: meeting.date, time: meeting.time, durationMin: meeting.durationMin || 60,
+    title: meeting.title, date: meeting.date, time: meeting.time, durationMin: meeting.durationMin || 30,
     recurring: meeting.recurring, recurEnd: meeting.recurEnd || 'never', recurUntil: meeting.recurUntil || '', recurCount: meeting.recurCount || 5,
     mode: meeting.mode, meetingLink: meeting.msEventId ? '' : (meeting.meetingLink || ''), // hide auto Teams link so edit re-syncs it
     room: meeting.room || '', roomOther: meeting.roomOther || '', eventId: meeting.eventId || '',
     attendeeIds: meeting.attendees.map((a) => a.id), agenda: (meeting.agenda || []).join('\n'),
   } : {
-    title: '', date: initialDate || '', time: '10:00', durationMin: 60,
+    title: '', date: initialDate || '', time: initialTime || '10:00', durationMin: 30,
     recurring: 'One-off', recurEnd: 'never', recurUntil: '', recurCount: 5,
     mode: 'offline', meetingLink: '', room: '', roomOther: '', eventId: '',
     attendeeIds: [], agenda: '',
