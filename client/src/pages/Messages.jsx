@@ -92,9 +92,9 @@ export default function Messages() {
   return (
     // On phones this is one pane at a time: the rail, or the open conversation.
     // From lg up it's the classic rail + chat + thread layout.
-    <div className="flex h-[calc(100dvh-8.5rem)] gap-4 sm:h-[calc(100dvh-10rem)]">
+    <div className="flex h-[calc(100dvh-3.25rem)] gap-0 sm:h-[calc(100dvh-10rem)] sm:gap-4">
       {/* ── Left rail (Slack-style dark channel list) ── */}
-      <aside className={`w-full shrink-0 flex-col overflow-hidden rounded-2xl bg-pine text-white lg:flex lg:w-64 ${paneOpen ? 'hidden lg:flex' : 'flex'}`}>
+      <aside className={`w-full shrink-0 flex-col overflow-hidden rounded-none bg-pine text-white sm:rounded-2xl lg:flex lg:w-64 ${paneOpen ? 'hidden lg:flex' : 'flex'}`}>
         <div className="flex items-center justify-between border-b border-white/10 px-4 py-3">
           <h1 className="font-serif text-lg font-bold text-white">Messages</h1>
         </div>
@@ -129,7 +129,7 @@ export default function Messages() {
       </aside>
 
       {/* ── Chat pane (or an active card view) ── */}
-      <section className={`relative min-w-0 flex-1 flex-col rounded-2xl border border-line bg-white lg:flex ${paneOpen ? 'flex' : 'hidden lg:flex'}`}>
+      <section className={`relative min-w-0 flex-1 flex-col rounded-none border-0 bg-white sm:rounded-2xl sm:border sm:border-line lg:flex ${paneOpen ? 'flex' : 'hidden lg:flex'}`}>
         {activeCard ? (
           <CardView
             card={activeCard}

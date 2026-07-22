@@ -168,7 +168,9 @@ function Shell() {
           </div>
           <div className="ml-auto shrink-0"><NotificationBell /></div>
         </header>
-        <main className="min-w-0 px-4 py-5 sm:px-8 sm:py-8">
+        {/* Messages is a full-bleed chat surface on phones (edge-to-edge like
+            Slack); every other page keeps the comfortable page padding. */}
+        <main className={`min-w-0 ${location.pathname.startsWith('/messages') ? 'sm:px-8 sm:py-8' : 'px-4 py-5 sm:px-8 sm:py-8'}`}>
           <Outlet />
         </main>
       </div>
