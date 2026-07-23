@@ -35,15 +35,16 @@ const MSG_INCLUDE = {
   author: { select: { id: true, name: true, photoUrl: true } },
   _count: { select: { replies: true } },
   replies: { orderBy: { createdAt: 'desc' }, take: 1, select: { createdAt: true } },
-  reactions: { select: { userId: true, emoji: true } },
+  reactions: { select: { userId: true, emoji: true, user: { select: { name: true } } } },
 };
 
 function groupReactions(list = [], meId) {
   const map = new Map();
   for (const r of list) {
-    const e = map.get(r.emoji) || { emoji: r.emoji, count: 0, mine: false };
+    const e = map.get(r.emoji) || { emoji: r.emoji, count: 0, mine: false, who: [] };
     e.count += 1;
-    if (r.userId === meId) e.mine = true;
+    if (r.userId === meId) { e.mine = true; e.who.unshift('You'); }
+    else if (r.user?.name) e.who.push(r.user.name);
     map.set(r.emoji, e);
   }
   return [...map.values()];
@@ -534,6 +535,20 @@ export async function markRead(userId, conversationId) {
     .update({
       where: { conversationId_userId: { conversationId, userId } },
       data: { lastReadAt: new Date() },
+    })
+    .catch(() => {});
+  return { ok: true };
+}
+
+// Mark a conversation unread starting at a given message: set lastReadAt to just
+// before it, so that message and everything after it count as unread again.
+export async function markUnread(userId, conversationId, messageId) {
+  const msg = await prisma.message.findUnique({ where: { id: messageId }, select: { createdAt: true, conversationId: true } });
+  if (!msg || msg.conversationId !== conversationId) throw new ApiError(400, 'Message is not in this conversation');
+  await prisma.conversationMember
+    .update({
+      where: { conversationId_userId: { conversationId, userId } },
+      data: { lastReadAt: new Date(msg.createdAt.getTime() - 1) },
     })
     .catch(() => {});
   return { ok: true };

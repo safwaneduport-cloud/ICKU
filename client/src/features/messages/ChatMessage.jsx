@@ -1,7 +1,7 @@
 import { useState, useRef, useEffect } from 'react';
-import { useMutation } from '@tanstack/react-query';
+import { useMutation, useQueryClient } from '@tanstack/react-query';
 import { useAuth } from '../../store/AuthContext.jsx';
-import { reactMessage, editMessage, deleteMessage, createReminder } from '../../api/messages.api.js';
+import { reactMessage, editMessage, deleteMessage, createReminder, markUnread } from '../../api/messages.api.js';
 import EmojiPicker from './EmojiPicker.jsx';
 import Avatar from './Avatar.jsx';
 
@@ -71,6 +71,9 @@ export default function ChatMessage({ m, conversationId, compact, reminderAt, on
     mutationFn: (remindAt) => createReminder({ messageId: m.id, conversationId, remindAt: remindAt.toISOString() }),
     onSuccess: (r) => { setMenuOpen(false); setRemindOpen(false); onRemind?.(r); },
   });
+  const qc = useQueryClient();
+  const unread = useMutation({ mutationFn: () => markUnread(conversationId, m.id), onSuccess: () => qc.invalidateQueries({ queryKey: ['conversations'] }) });
+  const [confirmDel, setConfirmDel] = useState(false); // styled delete confirmation
 
   useEffect(() => {
     if (!menuOpen && !pickerOpen) return;
@@ -110,7 +113,7 @@ export default function ChatMessage({ m, conversationId, compact, reminderAt, on
   useEffect(() => () => clearTimeout(pressTimer.current), []);
 
   const copyText = () => { navigator.clipboard?.writeText(m.body); setMenuOpen(false); };
-  const copyLink = () => { navigator.clipboard?.writeText(`${window.location.origin}/messages#msg-${m.id}`); setMenuOpen(false); };
+  const copyLink = () => { navigator.clipboard?.writeText(`${window.location.origin}/messages?c=${conversationId}&m=${m.id}`); setMenuOpen(false); };
 
   return (
     <div id={`msg-${m.id}`}
@@ -179,6 +182,7 @@ export default function ChatMessage({ m, conversationId, compact, reminderAt, on
           <div className="mt-1 flex flex-wrap gap-1">
             {m.reactions.map((r) => (
               <button key={r.emoji} onClick={() => react.mutate(r.emoji)}
+                title={r.who?.length ? `${r.who.join(', ')} reacted with ${r.emoji}` : undefined}
                 className={`flex items-center gap-1 rounded-full border px-2 py-0.5 text-xs ${r.mine ? 'border-pine bg-pine-tint text-pine' : 'border-line bg-white text-ink-soft hover:border-pine'}`}>
                 <span>{r.emoji}</span><span className="font-medium">{r.count}</span>
               </button>
@@ -221,6 +225,7 @@ export default function ChatMessage({ m, conversationId, compact, reminderAt, on
               {mine && <MenuItem icon="✏️" label="Edit message" onClick={() => { setEditing(true); setMenuOpen(false); }} />}
               <MenuItem icon="🔗" label="Copy link" onClick={copyLink} />
               {m.body && <MenuItem icon="📋" label="Copy text" onClick={copyText} />}
+              <MenuItem icon="👁" label="Mark unread" onClick={() => { unread.mutate(); setMenuOpen(false); }} />
               <button onClick={() => setRemindOpen((v) => !v)} className="flex w-full items-center justify-between gap-2 px-3 py-1.5 text-left hover:bg-paper">
                 <span className="flex items-center gap-2"><span>⏰</span>Remind me</span><span className="text-ink-soft">›</span>
               </button>
@@ -234,7 +239,7 @@ export default function ChatMessage({ m, conversationId, compact, reminderAt, on
               {mine && (
                 <>
                   <div className="my-1 h-px bg-line" />
-                  <MenuItem icon="🗑" label="Delete message" danger onClick={() => { if (confirm('Delete this message?')) del.mutate(); setMenuOpen(false); }} />
+                  <MenuItem icon="🗑" label="Delete message" danger onClick={() => { setMenuOpen(false); setConfirmDel(true); }} />
                 </>
               )}
             </div>
@@ -271,11 +276,26 @@ export default function ChatMessage({ m, conversationId, compact, reminderAt, on
                 )}
                 {m.body && <SheetItem icon="📋" label="Copy text" onClick={() => { copyText(); closeSheet(); }} />}
                 <SheetItem icon="🔗" label="Copy link" onClick={() => { copyLink(); closeSheet(); }} />
+                <SheetItem icon="👁" label="Mark unread" onClick={() => { unread.mutate(); closeSheet(); }} />
                 {mine && <SheetItem icon="✏️" label="Edit message" onClick={() => { setEditing(true); closeSheet(); }} />}
-                {mine && <SheetItem icon="🗑" label="Delete message" danger onClick={() => { closeSheet(); if (confirm('Delete this message?')) del.mutate(); }} />}
+                {mine && <SheetItem icon="🗑" label="Delete message" danger onClick={() => { closeSheet(); setConfirmDel(true); }} />}
                 <button onClick={closeSheet} className="mt-1 w-full rounded-xl py-3 text-[15px] font-medium text-ink-soft hover:bg-paper">Cancel</button>
               </>
             )}
+          </div>
+        </div>
+      )}
+
+      {/* styled delete confirmation (replaces the browser confirm) */}
+      {confirmDel && (
+        <div className="fixed inset-0 z-[60] flex items-center justify-center bg-ink/40 p-4" onClick={() => setConfirmDel(false)}>
+          <div className="w-full max-w-xs rounded-2xl bg-white p-5 text-center shadow-xl" onClick={(e) => e.stopPropagation()}>
+            <div className="font-serif text-lg font-semibold text-pine">Delete message?</div>
+            <p className="mt-1 text-sm text-ink-soft">This can’t be undone.</p>
+            <div className="mt-4 flex gap-2">
+              <button onClick={() => setConfirmDel(false)} className="flex-1 rounded-lg border border-line py-2 text-sm">Cancel</button>
+              <button onClick={() => { del.mutate(); setConfirmDel(false); }} className="flex-1 rounded-lg bg-brick py-2 text-sm font-medium text-white">Delete</button>
+            </div>
           </div>
         </div>
       )}

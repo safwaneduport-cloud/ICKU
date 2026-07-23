@@ -169,6 +169,17 @@ export default function Messages() {
     setPendingThread(null);
   }, [selectedId]); // eslint-disable-line
 
+  // Deep link from "Copy link": /messages?c=<conv>&m=<msg> opens that conversation
+  // and scrolls to the message, then strips the params so a refresh doesn't repeat.
+  useEffect(() => {
+    const p = new URLSearchParams(window.location.search);
+    const c = p.get('c');
+    if (c) {
+      openConversation(c, p.get('m'));
+      window.history.replaceState({}, '', window.location.pathname);
+    }
+  }, []); // eslint-disable-line
+
   return (
     // On phones this is one pane at a time: the rail, or the open conversation.
     // From lg up it's the classic rail + chat + thread layout.

@@ -56,6 +56,10 @@ export async function searchMessages(req, res, next) {
 export async function markRead(req, res, next) {
   try { ok(res, await service.markRead(req.user.id, req.params.id)); } catch (e) { next(e); }
 }
+
+export async function markUnread(req, res, next) {
+  try { ok(res, await service.markUnread(req.user.id, req.params.id, req.body?.messageId)); } catch (e) { next(e); }
+}
 export async function setSection(req, res, next) {
   try { ok(res, await service.setSection(req.user.id, req.params.id, req.body?.section)); } catch (e) { next(e); }
 }

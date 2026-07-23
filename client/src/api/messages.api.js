@@ -42,6 +42,9 @@ export const openEventConversation = (eventId) =>
 export const markRead = (id) =>
   api.post(`/messages/conversations/${id}/read`).then((r) => r.data.data);
 
+export const markUnread = (id, messageId) =>
+  api.post(`/messages/conversations/${id}/unread`, { messageId }).then((r) => r.data.data);
+
 // single-message actions
 export const editMessage = (messageId, body) =>
   api.patch(`/messages/message/${messageId}`, { body }).then((r) => r.data.data);
