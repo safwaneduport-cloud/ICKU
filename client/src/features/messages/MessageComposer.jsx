@@ -31,7 +31,7 @@ const MAX_BYTES = MAX_MB * 1024 * 1024; // per-attachment cap
 
 // Slack-style composer: multi-line text, @-mention autocomplete, and
 // file/image attachments. Enter sends; Shift+Enter makes a new line.
-export default function MessageComposer({ onSend, users = [], placeholder = 'Write a message…', autoFocus = false, draftKey = null }) {
+export default function MessageComposer({ onSend, users = [], placeholder = 'Write a message…', autoFocus = false, draftKey = null, outbox = false }) {
   const taRef = useRef(null);
   const fileRef = useRef(null);
   const [text, setText] = useState(() => readDraft(draftKey));
@@ -213,9 +213,17 @@ export default function MessageComposer({ onSend, users = [], placeholder = 'Wri
     if (sending) return; // a fast double-Enter bypasses the disabled Send button
     const body = text.trim();
     if (!body && atts.length === 0) return;
+    const payload = { body, attachments: atts, mentions: mentionIds };
+    if (outbox) {
+      // Optimistic: clear the composer immediately (this empties the draft) and
+      // hand delivery to the parent, which renders a sending/failed state + retry.
+      setText(''); setAtts([]); setMentionIds([]); setMq(null);
+      onSend(payload);
+      return;
+    }
     setSending(true);
     try {
-      await onSend({ body, attachments: atts, mentions: mentionIds });
+      await onSend(payload);
       setText(''); setAtts([]); setMentionIds([]); setMq(null);
     } finally {
       setSending(false);

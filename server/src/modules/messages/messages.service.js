@@ -413,7 +413,9 @@ export async function postMessage(userId, conversationId, { body = '', parentId 
   }
 
   const text = (body || '').trim();
-  const atts = Array.isArray(attachments) ? attachments.filter((a) => a && a.url) : [];
+  // Keep uploads (which carry a url) and forwarded-message cards (kind 'forward',
+  // which carry the quoted original instead of a url).
+  const atts = Array.isArray(attachments) ? attachments.filter((a) => a && (a.url || a.kind === 'forward')) : [];
   if (!text && atts.length === 0) throw new ApiError(400, 'Message cannot be empty');
   if (parentId) {
     const parent = await prisma.message.findUnique({ where: { id: parentId }, select: { conversationId: true } });

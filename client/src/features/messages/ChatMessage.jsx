@@ -84,7 +84,7 @@ function renderBlocks(body = '') {
 
 // Slack-style message row: avatar + name + time on the first of a run, hover
 // action toolbar (quick reactions / reply / more), reactions below, inline edit.
-export default function ChatMessage({ m, conversationId, compact, reminderAt, onOpenThread, onOpenProfile, onChanged, onRemind }) {
+export default function ChatMessage({ m, conversationId, compact, reminderAt, onOpenThread, onOpenProfile, onForward, onChanged, onRemind }) {
   const { user } = useAuth();
   const mine = user?.id === m.authorId;
   const [menuOpen, setMenuOpen] = useState(false);
@@ -210,13 +210,27 @@ export default function ChatMessage({ m, conversationId, compact, reminderAt, on
             )}
             {m.attachments?.length > 0 && (
               <div className="mt-1.5 flex flex-wrap gap-2">
-                {m.attachments.map((a, i) => a.kind === 'image' ? (
-                  <a key={i} href={a.url} target="_blank" rel="noreferrer"><img src={a.url} alt={a.name} className="max-h-48 rounded-lg object-cover" /></a>
-                ) : (
-                  <a key={i} href={a.url} download={a.name} className="flex items-center gap-2 rounded-lg border border-line bg-paper px-3 py-2 text-sm text-pine hover:border-pine">
-                    <span>📎</span><span className="max-w-[180px] truncate">{a.name}</span>
-                  </a>
-                ))}
+                {m.attachments.map((a, i) => {
+                  if (a.kind === 'forward') {
+                    return (
+                      <div key={i} className="w-full rounded-lg border border-line bg-paper/40 px-3 py-2 text-sm">
+                        <div className="mb-0.5 text-[11px] font-medium text-ink-soft">↪ Forwarded{a.source ? ` from ${a.source}` : ''}</div>
+                        <div className="flex items-baseline gap-1.5">
+                          <span className="font-semibold text-ink">{a.author}</span>
+                          {a.at && <span className="text-[10px] text-ink-soft">{timeOf(a.at)}</span>}
+                        </div>
+                        {a.body && <p className="whitespace-pre-wrap break-words text-ink">{renderInline(a.body, `fwd${i}`)}</p>}
+                      </div>
+                    );
+                  }
+                  return a.kind === 'image' ? (
+                    <a key={i} href={a.url} target="_blank" rel="noreferrer"><img src={a.url} alt={a.name} className="max-h-48 rounded-lg object-cover" /></a>
+                  ) : (
+                    <a key={i} href={a.url} download={a.name} className="flex items-center gap-2 rounded-lg border border-line bg-paper px-3 py-2 text-sm text-pine hover:border-pine">
+                      <span>📎</span><span className="max-w-[180px] truncate">{a.name}</span>
+                    </a>
+                  );
+                })}
               </div>
             )}
           </>
@@ -277,6 +291,7 @@ export default function ChatMessage({ m, conversationId, compact, reminderAt, on
             <div className="absolute right-0 top-8 z-20 w-52 overflow-hidden rounded-lg border border-line bg-white py-1 text-sm shadow-lg">
               {mine && <MenuItem icon="✏️" label="Edit message" onClick={() => { setEditing(true); setMenuOpen(false); }} />}
               {!m.parentId && <MenuItem icon="🔗" label="Copy link" onClick={copyLink} />}
+              {onForward && <MenuItem icon="↪️" label="Forward" onClick={() => { setMenuOpen(false); onForward(m); }} />}
               {m.body && <MenuItem icon="📋" label="Copy text" onClick={copyText} />}
               {!mine && <MenuItem icon="👁" label="Mark unread" onClick={() => { unread.mutate(); setMenuOpen(false); }} />}
               <button onClick={() => setRemindOpen((v) => !v)} className="flex w-full items-center justify-between gap-2 px-3 py-1.5 text-left hover:bg-paper">
@@ -327,6 +342,7 @@ export default function ChatMessage({ m, conversationId, compact, reminderAt, on
                     ))}
                   </div>
                 )}
+                {onForward && <SheetItem icon="↪️" label="Forward" onClick={() => { closeSheet(); onForward(m); }} />}
                 {m.body && <SheetItem icon="📋" label="Copy text" onClick={() => { copyText(); closeSheet(); }} />}
                 {!m.parentId && <SheetItem icon="🔗" label="Copy link" onClick={() => { copyLink(); closeSheet(); }} />}
                 {!mine && <SheetItem icon="👁" label="Mark unread" onClick={() => { unread.mutate(); closeSheet(); }} />}

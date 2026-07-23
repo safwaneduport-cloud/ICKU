@@ -131,6 +131,7 @@ export default function Messages() {
   const [fabOpen, setFabOpen] = useState(false);
   const [focusMsg, setFocusMsg] = useState(null); // a search hit to scroll to when its conversation opens
   const [switcherOpen, setSwitcherOpen] = useState(false); // ⌘K quick switcher
+  const [forwarding, setForwarding] = useState(null);       // the message being forwarded
 
   const conversations = useQuery({ queryKey: ['conversations'], queryFn: getConversations, retry: false, refetchInterval: 5000 });
   const users = useQuery({ queryKey: ['users'], queryFn: getUsers, retry: false });
@@ -326,6 +327,7 @@ export default function Messages() {
             focusMessageId={focusMsg}
             onOpenThread={setThread}
             onOpenProfile={openProfile}
+            onForward={setForwarding}
             onBack={() => setSelectedId(null)}
           />
         )}
@@ -340,6 +342,7 @@ export default function Messages() {
           users={userOpts}
           onClose={() => setThread(null)}
           onOpenProfile={openProfile}
+          onForward={setForwarding}
         />
       )}
 
@@ -363,6 +366,16 @@ export default function Messages() {
           conversations={conversations.data || []}
           onOpen={(id) => { setModal(null); openConversation(id); }}
           onClose={() => setSwitcherOpen(false)}
+        />
+      )}
+
+      {forwarding && (
+        <ForwardModal
+          message={forwarding}
+          conversations={conversations.data || []}
+          sourceName={threadConv?.name || ''}
+          onClose={() => setForwarding(null)}
+          onDone={(destId) => { setForwarding(null); qc.invalidateQueries({ queryKey: ['conversations'] }); if (destId) openConversation(destId); }}
         />
       )}
     </div>
@@ -451,18 +464,64 @@ function NewSheet({ onClose, onGroup, onCompose }) {
 }
 
 // Files tab — every image/file shared in my conversations, newest first.
+// Derive a coarse file type from the attachment kind + filename extension, so
+// the Files view can offer Slack-style type filters.
+const fileExt = (name = '') => (name.includes('.') ? name.split('.').pop().toLowerCase() : '');
+function fileType(f) {
+  if (f.kind === 'image') return 'image';
+  const e = fileExt(f.name);
+  if (e === 'pdf') return 'pdf';
+  if (['doc', 'docx', 'txt', 'rtf', 'md', 'pages', 'xls', 'xlsx', 'csv', 'numbers', 'ppt', 'pptx', 'key'].includes(e)) return 'doc';
+  return 'other';
+}
+const TYPE_LABELS = { image: 'Images', pdf: 'PDFs', doc: 'Docs', other: 'Other' };
+
 function FilesView({ onOpen }) {
   const filesQ = useQuery({ queryKey: ['msg-files'], queryFn: getFiles, retry: false });
-  const files = filesQ.data || [];
+  const allFiles = filesQ.data || [];
+  const [type, setType] = useState('all');     // 'all' | 'image' | 'pdf' | 'doc' | 'other'
+  const [person, setPerson] = useState('all');  // authorId | 'all'
+
+  // Only offer type chips / people that actually appear in the shared files.
+  const presentTypes = ['image', 'pdf', 'doc', 'other'].filter((t) => allFiles.some((f) => fileType(f) === t));
+  const people = Array.from(new Map(allFiles.map((f) => [f.authorId, f.author])).entries()).sort((a, b) => a[1].localeCompare(b[1]));
+  const files = allFiles.filter((f) => (type === 'all' || fileType(f) === type) && (person === 'all' || f.authorId === person));
+
   return (
     <div className="py-1.5">
       <div className="px-3 pb-1 pt-1 text-[15px] font-bold text-ink">Files</div>
+
+      {allFiles.length > 0 && (
+        <div className="mb-1 space-y-1.5 px-2">
+          {/* type chips */}
+          <div className="flex flex-wrap gap-1">
+            {['all', ...presentTypes].map((t) => (
+              <button key={t} onClick={() => setType(t)}
+                className={`rounded-full border px-2.5 py-1 text-xs font-medium ${type === t ? 'border-pine bg-pine text-white' : 'border-line text-ink-soft hover:border-pine hover:text-pine'}`}>
+                {t === 'all' ? 'All' : TYPE_LABELS[t]}
+              </button>
+            ))}
+          </div>
+          {/* shared-by filter */}
+          {people.length > 1 && (
+            <select value={person} onChange={(e) => setPerson(e.target.value)}
+              className="w-full rounded-lg border border-line bg-white px-2 py-1.5 text-xs text-ink outline-none focus:border-pine">
+              <option value="all">Shared by anyone</option>
+              {people.map(([id, name]) => <option key={id} value={id}>{name}</option>)}
+            </select>
+          )}
+        </div>
+      )}
+
       {filesQ.isLoading && <p className="px-3 py-2 text-xs text-ink-soft">Loading…</p>}
-      {!filesQ.isLoading && files.length === 0 && (
+      {!filesQ.isLoading && allFiles.length === 0 && (
         <div className="flex flex-col items-center justify-center py-16 text-center text-ink-soft">
           <span className="opacity-70"><FileIcon /></span>
           <p className="mt-2 text-sm">No files shared yet.</p>
         </div>
+      )}
+      {!filesQ.isLoading && allFiles.length > 0 && files.length === 0 && (
+        <p className="px-3 py-6 text-center text-xs text-ink-soft">No files match this filter.</p>
       )}
       <div className="space-y-0.5 px-2">
         {files.map((f) => (
@@ -741,7 +800,7 @@ function ChannelRow({ c, selected, onSelect, sections, onMove }) {
   );
 }
 
-function ChatPane({ conversationId, users, focusMessageId, onOpenThread, onOpenProfile, onBack }) {
+function ChatPane({ conversationId, users, focusMessageId, onOpenThread, onOpenProfile, onForward, onBack }) {
   const qc = useQueryClient();
   const { user } = useAuth();
   const me = user?.id;
@@ -834,14 +893,31 @@ function ChatPane({ conversationId, users, focusMessageId, onOpenThread, onOpenP
     if (status === 403 || status === 404) qc.invalidateQueries({ queryKey: ['conversation', conversationId] });
   }, [messages.error]); // eslint-disable-line
 
-  const send = useMutation({
-    mutationFn: (payload) => postMessage(conversationId, payload),
-    onSuccess: () => {
-      qc.invalidateQueries({ queryKey: ['messages', conversationId] });
-      qc.invalidateQueries({ queryKey: ['conversations'] });
-    },
-    onError: (e) => setToast(e?.response?.status === 403 ? '🔒 You’re no longer in this conversation.' : '⚠️ Couldn’t send — please try again.'),
-  });
+  // Optimistic outbox: a sent message shows immediately (Sending…); on delivery
+  // it's replaced by the real one, on failure it stays with Retry / Discard.
+  const [outbox, setOutbox] = useState([]); // { tempId, payload, status: 'sending'|'failed' }
+  const tempSeq = useRef(0);
+  const deliver = (item) => {
+    postMessage(conversationId, item.payload)
+      .then(() => {
+        setOutbox((ob) => ob.filter((o) => o.tempId !== item.tempId));
+        qc.invalidateQueries({ queryKey: ['messages', conversationId] });
+        qc.invalidateQueries({ queryKey: ['conversations'] });
+      })
+      .catch(() => setOutbox((ob) => ob.map((o) => (o.tempId === item.tempId ? { ...o, status: 'failed' } : o))));
+  };
+  const enqueue = (payload) => {
+    tempSeq.current += 1;
+    const item = { tempId: `t${tempSeq.current}`, payload, status: 'sending' };
+    setOutbox((ob) => [...ob, item]);
+    deliver(item);
+    requestAnimationFrame(() => bottomRef.current?.scrollIntoView({ behavior: 'smooth' }));
+  };
+  const retryOutbox = (item) => {
+    setOutbox((ob) => ob.map((o) => (o.tempId === item.tempId ? { ...o, status: 'sending' } : o)));
+    deliver(item);
+  };
+  const discardOutbox = (tempId) => setOutbox((ob) => ob.filter((o) => o.tempId !== tempId));
 
   const c = conv.data;
   if (conv.isError) return (
@@ -883,7 +959,7 @@ function ChatPane({ conversationId, users, focusMessageId, onOpenThread, onOpenP
       {/* messages */}
       <div ref={scrollRef} onScroll={onScroll} className="flex-1 overflow-y-auto py-2">
         {messages.isLoading && <p className="px-4 py-6 text-sm text-ink-soft">Loading…</p>}
-        {messages.data?.length === 0 && <p className="px-4 py-8 text-center text-sm text-ink-soft">No messages yet. Say hello! 👋</p>}
+        {messages.data?.length === 0 && outbox.length === 0 && <p className="px-4 py-8 text-center text-sm text-ink-soft">No messages yet. Say hello! 👋</p>}
         {messages.data?.map((m, i) => {
           const prev = messages.data[i - 1];
           const newDay = !prev || !sameDay(prev.at, m.at);
@@ -894,13 +970,38 @@ function ChatPane({ conversationId, users, focusMessageId, onOpenThread, onOpenP
               {m.id === firstUnreadId && <div ref={dividerRef}><UnreadDivider /></div>}
               <ChatMessage
                 m={m} compact={compact} conversationId={conversationId} reminderAt={remindByMsg.get(m.id)}
-                onOpenThread={onOpenThread} onOpenProfile={onOpenProfile}
+                onOpenThread={onOpenThread} onOpenProfile={onOpenProfile} onForward={onForward}
                 onChanged={() => qc.invalidateQueries({ queryKey: ['messages', conversationId] })}
                 onRemind={() => { qc.invalidateQueries({ queryKey: ['notifications'] }); qc.invalidateQueries({ queryKey: ['reminders'] }); setToast('🔖 Saved for later'); }}
               />
             </div>
           );
         })}
+        {/* optimistic outbox: pending / failed sends, shown after the real messages */}
+        {outbox.map((o) => (
+          <div key={o.tempId} className="group relative px-4 py-1">
+            <div className="flex items-start gap-2.5">
+              <Avatar id={me} name={user?.name} photoUrl={user?.photoUrl} size={32} />
+              <div className="min-w-0 flex-1">
+                <div className="flex items-baseline gap-1.5">
+                  <span className="text-sm font-semibold text-ink">{user?.name || 'You'}</span>
+                </div>
+                {o.payload.body && <p className="whitespace-pre-wrap break-words text-sm leading-relaxed text-ink">{o.payload.body}</p>}
+                {!o.payload.body && o.payload.attachments?.length > 0 && <p className="text-sm text-ink-soft">📎 attachment</p>}
+                {o.status === 'sending' ? (
+                  <span className="text-[11px] text-ink-soft">Sending…</span>
+                ) : (
+                  <span className="text-[11px] text-brick">
+                    Failed to send.{' '}
+                    <button onClick={() => retryOutbox(o)} className="font-medium underline hover:no-underline">Retry</button>
+                    {' · '}
+                    <button onClick={() => discardOutbox(o.tempId)} className="font-medium underline hover:no-underline">Discard</button>
+                  </span>
+                )}
+              </div>
+            </div>
+          </div>
+        ))}
         <div ref={bottomRef} />
       </div>
       {!atBottom && (
@@ -911,7 +1012,7 @@ function ChatPane({ conversationId, users, focusMessageId, onOpenThread, onOpenP
 
       {/* composer */}
       <div className="border-t border-line p-3">
-        <MessageComposer onSend={(p) => send.mutateAsync(p)} users={users} placeholder={`Message ${c?.name || ''}`} draftKey={conversationId} />
+        <MessageComposer onSend={enqueue} outbox users={users} placeholder={`Message ${c?.name || ''}`} draftKey={conversationId} />
       </div>
 
       {addOpen && c && (
@@ -938,7 +1039,7 @@ function ChatPane({ conversationId, users, focusMessageId, onOpenThread, onOpenP
   );
 }
 
-function ThreadPanel({ conversationId, parent, convLabel, users, onClose, onOpenProfile }) {
+function ThreadPanel({ conversationId, parent, convLabel, users, onClose, onOpenProfile, onForward }) {
   const qc = useQueryClient();
   const thread = useQuery({ queryKey: ['thread', parent.id], queryFn: () => getThread(parent.id), retry: false, refetchInterval: 3000 });
   const reply = useMutation({
@@ -964,14 +1065,14 @@ function ThreadPanel({ conversationId, parent, convLabel, users, onClose, onOpen
       <div className="flex-1 overflow-y-auto py-2">
         {thread.data && (
           <>
-            <ChatMessage m={thread.data.parent} conversationId={conversationId} onOpenProfile={onOpenProfile}
+            <ChatMessage m={thread.data.parent} conversationId={conversationId} onOpenProfile={onOpenProfile} onForward={onForward}
               onChanged={() => { qc.invalidateQueries({ queryKey: ['thread', parent.id] }); qc.invalidateQueries({ queryKey: ['messages', conversationId] }); }} />
             <div className="my-1 flex items-center gap-2 px-4 text-[11px] text-ink-soft">
               <span>{thread.data.replies.length} {thread.data.replies.length === 1 ? 'reply' : 'replies'}</span>
               <span className="h-px flex-1 bg-line" />
             </div>
             {thread.data.replies.map((r) => (
-              <ChatMessage key={r.id} m={r} conversationId={conversationId} onOpenProfile={onOpenProfile}
+              <ChatMessage key={r.id} m={r} conversationId={conversationId} onOpenProfile={onOpenProfile} onForward={onForward}
                 onChanged={() => qc.invalidateQueries({ queryKey: ['thread', parent.id] })} />
             ))}
           </>
@@ -985,6 +1086,57 @@ function ThreadPanel({ conversationId, parent, convLabel, users, onClose, onOpen
 }
 
 // ── Modals ──────────────────────────────────────────────────────────
+// Forward a message to another conversation, with an optional note. The
+// original is carried as a 'forward' attachment (rendered as a quoted card);
+// any file/image attachments on the original are copied along too.
+function ForwardModal({ message, conversations, sourceName, onClose, onDone }) {
+  const [dest, setDest] = useState('');
+  const [note, setNote] = useState('');
+  const [q, setQ] = useState('');
+  const list = conversations.filter((c) => !q || (c.name || '').toLowerCase().includes(q.toLowerCase()));
+  const send = useMutation({
+    mutationFn: () => {
+      const files = (message.attachments || []).filter((a) => a && a.url);
+      const fwd = { kind: 'forward', author: message.author, authorId: message.authorId, at: message.at, body: message.body || '', source: sourceName || '' };
+      return postMessage(dest, { body: note.trim(), attachments: [fwd, ...files] });
+    },
+    onSuccess: () => onDone(dest),
+  });
+  return (
+    <ModalShell title="Forward message" onClose={onClose}>
+      <div className="mt-3 rounded-lg border border-line bg-paper/40 px-3 py-2 text-sm">
+        <div className="flex items-baseline gap-1.5">
+          <span className="font-semibold text-ink">{message.author}</span>
+          {sourceName && <span className="text-[10px] text-ink-soft">{sourceName}</span>}
+        </div>
+        <p className="max-h-16 overflow-hidden whitespace-pre-wrap break-words text-ink-soft">
+          {message.body || (message.attachments?.length ? '📎 attachment' : '')}
+        </p>
+      </div>
+      <textarea value={note} onChange={(e) => setNote(e.target.value)} rows={2} placeholder="Add a message (optional)"
+        className="mt-3 w-full resize-none rounded-lg border border-line px-3 py-2 text-sm outline-none focus:border-pine" />
+      <div className="mt-3 text-sm text-ink-soft">Forward to</div>
+      <input value={q} onChange={(e) => setQ(e.target.value)} placeholder="Search conversations…"
+        className="mt-1 w-full rounded-lg border border-line px-3 py-2 text-sm outline-none focus:border-pine" />
+      <div className="mt-1 max-h-52 space-y-0.5 overflow-y-auto">
+        {list.map((c) => (
+          <button key={c.id} onClick={() => setDest(c.id)}
+            className={`flex w-full items-center gap-2 rounded-lg px-2 py-2 text-left text-sm ${dest === c.id ? 'bg-pine/10 ring-1 ring-pine' : 'hover:bg-paper'}`}>
+            <span className="text-ink-soft">{c.type === 'group' ? '#' : c.type === 'event' ? '🗓' : '@'}</span>
+            <span className="truncate text-ink">{c.name}</span>
+          </button>
+        ))}
+        {list.length === 0 && <p className="px-2 py-3 text-xs text-ink-soft">No conversations.</p>}
+      </div>
+      {send.error && <p className="mt-2 text-sm text-brick">{send.error.response?.data?.error?.message || 'Could not forward'}</p>}
+      <div className="mt-4 flex justify-end gap-2">
+        <button onClick={onClose} className="rounded-lg border border-line px-4 py-2 text-sm">Cancel</button>
+        <button onClick={() => send.mutate()} disabled={!dest || send.isPending} className="rounded-lg bg-pine px-4 py-2 text-sm font-medium text-white disabled:opacity-50">Forward</button>
+      </div>
+    </ModalShell>
+  );
+}
+
 function ModalShell({ title, children, onClose }) {
   return (
     <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/30 p-4" onClick={onClose}>
