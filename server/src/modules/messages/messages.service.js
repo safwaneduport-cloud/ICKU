@@ -196,6 +196,24 @@ export async function addMembers(userId, conversationId, memberIds = []) {
   return getConversation(userId, conversationId);
 }
 
+// Remove someone else from a group (any member can; not for DMs; use leave for self).
+export async function removeMember(userId, conversationId, targetUserId) {
+  const conv = await loadMembership(userId, conversationId);
+  if (conv.type !== 'group') throw new ApiError(400, 'Members can only be removed from groups');
+  if (targetUserId === userId) throw new ApiError(400, 'Use “leave” to remove yourself');
+  await prisma.conversationMember.delete({ where: { conversationId_userId: { conversationId, userId: targetUserId } } }).catch(() => {});
+  return getConversation(userId, conversationId);
+}
+
+// Leave a conversation (groups and event chats; you can't leave a DM).
+export async function leaveConversation(userId, conversationId) {
+  const conv = await prisma.conversation.findUnique({ where: { id: conversationId }, select: { type: true } });
+  if (!conv) throw new ApiError(404, 'Conversation not found');
+  if (conv.type === 'dm') throw new ApiError(400, "You can't leave a direct message");
+  await prisma.conversationMember.delete({ where: { conversationId_userId: { conversationId, userId } } }).catch(() => {});
+  return { ok: true };
+}
+
 // Find (or create) the 1:1 DM between me and another user.
 export async function openDm(userId, otherId) {
   if (userId === otherId) throw new ApiError(400, 'You cannot message yourself');

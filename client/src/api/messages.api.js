@@ -33,6 +33,12 @@ export const createGroup = (name, memberIds) =>
 export const addMembers = (id, memberIds) =>
   api.post(`/messages/groups/${id}/members`, { memberIds }).then((r) => r.data.data);
 
+export const removeMember = (id, userId) =>
+  api.delete(`/messages/groups/${id}/members/${userId}`).then((r) => r.data.data);
+
+export const leaveConversation = (id) =>
+  api.post(`/messages/conversations/${id}/leave`).then((r) => r.data.data);
+
 export const openDm = (userId) =>
   api.post(`/messages/dm/${userId}`).then((r) => r.data.data);
 

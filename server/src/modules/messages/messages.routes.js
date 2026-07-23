@@ -9,6 +9,8 @@ router.get('/conversations', ctrl.listConversations);
 // Create a group / open a DM
 router.post('/groups', ctrl.createGroup);
 router.post('/groups/:id/members', ctrl.addMembers);
+router.delete('/groups/:id/members/:userId', ctrl.removeMember);
+router.post('/conversations/:id/leave', ctrl.leaveConversation);
 router.post('/dm/:userId', ctrl.openDm);
 router.post('/event/:eventId', ctrl.openEventConversation);
 

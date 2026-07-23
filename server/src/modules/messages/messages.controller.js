@@ -21,6 +21,14 @@ export async function addMembers(req, res, next) {
   try { ok(res, await service.addMembers(req.user.id, req.params.id, req.body?.memberIds)); } catch (e) { next(e); }
 }
 
+export async function removeMember(req, res, next) {
+  try { ok(res, await service.removeMember(req.user.id, req.params.id, req.params.userId)); } catch (e) { next(e); }
+}
+
+export async function leaveConversation(req, res, next) {
+  try { ok(res, await service.leaveConversation(req.user.id, req.params.id)); } catch (e) { next(e); }
+}
+
 export async function openDm(req, res, next) {
   try { ok(res, await service.openDm(req.user.id, req.params.userId)); } catch (e) { next(e); }
 }

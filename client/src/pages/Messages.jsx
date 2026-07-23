@@ -5,6 +5,7 @@ import {
   getConversations, getConversation, getMessages, postMessage,
   getThread, getMyThreads, createGroup, addMembers, openDm, markRead,
   getReminders, completeReminder, setSection, getFiles, searchMessages,
+  removeMember, leaveConversation,
 } from '../api/messages.api.js';
 import { useProfile } from '../store/ProfileContext.jsx';
 import { useAuth } from '../store/AuthContext.jsx';
@@ -68,6 +69,7 @@ const DmIcon = () => <Ic><path d="M4 5h12v7H8l-3 2.6V12H4z" /></Ic>;
 const FileIcon = () => <Ic><path d="M6 3.5h5l3.5 3.5V16.5H6zM11 3.5V7h3.5" /></Ic>;
 const SearchIcon = () => <Ic><circle cx="9" cy="9" r="5" /><path d="M12.8 12.8L16.5 16.5" /></Ic>;
 const PlusIcon = () => <Ic strokeWidth="2"><path d="M10 4v12M4 10h12" /></Ic>;
+const InfoIcon = () => <Ic><circle cx="10" cy="10" r="7" /><path d="M10 9v4.5M10 6.6v.01" /></Ic>;
 // Collapse chevron shown on the RIGHT of each section header (Slack-style):
 // points up when the section is open, down when collapsed.
 const CollapseChevron = ({ open }) => (
@@ -181,14 +183,14 @@ export default function Messages() {
     }
   }, []); // eslint-disable-line
 
-  // ⌘K / Ctrl+K opens the quick switcher.
+  // ⌘K / Ctrl+K opens the quick switcher — but not stacked over an open modal.
   useEffect(() => {
     const onKey = (e) => {
-      if ((e.metaKey || e.ctrlKey) && !e.shiftKey && e.key.toLowerCase() === 'k') { e.preventDefault(); setSwitcherOpen(true); }
+      if ((e.metaKey || e.ctrlKey) && !e.shiftKey && e.key.toLowerCase() === 'k') { e.preventDefault(); if (!modal) setSwitcherOpen(true); }
     };
     window.addEventListener('keydown', onKey);
     return () => window.removeEventListener('keydown', onKey);
-  }, []);
+  }, [modal]);
 
   return (
     // On phones this is one pane at a time: the rail, or the open conversation.
@@ -352,7 +354,7 @@ export default function Messages() {
       {switcherOpen && (
         <QuickSwitcher
           conversations={conversations.data || []}
-          onOpen={(id) => openConversation(id)}
+          onOpen={(id) => { setModal(null); openConversation(id); }}
           onClose={() => setSwitcherOpen(false)}
         />
       )}
@@ -737,6 +739,7 @@ function ChatPane({ conversationId, users, focusMessageId, onOpenThread, onOpenP
   const { user } = useAuth();
   const me = user?.id;
   const [addOpen, setAddOpen] = useState(false);
+  const [detailsOpen, setDetailsOpen] = useState(false); // conversation details drawer
   const [toast, setToast] = useState('');
   const [atBottom, setAtBottom] = useState(true); // controls the "jump to latest" button
   const conv = useQuery({ queryKey: ['conversation', conversationId], queryFn: () => getConversation(conversationId), retry: 1 });
@@ -792,6 +795,9 @@ function ChatPane({ conversationId, users, focusMessageId, onOpenThread, onOpenP
       const nearBottom = !el || el.scrollHeight - el.scrollTop - el.clientHeight < 120;
       const mineJustSent = msgs[msgs.length - 1]?.authorId === me;
       if (nearBottom || mineJustSent) bottomRef.current?.scrollIntoView({ behavior: 'smooth' });
+      // New content landed below the fold without moving scrollTop, so no scroll
+      // event fires — recompute atBottom directly so the "jump to latest" button shows.
+      else onScroll();
     }
     prevLen.current = msgs.length;
   }, [msgs.length]); // eslint-disable-line
@@ -833,19 +839,24 @@ function ChatPane({ conversationId, users, focusMessageId, onOpenThread, onOpenP
         {onBack && (
           <button onClick={onBack} className="-ml-1 shrink-0 rounded-lg p-1 text-ink-soft hover:bg-paper lg:hidden" aria-label="Back to conversations">←</button>
         )}
-        <div className="min-w-0 flex-1">
-          <div className="truncate font-serif text-lg font-semibold text-pine">
+        <button onClick={() => c && setDetailsOpen(true)} disabled={!c} className="group min-w-0 flex-1 text-left">
+          <div className="truncate font-serif text-lg font-semibold text-pine group-hover:underline">
             {c?.type === 'group' ? '# ' : c?.type === 'event' ? '🗓 ' : ''}{c?.name || '…'}
           </div>
           {c && (
             <div className="truncate text-xs text-ink-soft">
-              {c.type === 'dm' ? 'Direct message' : c.type === 'event' ? `Project chat · ${c.members.length} people` : `${c.members.length} members`}
+              {c.type === 'dm' ? 'Direct message' : c.type === 'event' ? `Project chat · ${c.members.length} people` : `${c.members.length} member${c.members.length === 1 ? '' : 's'}`}
             </div>
           )}
-        </div>
+        </button>
         {c?.type === 'group' && (
           <button onClick={() => setAddOpen(true)} className="shrink-0 rounded-lg border border-line px-3 py-1.5 text-xs text-ink-soft hover:border-pine hover:text-pine">
             + Add people
+          </button>
+        )}
+        {c && (
+          <button onClick={() => setDetailsOpen(true)} className="shrink-0 rounded-lg border border-line p-1.5 text-ink-soft hover:border-pine hover:text-pine" aria-label="Conversation details" title="Details">
+            <InfoIcon />
           </button>
         )}
       </div>
@@ -890,6 +901,18 @@ function ChatPane({ conversationId, users, focusMessageId, onOpenThread, onOpenP
           existing={c.members.map((m) => m.id)}
           onClose={() => setAddOpen(false)}
           onDone={() => { setAddOpen(false); qc.invalidateQueries({ queryKey: ['conversation', conversationId] }); qc.invalidateQueries({ queryKey: ['conversations'] }); }}
+        />
+      )}
+
+      {detailsOpen && c && (
+        <DetailsDrawer
+          conv={c}
+          me={me}
+          onOpenProfile={onOpenProfile}
+          onClose={() => setDetailsOpen(false)}
+          onAddPeople={() => { setDetailsOpen(false); setAddOpen(true); }}
+          onChanged={() => { qc.invalidateQueries({ queryKey: ['conversation', conversationId] }); qc.invalidateQueries({ queryKey: ['conversations'] }); }}
+          onLeft={() => { setDetailsOpen(false); qc.invalidateQueries({ queryKey: ['conversations'] }); onBack?.(); }}
         />
       )}
     </>
@@ -1074,5 +1097,102 @@ function AddPeopleModal({ conversationId, existing, onClose, onDone }) {
         <button onClick={() => mut.mutate()} disabled={!memberIds.length || mut.isPending} className="rounded-lg bg-pine px-4 py-2 text-sm font-medium text-white disabled:opacity-50">Add</button>
       </div>
     </ModalShell>
+  );
+}
+
+// ── Conversation details (F2): members, remove a member (F3), leave (F7) ──
+// A right-hand slide-over (full-screen on phones). Removing is group-only and
+// never yourself (use Leave); leaving is for groups (DMs can't be left, and
+// event chats manage their own membership).
+function DetailsDrawer({ conv, me, onOpenProfile, onClose, onAddPeople, onChanged, onLeft }) {
+  const [confirmRemove, setConfirmRemove] = useState(null); // member id awaiting confirm
+  const [confirmLeave, setConfirmLeave] = useState(false);
+  const [err, setErr] = useState('');
+  const isGroup = conv.type === 'group';
+  const isDm = conv.type === 'dm';
+  const canLeave = isGroup;
+  const members = conv.members || [];
+
+  const remove = useMutation({
+    mutationFn: (userId) => removeMember(conv.id, userId),
+    onSuccess: () => { setConfirmRemove(null); onChanged(); },
+    onError: (e) => setErr(e.response?.data?.error?.message || 'Could not remove'),
+  });
+  const leave = useMutation({
+    mutationFn: () => leaveConversation(conv.id),
+    onSuccess: () => onLeft(),
+    onError: (e) => { setErr(e.response?.data?.error?.message || 'Could not leave'); setConfirmLeave(false); },
+  });
+  const busy = remove.isPending || leave.isPending;
+
+  return (
+    <div className="fixed inset-0 z-50 flex justify-end bg-black/30" onClick={onClose}>
+      <div className="flex h-full w-full max-w-sm flex-col bg-white shadow-xl" onClick={(e) => e.stopPropagation()}>
+        <div className="flex items-center justify-between border-b border-line px-4 py-3">
+          <h3 className="font-serif text-lg font-semibold text-pine">Details</h3>
+          <button onClick={onClose} className="rounded-lg p-1 text-ink-soft hover:bg-paper" aria-label="Close">✕</button>
+        </div>
+
+        <div className="min-h-0 flex-1 overflow-y-auto">
+          <div className="border-b border-line px-4 py-4">
+            <div className="font-serif text-base font-semibold text-ink">
+              {isGroup ? '# ' : conv.type === 'event' ? '🗓 ' : ''}{isDm ? 'Direct message' : conv.name}
+            </div>
+            <div className="mt-0.5 text-xs text-ink-soft">
+              {isDm ? 'Direct message' : conv.type === 'event' ? `Project chat · ${members.length} people` : `${members.length} member${members.length === 1 ? '' : 's'}`}
+            </div>
+          </div>
+
+          <div className="px-2 py-2">
+            <div className="flex items-center justify-between px-2 py-1">
+              <span className="text-xs font-semibold uppercase tracking-wide text-ink-soft">{isDm ? 'People' : 'Members'}</span>
+              {isGroup && <button onClick={onAddPeople} className="text-xs text-pine hover:underline">+ Add</button>}
+            </div>
+            {err && <p className="px-2 py-1 text-xs text-brick">{err}</p>}
+            <ul className="divide-y divide-line">
+              {members.map((m) => {
+                const mine = m.id === me;
+                const pending = confirmRemove === m.id;
+                return (
+                  <li key={m.id} className="flex items-center gap-3 px-2 py-2">
+                    <Avatar id={m.id} name={m.name} photoUrl={m.photoUrl} size={32} onClick={() => onOpenProfile?.(m.id)} />
+                    <button onClick={() => onOpenProfile?.(m.id)} className="min-w-0 flex-1 text-left">
+                      <div className="truncate text-sm font-medium text-ink">{m.name}{mine && <span className="font-normal text-ink-soft"> (you)</span>}</div>
+                      {m.designation && <div className="truncate text-xs text-ink-soft">{m.designation}</div>}
+                    </button>
+                    {isGroup && !mine && (pending ? (
+                      <span className="flex shrink-0 items-center gap-1">
+                        <button disabled={busy} onClick={() => remove.mutate(m.id)} className="rounded-md bg-brick px-2 py-1 text-xs font-medium text-white disabled:opacity-50">Remove</button>
+                        <button disabled={busy} onClick={() => setConfirmRemove(null)} className="rounded-md border border-line px-2 py-1 text-xs">Cancel</button>
+                      </span>
+                    ) : (
+                      <button onClick={() => { setErr(''); setConfirmRemove(m.id); }} className="shrink-0 rounded-md p-1 text-lg leading-none text-ink-soft hover:bg-paper hover:text-brick" aria-label={`Remove ${m.name}`} title="Remove from group">✕</button>
+                    ))}
+                  </li>
+                );
+              })}
+            </ul>
+          </div>
+        </div>
+
+        {canLeave && (
+          <div className="border-t border-line px-4 py-3">
+            {confirmLeave ? (
+              <div className="flex items-center justify-between gap-2">
+                <span className="text-sm text-ink">Leave this group?</span>
+                <span className="flex gap-2">
+                  <button disabled={busy} onClick={() => leave.mutate()} className="rounded-lg bg-brick px-3 py-1.5 text-sm font-medium text-white disabled:opacity-50">Leave</button>
+                  <button disabled={busy} onClick={() => setConfirmLeave(false)} className="rounded-lg border border-line px-3 py-1.5 text-sm">Cancel</button>
+                </span>
+              </div>
+            ) : (
+              <button onClick={() => { setErr(''); setConfirmLeave(true); }} className="w-full rounded-lg border border-brick/40 px-3 py-2 text-sm font-medium text-brick hover:bg-brick/5">
+                Leave group
+              </button>
+            )}
+          </div>
+        )}
+      </div>
+    </div>
   );
 }
