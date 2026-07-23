@@ -1,10 +1,11 @@
 import { useState } from 'react';
-import { useNavigate } from 'react-router-dom';
+import { useNavigate, useLocation } from 'react-router-dom';
 import { useAuth } from '../store/AuthContext.jsx';
 
 export default function Login() {
   const { login } = useAuth();
   const navigate = useNavigate();
+  const location = useLocation();
   const [username, setUsername] = useState('');
   const [password, setPassword] = useState('');
   const [error, setError] = useState('');
@@ -16,7 +17,8 @@ export default function Login() {
     setBusy(true);
     try {
       await login(username, password);
-      navigate('/', { replace: true });
+      const from = location.state?.from;
+      navigate(from ? `${from.pathname}${from.search || ''}` : '/', { replace: true });
     } catch (err) {
       setError(err.response?.data?.error?.message || 'Login failed. Please try again.');
     } finally {

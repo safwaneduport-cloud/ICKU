@@ -758,6 +758,13 @@ function ChatPane({ conversationId, users, focusMessageId, onOpenThread, onOpenP
   });
 
   const c = conv.data;
+  if (conv.isError) return (
+    <div className="flex flex-1 flex-col items-center justify-center gap-2 px-6 text-center text-ink-soft">
+      {onBack && <button onClick={onBack} className="absolute left-3 top-3 rounded-lg p-1 hover:bg-paper lg:hidden" aria-label="Back">←</button>}
+      <div className="text-3xl">🔒</div>
+      <p className="text-sm">This conversation isn’t available.</p>
+    </div>
+  );
   return (
     <>
       {/* header */}

@@ -72,7 +72,14 @@ export default function ChatMessage({ m, conversationId, compact, reminderAt, on
     onSuccess: (r) => { setMenuOpen(false); setRemindOpen(false); onRemind?.(r); },
   });
   const qc = useQueryClient();
-  const unread = useMutation({ mutationFn: () => markUnread(conversationId, m.id), onSuccess: () => qc.invalidateQueries({ queryKey: ['conversations'] }) });
+  const unread = useMutation({
+    mutationFn: () => markUnread(conversationId, m.id),
+    onSuccess: () => {
+      qc.invalidateQueries({ queryKey: ['conversations'] });
+      // keep the frozen "New messages" marker in sync so the divider lands here on reopen
+      qc.setQueryData(['conversation', conversationId], (old) => (old ? { ...old, lastReadAt: new Date(new Date(m.at).getTime() - 1).toISOString() } : old));
+    },
+  });
   const [confirmDel, setConfirmDel] = useState(false); // styled delete confirmation
 
   useEffect(() => {
@@ -91,7 +98,7 @@ export default function ChatMessage({ m, conversationId, compact, reminderAt, on
   const didLong = useRef(false);
   const pressPos = useRef({ x: 0, y: 0 });
   const startPress = (e) => {
-    if (m.deleted || editing) return;
+    if (m.deleted || editing || sheetOpen || confirmDel) return; // don't arm while an overlay is up
     const t = e.touches?.[0];
     pressPos.current = { x: t?.clientX ?? 0, y: t?.clientY ?? 0 };
     didLong.current = false;
@@ -223,9 +230,9 @@ export default function ChatMessage({ m, conversationId, compact, reminderAt, on
           {menuOpen && (
             <div className="absolute right-0 top-8 z-20 w-52 overflow-hidden rounded-lg border border-line bg-white py-1 text-sm shadow-lg">
               {mine && <MenuItem icon="✏️" label="Edit message" onClick={() => { setEditing(true); setMenuOpen(false); }} />}
-              <MenuItem icon="🔗" label="Copy link" onClick={copyLink} />
+              {!m.parentId && <MenuItem icon="🔗" label="Copy link" onClick={copyLink} />}
               {m.body && <MenuItem icon="📋" label="Copy text" onClick={copyText} />}
-              <MenuItem icon="👁" label="Mark unread" onClick={() => { unread.mutate(); setMenuOpen(false); }} />
+              {!mine && <MenuItem icon="👁" label="Mark unread" onClick={() => { unread.mutate(); setMenuOpen(false); }} />}
               <button onClick={() => setRemindOpen((v) => !v)} className="flex w-full items-center justify-between gap-2 px-3 py-1.5 text-left hover:bg-paper">
                 <span className="flex items-center gap-2"><span>⏰</span>Remind me</span><span className="text-ink-soft">›</span>
               </button>
@@ -275,8 +282,8 @@ export default function ChatMessage({ m, conversationId, compact, reminderAt, on
                   </div>
                 )}
                 {m.body && <SheetItem icon="📋" label="Copy text" onClick={() => { copyText(); closeSheet(); }} />}
-                <SheetItem icon="🔗" label="Copy link" onClick={() => { copyLink(); closeSheet(); }} />
-                <SheetItem icon="👁" label="Mark unread" onClick={() => { unread.mutate(); closeSheet(); }} />
+                {!m.parentId && <SheetItem icon="🔗" label="Copy link" onClick={() => { copyLink(); closeSheet(); }} />}
+                {!mine && <SheetItem icon="👁" label="Mark unread" onClick={() => { unread.mutate(); closeSheet(); }} />}
                 {mine && <SheetItem icon="✏️" label="Edit message" onClick={() => { setEditing(true); closeSheet(); }} />}
                 {mine && <SheetItem icon="🗑" label="Delete message" danger onClick={() => { closeSheet(); setConfirmDel(true); }} />}
                 <button onClick={closeSheet} className="mt-1 w-full rounded-xl py-3 text-[15px] font-medium text-ink-soft hover:bg-paper">Cancel</button>

@@ -543,6 +543,7 @@ export async function markRead(userId, conversationId) {
 // Mark a conversation unread starting at a given message: set lastReadAt to just
 // before it, so that message and everything after it count as unread again.
 export async function markUnread(userId, conversationId, messageId) {
+  if (!messageId) throw new ApiError(400, 'messageId is required');
   const msg = await prisma.message.findUnique({ where: { id: messageId }, select: { createdAt: true, conversationId: true } });
   if (!msg || msg.conversationId !== conversationId) throw new ApiError(400, 'Message is not in this conversation');
   await prisma.conversationMember
