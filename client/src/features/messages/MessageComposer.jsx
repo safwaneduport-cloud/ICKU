@@ -70,6 +70,29 @@ export default function MessageComposer({ onSend, users = [], placeholder = 'Wri
     });
   }
 
+  // Wrap the selection (or a placeholder) in a [label](url) link.
+  function insertLink() {
+    const el = taRef.current; if (!el) return;
+    const s = el.selectionStart ?? text.length; const end = el.selectionEnd ?? s;
+    const sel = text.slice(s, end);
+    const url = window.prompt('Link URL', 'https://');
+    if (!url) return;
+    const md = `[${sel || url}](${url})`;
+    setText(text.slice(0, s) + md + text.slice(end));
+    requestAnimationFrame(() => { el.focus(); const p = s + md.length; el.setSelectionRange(p, p); });
+  }
+  // Prefix each line in the selection (or the current line) — for lists / quotes.
+  function prefixLines(prefix) {
+    const el = taRef.current; if (!el) return;
+    const s = el.selectionStart ?? 0; const end = el.selectionEnd ?? s;
+    const lineStart = text.lastIndexOf('\n', s - 1) + 1;
+    const nl = text.indexOf('\n', end); const lineEnd = nl === -1 ? text.length : nl;
+    const block = text.slice(lineStart, lineEnd);
+    const prefixed = block.split('\n').map((l, i) => (prefix === '1. ' ? `${i + 1}. ${l}` : `${prefix}${l}`)).join('\n');
+    setText(text.slice(0, lineStart) + prefixed + text.slice(lineEnd));
+    requestAnimationFrame(() => { el.focus(); const p = lineStart + prefixed.length; el.setSelectionRange(p, p); });
+  }
+
   function insertEmoji(emo) {
     const el = taRef.current;
     const s = el?.selectionStart ?? text.length;
@@ -142,10 +165,9 @@ export default function MessageComposer({ onSend, users = [], placeholder = 'Wri
     if (e.key === 'Enter' && !e.shiftKey) { e.preventDefault(); send(); }
   }
 
-  async function onFiles(e) {
-    const files = Array.from(e.target.files || []);
-    e.target.value = ''; // allow re-selecting the same file
-    for (const f of files) {
+  // Upload a set of files (from the picker, a drag-drop, or a paste).
+  async function processFiles(fileList) {
+    for (const f of Array.from(fileList || [])) {
       if (f.size > MAX_BYTES) { alert(`"${f.name}" is larger than ${MAX_MB}MB and was skipped.`); continue; }
       const dataUrl = await new Promise((res, rej) => {
         const r = new FileReader();
@@ -155,7 +177,7 @@ export default function MessageComposer({ onSend, users = [], placeholder = 'Wri
       });
       setUploading((n) => n + 1);
       try {
-        const att = await uploadFile(dataUrl, f.name); // → { kind, name, url }
+        const att = await uploadFile(dataUrl, f.name || 'pasted-image.png'); // → { kind, name, url }
         setAtts((a) => [...a, att]);
       } catch (err) {
         alert(`Couldn't upload "${f.name}": ${err.response?.data?.error?.message || err.message}`);
@@ -164,6 +186,15 @@ export default function MessageComposer({ onSend, users = [], placeholder = 'Wri
       }
     }
   }
+  function onFiles(e) { const list = e.target.files; e.target.value = ''; processFiles(list); }
+  // Paste an image straight from the clipboard.
+  function onPaste(e) {
+    const files = [...(e.clipboardData?.files || [])];
+    if (files.length) { e.preventDefault(); processFiles(files); }
+  }
+  // Drag-drop files onto the composer.
+  const [dragOver, setDragOver] = useState(false);
+  function onDrop(e) { e.preventDefault(); setDragOver(false); if (e.dataTransfer?.files?.length) processFiles(e.dataTransfer.files); }
 
   async function send() {
     if (sending) return; // a fast double-Enter bypasses the disabled Send button
@@ -179,7 +210,17 @@ export default function MessageComposer({ onSend, users = [], placeholder = 'Wri
   }
 
   return (
-    <div className="relative rounded-xl border border-line bg-white p-2">
+    <div
+      onDragOver={(e) => { e.preventDefault(); setDragOver(true); }}
+      onDragLeave={(e) => { if (e.currentTarget === e.target) setDragOver(false); }}
+      onDrop={onDrop}
+      className={`relative rounded-xl border bg-white p-2 ${dragOver ? 'border-pine ring-2 ring-pine/30' : 'border-line'}`}
+    >
+      {dragOver && (
+        <div className="pointer-events-none absolute inset-0 z-30 flex items-center justify-center rounded-xl bg-pine-tint/80 text-sm font-medium text-pine">
+          Drop files to attach
+        </div>
+      )}
       {/* @mention autocomplete */}
       {mq !== null && matches.length > 0 && (
         <div className="absolute bottom-full left-2 z-20 mb-1 w-64 overflow-hidden rounded-lg border border-line bg-white shadow-lg">
@@ -222,6 +263,11 @@ export default function MessageComposer({ onSend, users = [], placeholder = 'Wri
         <FmtBtn onClick={() => wrapSelection('_')} title="Italic (⌘/Ctrl+I)"><span className="italic">I</span></FmtBtn>
         <FmtBtn onClick={() => wrapSelection('~')} title="Strikethrough"><span className="line-through">S</span></FmtBtn>
         <FmtBtn onClick={() => wrapSelection('`')} title="Code"><span className="font-mono text-[11px]">{'</>'}</span></FmtBtn>
+        <span className="mx-0.5 h-4 w-px bg-line" />
+        <FmtBtn onClick={insertLink} title="Link"><span className="text-[13px]">🔗</span></FmtBtn>
+        <FmtBtn onClick={() => prefixLines('- ')} title="Bulleted list"><span className="text-base leading-none">•</span></FmtBtn>
+        <FmtBtn onClick={() => prefixLines('1. ')} title="Numbered list"><span className="text-[11px] font-semibold">1.</span></FmtBtn>
+        <FmtBtn onClick={() => prefixLines('> ')} title="Quote"><span className="text-[13px] font-semibold">❝</span></FmtBtn>
         <div className="relative">
           <FmtBtn onClick={() => setEmojiOpen((v) => !v)} title="Emoji">😊</FmtBtn>
           {emojiOpen && (
@@ -257,6 +303,7 @@ export default function MessageComposer({ onSend, users = [], placeholder = 'Wri
             value={text}
             onChange={onChange}
             onKeyDown={onKeyDown}
+            onPaste={onPaste}
             autoFocus={autoFocus}
             placeholder={placeholder}
             className="col-start-1 row-start-1 resize-none overflow-y-auto rounded-lg border border-line px-3 py-2 text-sm leading-5 outline-none focus:border-pine"

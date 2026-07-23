@@ -34,21 +34,52 @@ function remindOptions() {
   ];
 }
 
-// Lightweight inline formatting (Slack-style, non-nested): *bold*, _italic_,
-// ~strike~, `code`, and @mentions. One regex tokenises the string; each token
-// maps to an element. Deliberately simple — no external markdown library.
-const RICH = /(\*[^*\n]+\*|_[^_\n]+_|~[^~\n]+~|`[^`\n]+`|@[\p{L}][\p{L}0-9._-]*)/gu;
-function renderBody(body) {
-  return body.split(RICH).map((p, i) => {
+// Lightweight formatting (Slack-style, non-nested), no external markdown library.
+// Inline: *bold* _italic_ ~strike~ `code`, @mentions, [label](url) and bare URLs.
+const INLINE = /(\*[^*\n]+\*|_[^_\n]+_|~[^~\n]+~|`[^`\n]+`|@[\p{L}][\p{L}0-9._-]*|\[[^\]\n]+\]\(https?:\/\/[^\s)]+\)|https?:\/\/[^\s]+)/gu;
+const LINK_MD = /^\[([^\]]+)\]\((https?:\/\/[^\s)]+)\)$/;
+function renderInline(text, k) {
+  return String(text).split(INLINE).map((p, i) => {
     if (!p) return null;
+    const key = `${k}.${i}`;
+    if (p[0] === '@') return <span key={key} className="rounded bg-pine-tint px-0.5 font-medium text-pine">{p}</span>;
+    const md = p.match(LINK_MD);
+    if (md) return <a key={key} href={md[2]} target="_blank" rel="noreferrer" className="text-pine underline underline-offset-2 hover:text-sage">{md[1]}</a>;
+    if (/^https?:\/\//.test(p)) return <a key={key} href={p} target="_blank" rel="noreferrer" className="break-all text-pine underline underline-offset-2 hover:text-sage">{p}</a>;
     const inner = p.slice(1, -1);
-    if (p[0] === '@') return <span key={i} className="rounded bg-pine-tint px-0.5 font-medium text-pine">{p}</span>;
-    if (p.length > 2 && p[0] === '*' && p.endsWith('*')) return <strong key={i}>{inner}</strong>;
-    if (p.length > 2 && p[0] === '_' && p.endsWith('_')) return <em key={i}>{inner}</em>;
-    if (p.length > 2 && p[0] === '~' && p.endsWith('~')) return <span key={i} className="line-through">{inner}</span>;
-    if (p.length > 2 && p[0] === '`' && p.endsWith('`')) return <code key={i} className="rounded bg-paper px-1 font-mono text-[13px]">{inner}</code>;
-    return <span key={i}>{p}</span>;
+    if (p.length > 2 && p[0] === '*' && p.endsWith('*')) return <strong key={key}>{inner}</strong>;
+    if (p.length > 2 && p[0] === '_' && p.endsWith('_')) return <em key={key}>{inner}</em>;
+    if (p.length > 2 && p[0] === '~' && p.endsWith('~')) return <span key={key} className="line-through">{inner}</span>;
+    if (p.length > 2 && p[0] === '`' && p.endsWith('`')) return <code key={key} className="rounded bg-paper px-1 font-mono text-[13px]">{inner}</code>;
+    return <span key={key}>{p}</span>;
   });
+}
+// Block markdown (only used when a message actually contains it — see below):
+// > quote, - / * bullets, 1. numbered lists. Plain messages keep the simpler path.
+const hasBlockMarkdown = (body = '') => body.split('\n').some((l) => /^(>\s?|[-*]\s+|\d+\.\s+)/.test(l));
+function renderBlocks(body = '') {
+  const lines = body.split('\n');
+  const out = [];
+  let i = 0;
+  while (i < lines.length) {
+    if (/^>\s?/.test(lines[i])) {
+      const q = [];
+      while (i < lines.length && /^>\s?/.test(lines[i])) { q.push(lines[i].replace(/^>\s?/, '')); i += 1; }
+      out.push(<blockquote key={`bq${i}`} className="my-0.5 border-l-2 border-line pl-3 text-ink-soft">{q.map((t, j) => <div key={j} className="whitespace-pre-wrap break-words">{renderInline(t, `bq${i}.${j}`)}</div>)}</blockquote>);
+    } else if (/^[-*]\s+/.test(lines[i])) {
+      const items = [];
+      while (i < lines.length && /^[-*]\s+/.test(lines[i])) { items.push(lines[i].replace(/^[-*]\s+/, '')); i += 1; }
+      out.push(<ul key={`ul${i}`} className="my-0.5 list-disc pl-5">{items.map((t, j) => <li key={j} className="break-words">{renderInline(t, `ul${i}.${j}`)}</li>)}</ul>);
+    } else if (/^\d+\.\s+/.test(lines[i])) {
+      const items = [];
+      while (i < lines.length && /^\d+\.\s+/.test(lines[i])) { items.push(lines[i].replace(/^\d+\.\s+/, '')); i += 1; }
+      out.push(<ol key={`ol${i}`} className="my-0.5 list-decimal pl-5">{items.map((t, j) => <li key={j} className="break-words">{renderInline(t, `ol${i}.${j}`)}</li>)}</ol>);
+    } else {
+      out.push(<div key={`ln${i}`} className="min-h-[1.2em] whitespace-pre-wrap break-words">{renderInline(lines[i], `ln${i}`)}</div>);
+      i += 1;
+    }
+  }
+  return out;
 }
 
 // Slack-style message row: avatar + name + time on the first of a run, hover
@@ -165,10 +196,17 @@ export default function ChatMessage({ m, conversationId, compact, reminderAt, on
         ) : (
           <>
             {m.body && (
-              <p className="whitespace-pre-wrap break-words text-sm leading-relaxed text-ink">
-                {renderBody(m.body)}
-                {m.editedAt && <span className="ml-1 text-[10px] text-ink-soft">(edited)</span>}
-              </p>
+              hasBlockMarkdown(m.body) ? (
+                <div className="text-sm leading-relaxed text-ink">
+                  {renderBlocks(m.body)}
+                  {m.editedAt && <span className="text-[10px] text-ink-soft">(edited)</span>}
+                </div>
+              ) : (
+                <p className="whitespace-pre-wrap break-words text-sm leading-relaxed text-ink">
+                  {renderInline(m.body, 'b')}
+                  {m.editedAt && <span className="ml-1 text-[10px] text-ink-soft">(edited)</span>}
+                </p>
+              )
             )}
             {m.attachments?.length > 0 && (
               <div className="mt-1.5 flex flex-wrap gap-2">
