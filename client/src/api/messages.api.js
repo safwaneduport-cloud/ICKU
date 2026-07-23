@@ -61,6 +61,15 @@ export const deleteMessage = (messageId) =>
 export const reactMessage = (messageId, emoji) =>
   api.post(`/messages/message/${messageId}/react`, { emoji }).then((r) => r.data.data);
 
+export const pinMessage = (messageId) =>
+  api.post(`/messages/message/${messageId}/pin`).then((r) => r.data.data);
+
+export const unpinMessage = (messageId) =>
+  api.delete(`/messages/message/${messageId}/pin`).then((r) => r.data.data);
+
+export const getPinned = (conversationId) =>
+  api.get(`/messages/conversations/${conversationId}/pins`).then((r) => r.data.data);
+
 // reminders ("Remind me")
 export const getReminders = () =>
   api.get('/messages/reminders').then((r) => r.data.data);

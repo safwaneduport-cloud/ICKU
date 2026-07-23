@@ -1,7 +1,7 @@
 import { useState, useRef, useEffect } from 'react';
 import { useMutation, useQueryClient } from '@tanstack/react-query';
 import { useAuth } from '../../store/AuthContext.jsx';
-import { reactMessage, editMessage, deleteMessage, createReminder, markUnread } from '../../api/messages.api.js';
+import { reactMessage, editMessage, deleteMessage, createReminder, markUnread, pinMessage, unpinMessage } from '../../api/messages.api.js';
 import EmojiPicker from './EmojiPicker.jsx';
 import Avatar from './Avatar.jsx';
 
@@ -98,6 +98,7 @@ export default function ChatMessage({ m, conversationId, compact, reminderAt, on
   const react = useMutation({ mutationFn: (emoji) => reactMessage(m.id, emoji), onSuccess: changed });
   const edit = useMutation({ mutationFn: (body) => editMessage(m.id, body), onSuccess: () => { setEditing(false); changed(); } });
   const del = useMutation({ mutationFn: () => deleteMessage(m.id), onSuccess: changed });
+  const pin = useMutation({ mutationFn: () => (m.pinnedAt ? unpinMessage(m.id) : pinMessage(m.id)), onSuccess: changed });
   const remind = useMutation({
     mutationFn: (remindAt) => createReminder({ messageId: m.id, conversationId, remindAt: remindAt.toISOString() }),
     onSuccess: (r) => { setMenuOpen(false); setRemindOpen(false); onRemind?.(r); },
@@ -179,6 +180,10 @@ export default function ChatMessage({ m, conversationId, compact, reminderAt, on
             <button onClick={() => onOpenProfile?.(m.authorId)} className="text-sm font-semibold text-ink hover:underline">{m.author}</button>
             <span className="text-[11px] text-ink-soft">{timeOf(m.at)}</span>
           </div>
+        )}
+
+        {m.pinnedAt && !m.deleted && (
+          <div className="flex items-center gap-1 text-[11px] font-medium text-steel">📌 Pinned</div>
         )}
 
         {m.deleted ? (
@@ -291,6 +296,7 @@ export default function ChatMessage({ m, conversationId, compact, reminderAt, on
             <div className="absolute right-0 top-8 z-20 w-52 overflow-hidden rounded-lg border border-line bg-white py-1 text-sm shadow-lg">
               {mine && <MenuItem icon="✏️" label="Edit message" onClick={() => { setEditing(true); setMenuOpen(false); }} />}
               {!m.parentId && <MenuItem icon="🔗" label="Copy link" onClick={copyLink} />}
+              {!m.parentId && <MenuItem icon="📌" label={m.pinnedAt ? 'Unpin from conversation' : 'Pin to conversation'} onClick={() => { setMenuOpen(false); pin.mutate(); }} />}
               {onForward && <MenuItem icon="↪️" label="Forward" onClick={() => { setMenuOpen(false); onForward(m); }} />}
               {m.body && <MenuItem icon="📋" label="Copy text" onClick={copyText} />}
               {!mine && <MenuItem icon="👁" label="Mark unread" onClick={() => { unread.mutate(); setMenuOpen(false); }} />}
@@ -343,6 +349,7 @@ export default function ChatMessage({ m, conversationId, compact, reminderAt, on
                   </div>
                 )}
                 {onForward && <SheetItem icon="↪️" label="Forward" onClick={() => { closeSheet(); onForward(m); }} />}
+                {!m.parentId && <SheetItem icon="📌" label={m.pinnedAt ? 'Unpin from conversation' : 'Pin to conversation'} onClick={() => { closeSheet(); pin.mutate(); }} />}
                 {m.body && <SheetItem icon="📋" label="Copy text" onClick={() => { copyText(); closeSheet(); }} />}
                 {!m.parentId && <SheetItem icon="🔗" label="Copy link" onClick={() => { copyLink(); closeSheet(); }} />}
                 {!mine && <SheetItem icon="👁" label="Mark unread" onClick={() => { unread.mutate(); closeSheet(); }} />}

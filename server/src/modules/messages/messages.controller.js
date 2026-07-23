@@ -84,6 +84,18 @@ export async function reactMessage(req, res, next) {
   try { ok(res, await service.toggleReaction(req.user.id, req.params.messageId, req.body?.emoji)); } catch (e) { next(e); }
 }
 
+export async function pinMessage(req, res, next) {
+  try { ok(res, await service.setPin(req.user.id, req.params.messageId, true)); } catch (e) { next(e); }
+}
+
+export async function unpinMessage(req, res, next) {
+  try { ok(res, await service.setPin(req.user.id, req.params.messageId, false)); } catch (e) { next(e); }
+}
+
+export async function listPinned(req, res, next) {
+  try { ok(res, await service.listPinned(req.user.id, req.params.id)); } catch (e) { next(e); }
+}
+
 // reminders
 export async function listReminders(req, res, next) {
   try { ok(res, await service.listReminders(req.user.id)); } catch (e) { next(e); }

@@ -885,6 +885,7 @@ model Conversation {
   id          String               @id @default(uuid())
   type        String // "group" | "dm" | "event"
   name        String? // group/event name; null for DMs (name derived from the other member)
+  description String? // optional group/channel description, shown in the details drawer
   createdById String
   createdBy   User                 @relation("ConvCreator", fields: [createdById], references: [id])
   eventId     String?              @unique // set for type "event" — links to the Event
@@ -904,6 +905,7 @@ model ConversationMember {
   user           User         @relation("ConvMember", fields: [userId], references: [id])
   role           String       @default("member") // "owner" | "member"
   lastReadAt     DateTime? // for unread badges
+  mutedAt        DateTime? // set when this member mutes the conversation (no unread badge)
   section        String? // this member's personal sidebar section/group for the channel
   joinedAt       DateTime     @default(now())
 
@@ -927,6 +929,8 @@ model Message {
   reminders      Reminder[]
   editedAt       DateTime? // set when the author edits
   deletedAt      DateTime? // soft-delete tombstone (keeps thread structure)
+  pinnedAt       DateTime? // set when a member pins this message to the conversation
+  pinnedById     String? // who pinned it (userId; resolved to a name client-side)
   createdAt      DateTime     @default(now())
 
   @@index([conversationId])

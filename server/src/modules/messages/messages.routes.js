@@ -35,6 +35,9 @@ router.get('/thread/:messageId', ctrl.listThread);
 router.patch('/message/:messageId', ctrl.editMessage);
 router.delete('/message/:messageId', ctrl.deleteMessage);
 router.post('/message/:messageId/react', ctrl.reactMessage);
+router.post('/message/:messageId/pin', ctrl.pinMessage);
+router.delete('/message/:messageId/pin', ctrl.unpinMessage);
+router.get('/conversations/:id/pins', ctrl.listPinned);
 
 // Reminders ("Remind me")
 router.get('/reminders', ctrl.listReminders);

@@ -5,7 +5,7 @@ import {
   getConversations, getConversation, getMessages, postMessage,
   getThread, getMyThreads, createGroup, addMembers, openDm, markRead,
   getReminders, completeReminder, setSection, getFiles, searchMessages,
-  removeMember, leaveConversation,
+  removeMember, leaveConversation, getPinned, unpinMessage,
 } from '../api/messages.api.js';
 import { useProfile } from '../store/ProfileContext.jsx';
 import { useAuth } from '../store/AuthContext.jsx';
@@ -830,6 +830,7 @@ function ChatPane({ conversationId, users, focusMessageId, onOpenThread, onOpenP
   const me = user?.id;
   const [addOpen, setAddOpen] = useState(false);
   const [detailsOpen, setDetailsOpen] = useState(false); // conversation details drawer
+  const [pinnedOpen, setPinnedOpen] = useState(false);   // pinned-messages panel
   const [toast, setToast] = useState('');
   const [atBottom, setAtBottom] = useState(true); // controls the "jump to latest" button
   const conv = useQuery({ queryKey: ['conversation', conversationId], queryFn: () => getConversation(conversationId), retry: 1 });
@@ -980,6 +981,11 @@ function ChatPane({ conversationId, users, focusMessageId, onOpenThread, onOpenP
           </button>
         )}
         {c && (
+          <button onClick={() => setPinnedOpen(true)} className="shrink-0 rounded-lg border border-line px-2 py-1.5 text-xs text-ink-soft hover:border-pine hover:text-pine" aria-label="Pinned messages" title="Pinned">
+            📌
+          </button>
+        )}
+        {c && (
           <button onClick={() => setDetailsOpen(true)} className="shrink-0 rounded-lg border border-line p-1.5 text-ink-soft hover:border-pine hover:text-pine" aria-label="Conversation details" title="Details">
             <InfoIcon />
           </button>
@@ -1064,6 +1070,10 @@ function ChatPane({ conversationId, users, focusMessageId, onOpenThread, onOpenP
           onChanged={() => { qc.invalidateQueries({ queryKey: ['conversation', conversationId] }); qc.invalidateQueries({ queryKey: ['conversations'] }); }}
           onLeft={() => { setDetailsOpen(false); qc.invalidateQueries({ queryKey: ['conversations'] }); onBack?.(); }}
         />
+      )}
+
+      {pinnedOpen && c && (
+        <PinnedPanel conversationId={conversationId} onOpenProfile={onOpenProfile} onClose={() => setPinnedOpen(false)} />
       )}
     </>
   );
@@ -1317,6 +1327,57 @@ function AddPeopleModal({ conversationId, existing, onClose, onDone }) {
 // A right-hand slide-over (full-screen on phones). Removing is group-only and
 // never yourself (use Leave); leaving is for groups (DMs can't be left, and
 // event chats manage their own membership).
+// Pinned messages of a conversation — a right slide-over listing pins, each
+// jumps to the message in place; hover to unpin.
+function PinnedPanel({ conversationId, onOpenProfile, onClose }) {
+  const qc = useQueryClient();
+  const pins = useQuery({ queryKey: ['pins', conversationId], queryFn: () => getPinned(conversationId), retry: false });
+  const list = pins.data || [];
+  const unpin = useMutation({
+    mutationFn: (id) => unpinMessage(id),
+    onSuccess: () => { qc.invalidateQueries({ queryKey: ['pins', conversationId] }); qc.invalidateQueries({ queryKey: ['messages', conversationId] }); },
+  });
+  const jump = (id) => {
+    onClose();
+    requestAnimationFrame(() => {
+      const el = document.getElementById(`msg-${id}`);
+      if (!el) return;
+      el.scrollIntoView({ block: 'center' });
+      el.style.transition = 'background-color .4s';
+      el.style.backgroundColor = 'rgba(184,134,47,0.16)';
+      setTimeout(() => { el.style.backgroundColor = ''; }, 1800);
+    });
+  };
+  return (
+    <div className="fixed inset-0 z-50 flex justify-end bg-black/30" onClick={onClose}>
+      <div className="flex h-full w-full max-w-sm flex-col bg-white shadow-xl" onClick={(e) => e.stopPropagation()}>
+        <div className="flex items-center justify-between border-b border-line px-4 py-3">
+          <h3 className="font-serif text-lg font-semibold text-pine">📌 Pinned</h3>
+          <button onClick={onClose} className="rounded-lg p-1 text-ink-soft hover:bg-paper" aria-label="Close">✕</button>
+        </div>
+        <div className="min-h-0 flex-1 overflow-y-auto p-2">
+          {pins.isLoading && <p className="px-2 py-3 text-xs text-ink-soft">Loading…</p>}
+          {!pins.isLoading && list.length === 0 && (
+            <p className="px-2 py-10 text-center text-sm text-ink-soft">No pinned messages yet.<br /><span className="text-xs">Pin one from a message’s ⋮ menu.</span></p>
+          )}
+          {list.map((m) => (
+            <div key={m.id} className="group mb-1.5 rounded-lg border border-line p-2.5 hover:border-pine">
+              <div className="flex items-baseline justify-between gap-2">
+                <button onClick={() => onOpenProfile?.(m.authorId)} className="text-sm font-semibold text-ink hover:underline">{m.author}</button>
+                <button onClick={() => unpin.mutate(m.id)} disabled={unpin.isPending} className="text-[11px] text-ink-soft opacity-0 transition group-hover:opacity-100 hover:text-brick disabled:opacity-50">Unpin</button>
+              </div>
+              <button onClick={() => jump(m.id)} className="mt-0.5 block w-full text-left">
+                <p className="max-h-16 overflow-hidden whitespace-pre-wrap break-words text-sm text-ink-soft">{m.body || (m.attachments?.length ? '📎 attachment' : '')}</p>
+                <span className="mt-1 block text-[11px] font-medium text-steel">Jump to message →</span>
+              </button>
+            </div>
+          ))}
+        </div>
+      </div>
+    </div>
+  );
+}
+
 function DetailsDrawer({ conv, me, onOpenProfile, onClose, onAddPeople, onChanged, onLeft }) {
   const [confirmRemove, setConfirmRemove] = useState(null); // member id awaiting confirm
   const [confirmLeave, setConfirmLeave] = useState(false);

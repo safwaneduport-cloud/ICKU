@@ -83,6 +83,8 @@ function shapeMessage(m, meId) {
     replyAuthors: distinctReplyAuthors(m.replies),
     editedAt: m.editedAt ?? null,
     deleted,
+    pinnedAt: m.pinnedAt ?? null,
+    pinnedById: m.pinnedById ?? null,
     reactions: deleted ? [] : groupReactions(m.reactions, meId),
   };
 }
@@ -478,6 +480,31 @@ export async function deleteMessage(userId, messageId) {
   await prisma.message.update({ where: { id: messageId }, data: { deletedAt: new Date(), body: '' } });
   await prisma.messageReaction.deleteMany({ where: { messageId } });
   return { ok: true };
+}
+
+// Pin / unpin a message to its conversation. Any member can pin (Slack-style).
+export async function setPin(userId, messageId, pinned) {
+  const m = await prisma.message.findUnique({ where: { id: messageId }, select: { id: true, conversationId: true, deletedAt: true } });
+  if (!m) throw new ApiError(404, 'Message not found');
+  if (m.deletedAt) throw new ApiError(400, 'Cannot pin a deleted message');
+  await loadForRead(userId, m.conversationId); // membership check (403 for non-members)
+  const updated = await prisma.message.update({
+    where: { id: messageId },
+    data: pinned ? { pinnedAt: new Date(), pinnedById: userId } : { pinnedAt: null, pinnedById: null },
+    include: MSG_INCLUDE,
+  });
+  return shapeMessage(updated, userId);
+}
+
+// The pinned messages of a conversation, most-recently-pinned first.
+export async function listPinned(userId, conversationId) {
+  await loadForRead(userId, conversationId);
+  const msgs = await prisma.message.findMany({
+    where: { conversationId, pinnedAt: { not: null }, deletedAt: null },
+    orderBy: { pinnedAt: 'desc' },
+    include: MSG_INCLUDE,
+  });
+  return msgs.map((m) => shapeMessage(m, userId));
 }
 
 export async function toggleReaction(userId, messageId, emoji) {
