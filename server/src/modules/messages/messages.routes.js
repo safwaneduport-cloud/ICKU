@@ -32,6 +32,7 @@ router.get('/files', ctrl.listFiles);
 router.get('/search', ctrl.searchMessages);
 // Thread (a message's replies)
 router.get('/thread/:messageId', ctrl.listThread);
+router.post('/thread/:messageId/read', ctrl.markThreadRead); // Slack-style thread unread
 
 // Single-message actions (edit / delete / react)
 router.patch('/message/:messageId', ctrl.editMessage);

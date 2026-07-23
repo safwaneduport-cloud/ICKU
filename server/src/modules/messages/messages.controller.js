@@ -56,6 +56,10 @@ export async function myThreads(req, res, next) {
   try { ok(res, await service.myThreads(req.user.id)); } catch (e) { next(e); }
 }
 
+export async function markThreadRead(req, res, next) {
+  try { ok(res, await service.markThreadRead(req.user.id, req.params.messageId)); } catch (e) { next(e); }
+}
+
 export async function listFiles(req, res, next) {
   try { ok(res, await service.filesFor(req.user.id)); } catch (e) { next(e); }
 }

@@ -106,6 +106,7 @@ model User {
   messagesSent         Message[]            @relation("MessageAuthor")
   messageReactions     MessageReaction[]
   reminders            Reminder[]
+  threadReads          ThreadRead[]
   microsoftAccount     MicrosoftAccount?
 
   // AssetHub (V1)
@@ -927,6 +928,7 @@ model Message {
   mentions       String[]     @default([]) // userIds mentioned via @
   reactions      MessageReaction[]
   reminders      Reminder[]
+  threadReads    ThreadRead[]      @relation("ThreadReadRoot") // per-user read state (only on thread roots)
   editedAt       DateTime? // set when the author edits
   deletedAt      DateTime? // soft-delete tombstone (keeps thread structure)
   pinnedAt       DateTime? // set when a member pins this message to the conversation
@@ -948,6 +950,20 @@ model MessageReaction {
   createdAt DateTime @default(now())
 
   @@unique([messageId, userId, emoji])
+  @@index([messageId])
+}
+
+// Per-user read state for a thread (Slack-style "Threads" unread). One row per
+// (user, thread-root message); lastReadAt advances when the user opens the thread
+// or posts a reply. A reply newer than lastReadAt (from someone else) is unread.
+model ThreadRead {
+  userId     String
+  user       User     @relation(fields: [userId], references: [id])
+  messageId  String // the thread ROOT message (parentId = null)
+  message    Message  @relation("ThreadReadRoot", fields: [messageId], references: [id], onDelete: Cascade)
+  lastReadAt DateTime @default(now())
+
+  @@id([userId, messageId])
   @@index([messageId])
 }
 

@@ -1,7 +1,7 @@
-import { useState } from 'react';
+import { useState, useEffect } from 'react';
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query';
 import { getUsers } from '../../api/users.api.js';
-import { openEventConversation, getMessages, postMessage, getThread } from '../../api/messages.api.js';
+import { openEventConversation, getMessages, postMessage, getThread, markThreadRead } from '../../api/messages.api.js';
 import { useProfile } from '../../store/ProfileContext.jsx';
 import MessageComposer from './MessageComposer.jsx';
 import ChatMessage from './ChatMessage.jsx';
@@ -69,6 +69,12 @@ export default function EventChat({ eventId }) {
 function InlineThread({ conversationId, parentId, users, onOpenProfile }) {
   const qc = useQueryClient();
   const thread = useQuery({ queryKey: ['thread', parentId], queryFn: () => getThread(parentId), retry: false, refetchInterval: 3000 });
+  // Expanding a thread here marks it read too, so the Threads-card unread badge
+  // clears whether you read it in the drawer or the main Messages panel.
+  const newestReplyId = thread.data?.replies?.length ? thread.data.replies[thread.data.replies.length - 1].id : null;
+  useEffect(() => {
+    markThreadRead(parentId).then(() => qc.invalidateQueries({ queryKey: ['my-threads'] })).catch(() => {});
+  }, [parentId, newestReplyId]); // eslint-disable-line
   const reply = useMutation({
     mutationFn: (payload) => postMessage(conversationId, { ...payload, parentId }),
     onSuccess: () => {

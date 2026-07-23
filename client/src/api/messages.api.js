@@ -29,6 +29,10 @@ export const getThread = (messageId) =>
 export const getMyThreads = () =>
   api.get('/messages/threads/mine').then((r) => r.data.data);
 
+// Mark a thread read (Slack-style Threads unread). messageId = the thread root.
+export const markThreadRead = (messageId) =>
+  api.post(`/messages/thread/${messageId}/read`).then((r) => r.data.data);
+
 export const getFiles = () =>
   api.get('/messages/files').then((r) => r.data.data);
 

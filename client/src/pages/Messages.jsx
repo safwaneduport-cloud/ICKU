@@ -3,7 +3,7 @@ import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query';
 import { getUsers } from '../api/users.api.js';
 import {
   getConversations, getConversation, getMessages, postMessage,
-  getThread, getMyThreads, createGroup, addMembers, openDm, markRead,
+  getThread, getMyThreads, markThreadRead, createGroup, addMembers, openDm, markRead,
   getReminders, completeReminder, setSection, getFiles, searchMessages,
   removeMember, leaveConversation, getPinned, unpinMessage, setMute, setDescription,
 } from '../api/messages.api.js';
@@ -225,6 +225,7 @@ export default function Messages() {
         {mobileTab === 'home' && (
           <TopCards active={activeCard} onPick={pickCard}
             unread={totalUnread} threads={(threadsQ.data || []).length}
+            threadsUnread={(threadsQ.data || []).filter((t) => t.hasUnread).length}
             reminders={(remindersQ.data || []).filter((r) => !r.doneAt).length} drafts={drafts.length} />
         )}
 
@@ -426,18 +427,22 @@ function QuickSwitcher({ conversations, onOpen, onClose }) {
 }
 
 // ── Top cards (Catch Up · Threads · Later · Drafts), horizontal scroll ──
-function TopCards({ active, onPick, unread, threads, reminders, drafts }) {
+function TopCards({ active, onPick, unread, threads, threadsUnread = 0, reminders, drafts }) {
   const cards = [
-    ['catchup', 'Catch Up', CatchUpIcon, unread, 'new'],
-    ['threads', 'Threads', ThreadIcon, threads, ''],
-    ['later', 'Later', LaterIcon, reminders, ''],
-    ['drafts', 'Drafts', DraftIcon, drafts, ''],
+    ['catchup', 'Catch Up', CatchUpIcon, unread, 'new', 0],
+    ['threads', 'Threads', ThreadIcon, threads, '', threadsUnread],
+    ['later', 'Later', LaterIcon, reminders, '', 0],
+    ['drafts', 'Drafts', DraftIcon, drafts, '', 0],
   ];
   return (
     <div className="flex gap-2 overflow-x-auto border-b border-line px-3 py-2 [-ms-overflow-style:none] [scrollbar-width:none]">
-      {cards.map(([key, label, Icon, count, suffix]) => (
+      {cards.map(([key, label, Icon, count, suffix, badge]) => (
         <button key={key} onClick={() => onPick(key)}
-          className={`flex min-w-[84px] shrink-0 flex-col rounded-xl border px-3 py-2 text-left transition ${active === key ? 'border-pine bg-pine-tint' : 'border-line bg-white hover:bg-paper'}`}>
+          className={`relative flex min-w-[84px] shrink-0 flex-col rounded-xl border px-3 py-2 text-left transition ${active === key ? 'border-pine bg-pine-tint' : 'border-line bg-white hover:bg-paper'}`}>
+          {/* unread badge (Slack-style): threads with new replies */}
+          {badge > 0 && (
+            <span className="absolute right-1.5 top-1.5 flex h-[18px] min-w-[18px] items-center justify-center rounded-full bg-sage px-1 text-[10px] font-bold text-white">{badge > 99 ? '99+' : badge}</span>
+          )}
           <span className="text-ink-soft"><Icon /></span>
           <span className="mt-1.5 text-xs font-semibold text-ink">{label}</span>
           <span className="text-[11px] text-ink-soft">{count > 0 ? `${count}${suffix ? ` ${suffix}` : ''}` : '—'}</span>
@@ -630,16 +635,23 @@ function CatchUpView({ conversations, onBack, onOpen }) {
 }
 
 function ThreadsView({ threads, onBack, onOpenThread }) {
+  const unreadN = threads.filter((t) => t.hasUnread).length;
+  const subtitle = threads.length
+    ? (unreadN ? `${unreadN} unread · ${threads.length} thread${threads.length === 1 ? '' : 's'}` : `${threads.length} thread${threads.length === 1 ? '' : 's'} you're in`)
+    : '';
   return (
-    <PaneShell title="Threads" subtitle={threads.length ? `${threads.length} thread${threads.length === 1 ? '' : 's'} you're in` : ''} onBack={onBack}>
+    <PaneShell title="Threads" subtitle={subtitle} onBack={onBack}>
       {threads.length === 0 ? <Empty icon="🧵" text="No threads yet." /> : threads.map((t) => (
         <button key={t.id} onClick={() => onOpenThread(t.conversationId, t)} className="flex w-full items-start gap-3 rounded-lg px-3 py-2 text-left hover:bg-paper">
           <Avatar id={t.authorId} name={t.author} photoUrl={t.authorPhoto} size={32} />
           <div className="min-w-0 flex-1">
             <div className="truncate text-[11px] font-semibold text-steel">{t.conversationType === 'group' ? '#' : t.conversationType === 'event' ? '🗓' : ''} {t.conversationName}</div>
-            <div className="truncate text-sm text-ink"><span className="font-semibold">{t.author}: </span>{stripFmt(t.body) || '(no text)'}</div>
-            <div className="text-[11px] text-ink-soft">💬 {t.replyCount} {t.replyCount === 1 ? 'reply' : 'replies'}{t.lastReplyAt ? ` · last ${timeOf(t.lastReplyAt)}` : ''}</div>
+            <div className={`truncate text-sm text-ink ${t.hasUnread ? 'font-semibold' : ''}`}><span className="font-semibold">{t.author}: </span>{stripFmt(t.body) || '(no text)'}</div>
+            <div className={`text-[11px] ${t.hasUnread ? 'font-semibold text-sage' : 'text-ink-soft'}`}>💬 {t.replyCount} {t.replyCount === 1 ? 'reply' : 'replies'}{t.lastReplyAt ? ` · last ${timeOf(t.lastReplyAt)}` : ''}</div>
           </div>
+          {t.unreadCount > 0 && (
+            <span className="mt-1 flex h-[18px] min-w-[18px] shrink-0 items-center justify-center rounded-full bg-sage px-1 text-[10px] font-bold text-white">{t.unreadCount > 99 ? '99+' : t.unreadCount}</span>
+          )}
         </button>
       ))}
     </PaneShell>
@@ -1194,6 +1206,15 @@ function ThreadPanel({ conversationId, parent, convLabel, users, onClose, onOpen
       qc.invalidateQueries({ queryKey: ['messages', conversationId] });
     },
   });
+
+  // Viewing a thread marks it read (Slack-style). Fire on open and each time a
+  // new reply lands while the panel is open, then refresh the Threads unread state.
+  const newestReplyId = thread.data?.replies?.length ? thread.data.replies[thread.data.replies.length - 1].id : null;
+  useEffect(() => {
+    markThreadRead(parent.id)
+      .then(() => qc.invalidateQueries({ queryKey: ['my-threads'] }))
+      .catch(() => {});
+  }, [parent.id, newestReplyId]); // eslint-disable-line
 
   return (
     // Full-screen over the chat on phones; a side panel from lg up.

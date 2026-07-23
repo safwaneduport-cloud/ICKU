@@ -360,14 +360,54 @@ export async function myThreads(userId) {
     orderBy: { createdAt: 'desc' },
     take: 60,
   });
+  // Per-thread unread (Slack-style): a reply from someone else, newer than my
+  // read baseline, counts as unread. Baseline = max(my ThreadRead.lastReadAt, my
+  // most recent own post in the thread). Replying or opening the thread advances
+  // lastReadAt; my own posts never count against me.
+  const rootIds = parents.map((p) => p.id);
+  const [reads, replies] = await Promise.all([
+    prisma.threadRead.findMany({ where: { userId, messageId: { in: rootIds } }, select: { messageId: true, lastReadAt: true } }),
+    prisma.message.findMany({ where: { parentId: { in: rootIds }, deletedAt: null }, select: { parentId: true, authorId: true, createdAt: true } }),
+  ]);
+  const readAt = new Map(reads.map((r) => [r.messageId, new Date(r.lastReadAt).getTime()]));
+  const myLast = new Map(); // rootId -> ms of my most recent post in the thread (root or reply)
+  const bump = (id, at) => { const t = new Date(at).getTime(); if (t > (myLast.get(id) || 0)) myLast.set(id, t); };
+  for (const p of parents) if (p.authorId === userId) bump(p.id, p.createdAt);
+  for (const r of replies) if (r.authorId === userId) bump(r.parentId, r.createdAt);
+  const unread = new Map(); // rootId -> count of others' replies newer than my baseline
+  for (const r of replies) {
+    if (r.authorId === userId) continue;
+    const baseline = Math.max(readAt.get(r.parentId) || 0, myLast.get(r.parentId) || 0);
+    if (new Date(r.createdAt).getTime() > baseline) unread.set(r.parentId, (unread.get(r.parentId) || 0) + 1);
+  }
+
   const shaped = parents.map((m) => ({
     ...shapeMessage(m, userId),
     conversationId: m.conversationId,
     conversationName: m.conversation.name || (m.conversation.type === 'dm' ? 'Direct message' : ''),
     conversationType: m.conversation.type,
+    unreadCount: unread.get(m.id) || 0,
+    hasUnread: (unread.get(m.id) || 0) > 0,
   }));
-  shaped.sort((a, b) => new Date(b.lastReplyAt || b.at) - new Date(a.lastReplyAt || a.at));
+  // Unread threads first, then most-recently-active.
+  shaped.sort((a, b) => (b.hasUnread ? 1 : 0) - (a.hasUnread ? 1 : 0) || new Date(b.lastReplyAt || b.at) - new Date(a.lastReplyAt || a.at));
   return shaped;
+}
+
+// Mark a thread read for this user (upserts lastReadAt = now). Only thread ROOTS
+// are tracked; opening a thread or posting a reply advances this.
+export async function markThreadRead(userId, messageId) {
+  const root = await prisma.message.findUnique({ where: { id: messageId }, select: { id: true, parentId: true, conversationId: true } });
+  if (!root) throw new ApiError(404, 'Thread not found');
+  if (root.parentId) throw new ApiError(400, 'Not a thread root');
+  await loadForRead(userId, root.conversationId); // membership / read access
+  const now = new Date();
+  await prisma.threadRead.upsert({
+    where: { userId_messageId: { userId, messageId } },
+    create: { userId, messageId, lastReadAt: now },
+    update: { lastReadAt: now },
+  });
+  return { ok: true };
 }
 
 // Every file/image shared in the conversations I'm part of — powers the "Files"
@@ -488,6 +528,16 @@ export async function postMessage(userId, conversationId, { body = '', parentId 
     include: { author: { select: { id: true, name: true } } },
   });
   await prisma.conversation.update({ where: { id: conversationId }, data: { updatedAt: new Date() } });
+
+  // Replying to a thread marks it read for me up to now (my own reply never shows
+  // as unread, and I'm caught up on everything before it).
+  if (parentId) {
+    await prisma.threadRead.upsert({
+      where: { userId_messageId: { userId, messageId: parentId } },
+      create: { userId, messageId: parentId, lastReadAt: new Date() },
+      update: { lastReadAt: new Date() },
+    }).catch(() => {});
+  }
 
   // @-mention routing: in an event chat, mentioned people become members so the
   // conversation surfaces in their Event Messages inbox.
