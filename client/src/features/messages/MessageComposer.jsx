@@ -75,8 +75,9 @@ export default function MessageComposer({ onSend, users = [], placeholder = 'Wri
     const el = taRef.current; if (!el) return;
     const s = el.selectionStart ?? text.length; const end = el.selectionEnd ?? s;
     const sel = text.slice(s, end);
-    const url = window.prompt('Link URL', 'https://');
-    if (!url) return;
+    let url = (window.prompt('Link URL', 'https://') || '').trim();
+    if (!url || url === 'https://' || url === 'http://') return;
+    if (!/^https?:\/\//i.test(url)) url = `https://${url}`; // auto-prefix so it renders as a link
     const md = `[${sel || url}](${url})`;
     setText(text.slice(0, s) + md + text.slice(end));
     requestAnimationFrame(() => { el.focus(); const p = s + md.length; el.setSelectionRange(p, p); });
@@ -165,22 +166,23 @@ export default function MessageComposer({ onSend, users = [], placeholder = 'Wri
     if (e.key === 'Enter' && !e.shiftKey) { e.preventDefault(); send(); }
   }
 
-  // Upload a set of files (from the picker, a drag-drop, or a paste).
+  // Upload a set of files (from the picker, a drag-drop, or a paste). Each file's
+  // read+upload is guarded so one failure doesn't abort the whole batch.
   async function processFiles(fileList) {
     for (const f of Array.from(fileList || [])) {
       if (f.size > MAX_BYTES) { alert(`"${f.name}" is larger than ${MAX_MB}MB and was skipped.`); continue; }
-      const dataUrl = await new Promise((res, rej) => {
-        const r = new FileReader();
-        r.onload = () => res(r.result);
-        r.onerror = rej;
-        r.readAsDataURL(f);
-      });
       setUploading((n) => n + 1);
       try {
+        const dataUrl = await new Promise((res, rej) => {
+          const r = new FileReader();
+          r.onload = () => res(r.result);
+          r.onerror = rej;
+          r.readAsDataURL(f);
+        });
         const att = await uploadFile(dataUrl, f.name || 'pasted-image.png'); // → { kind, name, url }
         setAtts((a) => [...a, att]);
       } catch (err) {
-        alert(`Couldn't upload "${f.name}": ${err.response?.data?.error?.message || err.message}`);
+        alert(`Couldn't attach "${f.name || 'file'}": ${err?.response?.data?.error?.message || err?.message || 'read failed'}`);
       } finally {
         setUploading((n) => n - 1);
       }
@@ -192,9 +194,20 @@ export default function MessageComposer({ onSend, users = [], placeholder = 'Wri
     const files = [...(e.clipboardData?.files || [])];
     if (files.length) { e.preventDefault(); processFiles(files); }
   }
-  // Drag-drop files onto the composer.
+  // Drag-drop onto the composer. A depth counter keeps the overlay from sticking
+  // when the pointer moves over child elements (dragleave bubbles from the deepest
+  // node); a window drop/dragend listener is a final safety net.
   const [dragOver, setDragOver] = useState(false);
-  function onDrop(e) { e.preventDefault(); setDragOver(false); if (e.dataTransfer?.files?.length) processFiles(e.dataTransfer.files); }
+  const dragDepth = useRef(0);
+  const onDragEnter = () => { dragDepth.current += 1; setDragOver(true); };
+  const onDragLeave = () => { dragDepth.current = Math.max(0, dragDepth.current - 1); if (!dragDepth.current) setDragOver(false); };
+  function onDrop(e) { e.preventDefault(); dragDepth.current = 0; setDragOver(false); if (e.dataTransfer?.files?.length) processFiles(e.dataTransfer.files); }
+  useEffect(() => {
+    const reset = () => { dragDepth.current = 0; setDragOver(false); };
+    window.addEventListener('drop', reset);
+    window.addEventListener('dragend', reset);
+    return () => { window.removeEventListener('drop', reset); window.removeEventListener('dragend', reset); };
+  }, []);
 
   async function send() {
     if (sending) return; // a fast double-Enter bypasses the disabled Send button
@@ -211,8 +224,9 @@ export default function MessageComposer({ onSend, users = [], placeholder = 'Wri
 
   return (
     <div
-      onDragOver={(e) => { e.preventDefault(); setDragOver(true); }}
-      onDragLeave={(e) => { if (e.currentTarget === e.target) setDragOver(false); }}
+      onDragEnter={onDragEnter}
+      onDragOver={(e) => e.preventDefault()}
+      onDragLeave={onDragLeave}
       onDrop={onDrop}
       className={`relative rounded-xl border bg-white p-2 ${dragOver ? 'border-pine ring-2 ring-pine/30' : 'border-line'}`}
     >
