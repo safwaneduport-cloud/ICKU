@@ -128,6 +128,7 @@ export default function Messages() {
   const [search, setSearch] = useState('');
   const [fabOpen, setFabOpen] = useState(false);
   const [focusMsg, setFocusMsg] = useState(null); // a search hit to scroll to when its conversation opens
+  const [switcherOpen, setSwitcherOpen] = useState(false); // ⌘K quick switcher
 
   const conversations = useQuery({ queryKey: ['conversations'], queryFn: getConversations, retry: false, refetchInterval: 5000 });
   const users = useQuery({ queryKey: ['users'], queryFn: getUsers, retry: false });
@@ -179,6 +180,15 @@ export default function Messages() {
       window.history.replaceState({}, '', window.location.pathname);
     }
   }, []); // eslint-disable-line
+
+  // ⌘K / Ctrl+K opens the quick switcher.
+  useEffect(() => {
+    const onKey = (e) => {
+      if ((e.metaKey || e.ctrlKey) && !e.shiftKey && e.key.toLowerCase() === 'k') { e.preventDefault(); setSwitcherOpen(true); }
+    };
+    window.addEventListener('keydown', onKey);
+    return () => window.removeEventListener('keydown', onKey);
+  }, []);
 
   return (
     // On phones this is one pane at a time: the rail, or the open conversation.
@@ -338,6 +348,54 @@ export default function Messages() {
           onSent={(id) => { setModal(null); qc.invalidateQueries({ queryKey: ['conversations'] }); setSelectedId(id); }}
         />
       )}
+
+      {switcherOpen && (
+        <QuickSwitcher
+          conversations={conversations.data || []}
+          onOpen={(id) => openConversation(id)}
+          onClose={() => setSwitcherOpen(false)}
+        />
+      )}
+    </div>
+  );
+}
+
+// ⌘K quick switcher: type to jump to any conversation (arrow keys + Enter).
+function QuickSwitcher({ conversations, onOpen, onClose }) {
+  const [q, setQ] = useState('');
+  const [hi, setHi] = useState(0);
+  const term = q.trim().toLowerCase();
+  const items = conversations
+    .filter((c) => !term || (c.name || '').toLowerCase().includes(term))
+    .sort((a, b) => (b.unread || 0) - (a.unread || 0) || new Date(b.lastAt || 0) - new Date(a.lastAt || 0))
+    .slice(0, 12);
+  const pick = (c) => { if (c) { onOpen(c.id); onClose(); } };
+  const onKey = (e) => {
+    if (e.key === 'ArrowDown') { e.preventDefault(); setHi((h) => Math.min(h + 1, items.length - 1)); }
+    else if (e.key === 'ArrowUp') { e.preventDefault(); setHi((h) => Math.max(h - 1, 0)); }
+    else if (e.key === 'Enter') { e.preventDefault(); pick(items[hi]); }
+    else if (e.key === 'Escape') { e.preventDefault(); onClose(); }
+  };
+  return (
+    <div className="fixed inset-0 z-50 flex items-start justify-center bg-ink/30 p-4 pt-20" onClick={onClose}>
+      <div className="w-full max-w-lg overflow-hidden rounded-2xl border border-line bg-white shadow-xl" onClick={(e) => e.stopPropagation()}>
+        <input autoFocus value={q} onChange={(e) => { setQ(e.target.value); setHi(0); }} onKeyDown={onKey}
+          placeholder="Jump to a conversation…" className="w-full border-b border-line px-4 py-3 text-sm outline-none" />
+        <div className="max-h-80 overflow-y-auto py-1">
+          {items.length === 0 && <p className="px-4 py-3 text-sm text-ink-soft">No matches.</p>}
+          {items.map((c, i) => (
+            <button key={c.id} onMouseEnter={() => setHi(i)} onClick={() => pick(c)}
+              className={`flex w-full items-center gap-2 px-4 py-2 text-left text-sm ${i === hi ? 'bg-pine-tint' : 'hover:bg-paper'}`}>
+              {c.type === 'dm'
+                ? <Avatar id={c.id} name={c.name} photoUrl={c.photoUrl} size={22} rounded="rounded" />
+                : <span className="w-5 shrink-0 text-center text-ink-soft">{c.type === 'event' ? '🗓' : '#'}</span>}
+              <span className="min-w-0 flex-1 truncate">{c.name}</span>
+              {c.unread > 0 && <span className="flex h-[18px] min-w-[18px] items-center justify-center rounded-full bg-sage px-1 text-[10px] font-bold text-white">{c.unread > 99 ? '99+' : c.unread}</span>}
+            </button>
+          ))}
+        </div>
+        <div className="border-t border-line px-4 py-1.5 text-[11px] text-ink-soft">↑↓ to navigate · Enter to open · Esc to close</div>
+      </div>
     </div>
   );
 }
@@ -680,6 +738,7 @@ function ChatPane({ conversationId, users, focusMessageId, onOpenThread, onOpenP
   const me = user?.id;
   const [addOpen, setAddOpen] = useState(false);
   const [toast, setToast] = useState('');
+  const [atBottom, setAtBottom] = useState(true); // controls the "jump to latest" button
   const conv = useQuery({ queryKey: ['conversation', conversationId], queryFn: () => getConversation(conversationId), retry: 1 });
   const messages = useQuery({ queryKey: ['messages', conversationId], queryFn: () => getMessages(conversationId), retry: false, refetchInterval: 3000 });
   const reminders = useQuery({ queryKey: ['reminders'], queryFn: getReminders, retry: false });
@@ -725,6 +784,8 @@ function ChatPane({ conversationId, users, focusMessageId, onOpenThread, onOpenP
   // reading). Always follow your own just-sent message.
   const scrollRef = useRef(null);
   const prevLen = useRef(0);
+  const onScroll = () => { const el = scrollRef.current; if (el) setAtBottom(el.scrollHeight - el.scrollTop - el.clientHeight < 120); };
+  const jumpToLatest = () => scrollRef.current?.scrollTo({ top: scrollRef.current.scrollHeight, behavior: 'smooth' });
   useEffect(() => {
     if (didInit.current && msgs.length > prevLen.current) {
       const el = scrollRef.current;
@@ -790,7 +851,7 @@ function ChatPane({ conversationId, users, focusMessageId, onOpenThread, onOpenP
       </div>
 
       {/* messages */}
-      <div ref={scrollRef} className="flex-1 overflow-y-auto py-2">
+      <div ref={scrollRef} onScroll={onScroll} className="flex-1 overflow-y-auto py-2">
         {messages.isLoading && <p className="px-4 py-6 text-sm text-ink-soft">Loading…</p>}
         {messages.data?.length === 0 && <p className="px-4 py-8 text-center text-sm text-ink-soft">No messages yet. Say hello! 👋</p>}
         {messages.data?.map((m, i) => {
@@ -812,6 +873,10 @@ function ChatPane({ conversationId, users, focusMessageId, onOpenThread, onOpenP
         })}
         <div ref={bottomRef} />
       </div>
+      {!atBottom && (
+        <button onClick={jumpToLatest} title="Jump to latest" aria-label="Jump to latest"
+          className="absolute bottom-24 right-4 z-10 flex h-9 w-9 items-center justify-center rounded-full border border-line bg-white text-lg text-ink-soft shadow-md hover:border-pine hover:text-pine">↓</button>
+      )}
       {toast && <div className="pointer-events-none absolute bottom-24 left-1/2 -translate-x-1/2 rounded-full bg-pine px-4 py-2 text-sm text-white shadow-lg">{toast}</div>}
 
       {/* composer */}
