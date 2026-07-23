@@ -319,6 +319,37 @@ export async function filesFor(userId) {
   return files.slice(0, 120);
 }
 
+// Substring search over message bodies in the conversations I'm a member of.
+export async function searchMessages(userId, q) {
+  const term = (q || '').trim();
+  if (term.length < 2) return [];
+  const memberships = await prisma.conversationMember.findMany({ where: { userId }, select: { conversationId: true } });
+  const convIds = memberships.map((m) => m.conversationId);
+  if (!convIds.length) return [];
+  const msgs = await prisma.message.findMany({
+    where: { conversationId: { in: convIds }, deletedAt: null, body: { contains: term, mode: 'insensitive' } },
+    include: {
+      author: { select: { name: true } },
+      conversation: { select: { type: true, name: true, members: { select: { userId: true, user: { select: { name: true } } } } } },
+    },
+    orderBy: { createdAt: 'desc' },
+    take: 40,
+  });
+  return msgs.map((m) => {
+    const c = m.conversation;
+    const other = c.type === 'dm' ? c.members.find((mm) => mm.userId !== userId)?.user : null;
+    return {
+      id: m.id,
+      conversationId: m.conversationId,
+      conversationName: c.type === 'dm' ? other?.name || 'Direct message' : c.name || '',
+      conversationType: c.type,
+      author: m.author?.name || '—',
+      snippet: m.body,
+      at: m.createdAt,
+    };
+  });
+}
+
 export async function postMessage(userId, conversationId, { body = '', parentId = null, attachments = null, mentions = [] } = {}) {
   const conv = await prisma.conversation.findUnique({ where: { id: conversationId }, include: { members: true } });
   if (!conv) throw new ApiError(404, 'Conversation not found');

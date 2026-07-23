@@ -23,6 +23,8 @@ router.patch('/conversations/:id/section', ctrl.setSection);
 router.get('/threads/mine', ctrl.myThreads);
 // Files shared across my conversations (Files tab)
 router.get('/files', ctrl.listFiles);
+// Search message bodies across my conversations
+router.get('/search', ctrl.searchMessages);
 // Thread (a message's replies)
 router.get('/thread/:messageId', ctrl.listThread);
 

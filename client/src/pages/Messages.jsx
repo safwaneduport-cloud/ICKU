@@ -4,7 +4,7 @@ import { getUsers } from '../api/users.api.js';
 import {
   getConversations, getConversation, getMessages, postMessage,
   getThread, getMyThreads, createGroup, addMembers, openDm, markRead,
-  getReminders, completeReminder, setSection, getFiles,
+  getReminders, completeReminder, setSection, getFiles, searchMessages,
 } from '../api/messages.api.js';
 import { useProfile } from '../store/ProfileContext.jsx';
 import { useAuth } from '../store/AuthContext.jsx';
@@ -18,6 +18,27 @@ const sameDay = (a, b) => new Date(a).toDateString() === new Date(b).toDateStrin
 const withinGap = (a, b) => Math.abs(new Date(b) - new Date(a)) < 5 * 60e3;
 const timeOf = (iso) => new Date(iso).toLocaleTimeString(undefined, { hour: 'numeric', minute: '2-digit' });
 const stripFmt = (s = '') => s.replace(/[*_~`]/g, '');
+// Short timestamp for search hits: time if today, else a short date.
+const shortWhen = (iso) => {
+  const d = new Date(iso);
+  return d.toDateString() === new Date().toDateString()
+    ? d.toLocaleTimeString(undefined, { hour: 'numeric', minute: '2-digit' })
+    : d.toLocaleDateString(undefined, { month: 'short', day: 'numeric' });
+};
+// A snippet windowed around the match, with the matched term highlighted.
+function highlightMatch(text = '', q = '') {
+  const term = q.trim();
+  const idx = term ? text.toLowerCase().indexOf(term.toLowerCase()) : -1;
+  if (idx < 0) return stripFmt(text).slice(0, 140);
+  const start = Math.max(0, idx - 24);
+  return (
+    <>
+      {(start > 0 ? '…' : '') + stripFmt(text.slice(start, idx))}
+      <mark className="rounded bg-ochre/30 px-0.5 text-ink">{stripFmt(text.slice(idx, idx + term.length))}</mark>
+      {stripFmt(text.slice(idx + term.length, idx + term.length + 100))}
+    </>
+  );
+}
 // "in 20 min" / "in 2 hr" / "in 3 days" for a reminder's due time.
 function dueLabel(at) {
   const ms = new Date(at) - Date.now();
@@ -148,6 +169,9 @@ export default function Messages() {
       <aside className={`relative w-full shrink-0 flex-col overflow-hidden rounded-none bg-white text-ink sm:rounded-2xl sm:border sm:border-line lg:flex lg:w-64 ${paneOpen ? 'hidden lg:flex' : 'flex'}`}>
         <div className="flex items-center justify-between border-b border-line px-4 py-3">
           <h1 className="font-serif text-lg font-bold text-pine">Messages</h1>
+          {/* Desktop search toggle (phones use the footer search button). */}
+          <button onClick={() => setSearchOpen((o) => !o)} aria-label="Search messages"
+            className={`hidden rounded-lg p-1.5 lg:inline-flex ${searchOpen ? 'bg-pine-tint text-pine' : 'text-ink-soft hover:bg-paper hover:text-pine'}`}><SearchIcon /></button>
         </div>
 
         {searchOpen && (
@@ -165,6 +189,7 @@ export default function Messages() {
 
         {/* Full-width dividers between sections, Slack-style */}
         <div className="flex-1 divide-y divide-line overflow-y-auto pb-28 lg:pb-3">
+          {search.trim().length >= 2 && <MessageSearchResults q={search} onOpen={openConversation} />}
           {mobileTab === 'files' ? (
             <FilesView onOpen={openConversation} />
           ) : mobileTab === 'dms' ? (
@@ -363,6 +388,32 @@ function FilesView({ onOpen }) {
               <span className="block truncate text-[13px] font-medium text-ink">{f.name}</span>
               <span className="block truncate text-[11px] text-ink-soft">{f.author} · {f.conversationName || 'Direct message'}</span>
             </span>
+          </button>
+        ))}
+      </div>
+    </div>
+  );
+}
+
+// Message-content search results (shown in the rail while searching).
+function MessageSearchResults({ q, onOpen }) {
+  const term = q.trim();
+  const res = useQuery({ queryKey: ['msg-search', term], queryFn: () => searchMessages(term), enabled: term.length >= 2, retry: false });
+  const hits = res.data || [];
+  return (
+    <div className="py-1.5">
+      <div className="px-3 pb-1 pt-1 text-[15px] font-bold text-ink">Messages</div>
+      {res.isLoading && <p className="px-3 py-1 text-xs text-ink-soft">Searching…</p>}
+      {!res.isLoading && hits.length === 0 && <p className="px-3 py-1 text-xs text-ink-soft">No message matches.</p>}
+      <div className="space-y-0.5 px-2">
+        {hits.map((h) => (
+          <button key={h.id} onClick={() => onOpen(h.conversationId)} className="block w-full rounded-lg px-2 py-1.5 text-left hover:bg-paper">
+            <span className="flex items-center gap-1 truncate text-[11px] text-ink-soft">
+              <span className="text-ink-soft">{h.conversationType === 'group' ? '#' : h.conversationType === 'event' ? '🗓' : ''}</span>
+              <span className="font-semibold text-ink">{h.author}</span>
+              <span className="truncate">· {h.conversationName} · {shortWhen(h.at)}</span>
+            </span>
+            <span className="mt-0.5 block break-words text-[13px] leading-snug text-ink">{highlightMatch(h.snippet, q)}</span>
           </button>
         ))}
       </div>
