@@ -800,6 +800,30 @@ function ChannelRow({ c, selected, onSelect, sections, onMove }) {
   );
 }
 
+// ── Optimistic outbox store ─────────────────────────────────────────
+// Pending/failed sends live here, keyed by conversationId, OUTSIDE the
+// per-conversation ChatPane mount. ChatPane is key={selectedId} and remounts on
+// every switch, so keeping the outbox in module scope means a failed send isn't
+// silently dropped when you switch away and back — you return to it and can retry.
+const outboxStore = new Map(); // conversationId -> [{ tempId, payload, status }]
+const outboxListeners = new Set();
+let outboxSeq = 0;
+const readOutbox = (cid) => outboxStore.get(cid) || [];
+function writeOutbox(cid, updater) {
+  const next = updater(outboxStore.get(cid) || []);
+  if (next.length) outboxStore.set(cid, next); else outboxStore.delete(cid);
+  outboxListeners.forEach((fn) => fn());
+}
+function useOutbox(cid) {
+  const [, bump] = useState(0);
+  useEffect(() => {
+    const fn = () => bump((n) => n + 1);
+    outboxListeners.add(fn);
+    return () => { outboxListeners.delete(fn); };
+  }, []);
+  return readOutbox(cid);
+}
+
 function ChatPane({ conversationId, users, focusMessageId, onOpenThread, onOpenProfile, onForward, onBack }) {
   const qc = useQueryClient();
   const { user } = useAuth();
@@ -894,30 +918,36 @@ function ChatPane({ conversationId, users, focusMessageId, onOpenThread, onOpenP
   }, [messages.error]); // eslint-disable-line
 
   // Optimistic outbox: a sent message shows immediately (Sending…); on delivery
-  // it's replaced by the real one, on failure it stays with Retry / Discard.
-  const [outbox, setOutbox] = useState([]); // { tempId, payload, status: 'sending'|'failed' }
-  const tempSeq = useRef(0);
-  const deliver = (item) => {
-    postMessage(conversationId, item.payload)
+  // it's replaced by the real one, on failure it stays with Retry / Discard. Held
+  // in a module store keyed by conversationId (see useOutbox) so it survives this
+  // pane remounting on a conversation switch — a failed send is never lost.
+  const outbox = useOutbox(conversationId);
+  const deliver = (cid, item) => {
+    postMessage(cid, item.payload)
       .then(() => {
-        setOutbox((ob) => ob.filter((o) => o.tempId !== item.tempId));
-        qc.invalidateQueries({ queryKey: ['messages', conversationId] });
         qc.invalidateQueries({ queryKey: ['conversations'] });
+        // Drop the optimistic item only AFTER the messages refetch settles, so the
+        // real message is on screen before the placeholder goes — no blink/disappear.
+        qc.invalidateQueries({ queryKey: ['messages', cid] })
+          .finally(() => writeOutbox(cid, (ob) => ob.filter((o) => o.tempId !== item.tempId)));
       })
-      .catch(() => setOutbox((ob) => ob.map((o) => (o.tempId === item.tempId ? { ...o, status: 'failed' } : o))));
+      .catch(() => {
+        writeOutbox(cid, (ob) => ob.map((o) => (o.tempId === item.tempId ? { ...o, status: 'failed' } : o)));
+        setToast('⚠️ Message not sent — retry below.');
+      });
   };
   const enqueue = (payload) => {
-    tempSeq.current += 1;
-    const item = { tempId: `t${tempSeq.current}`, payload, status: 'sending' };
-    setOutbox((ob) => [...ob, item]);
-    deliver(item);
+    outboxSeq += 1;
+    const item = { tempId: `t${outboxSeq}`, payload, status: 'sending' };
+    writeOutbox(conversationId, (ob) => [...ob, item]);
+    deliver(conversationId, item);
     requestAnimationFrame(() => bottomRef.current?.scrollIntoView({ behavior: 'smooth' }));
   };
   const retryOutbox = (item) => {
-    setOutbox((ob) => ob.map((o) => (o.tempId === item.tempId ? { ...o, status: 'sending' } : o)));
-    deliver(item);
+    writeOutbox(conversationId, (ob) => ob.map((o) => (o.tempId === item.tempId ? { ...o, status: 'sending' } : o)));
+    deliver(conversationId, { ...item, status: 'sending' });
   };
-  const discardOutbox = (tempId) => setOutbox((ob) => ob.filter((o) => o.tempId !== tempId));
+  const discardOutbox = (tempId) => writeOutbox(conversationId, (ob) => ob.filter((o) => o.tempId !== tempId));
 
   const c = conv.data;
   if (conv.isError) return (
@@ -1094,10 +1124,17 @@ function ForwardModal({ message, conversations, sourceName, onClose, onDone }) {
   const [note, setNote] = useState('');
   const [q, setQ] = useState('');
   const list = conversations.filter((c) => !q || (c.name || '').toLowerCase().includes(q.toLowerCase()));
+  // If the message being forwarded is itself a pure forward card (has no note of
+  // its own), carry the inner original's content so a re-forward isn't an empty card.
+  const inner = message.body ? null : (message.attachments || []).find((a) => a && a.kind === 'forward');
+  const fwdAuthor = inner?.author || message.author;
+  const fwdBody = message.body || inner?.body || '';
+  const fwdSource = inner?.source || sourceName || '';
+  const hasFile = (message.attachments || []).some((a) => a && a.url);
   const send = useMutation({
     mutationFn: () => {
       const files = (message.attachments || []).filter((a) => a && a.url);
-      const fwd = { kind: 'forward', author: message.author, authorId: message.authorId, at: message.at, body: message.body || '', source: sourceName || '' };
+      const fwd = { kind: 'forward', author: fwdAuthor, authorId: inner?.authorId || message.authorId, at: inner?.at || message.at, body: fwdBody, source: fwdSource };
       return postMessage(dest, { body: note.trim(), attachments: [fwd, ...files] });
     },
     onSuccess: () => onDone(dest),
@@ -1106,11 +1143,11 @@ function ForwardModal({ message, conversations, sourceName, onClose, onDone }) {
     <ModalShell title="Forward message" onClose={onClose}>
       <div className="mt-3 rounded-lg border border-line bg-paper/40 px-3 py-2 text-sm">
         <div className="flex items-baseline gap-1.5">
-          <span className="font-semibold text-ink">{message.author}</span>
-          {sourceName && <span className="text-[10px] text-ink-soft">{sourceName}</span>}
+          <span className="font-semibold text-ink">{fwdAuthor}</span>
+          {fwdSource && <span className="text-[10px] text-ink-soft">{fwdSource}</span>}
         </div>
         <p className="max-h-16 overflow-hidden whitespace-pre-wrap break-words text-ink-soft">
-          {message.body || (message.attachments?.length ? '📎 attachment' : '')}
+          {fwdBody || (hasFile ? '📎 attachment' : '')}
         </p>
       </div>
       <textarea value={note} onChange={(e) => setNote(e.target.value)} rows={2} placeholder="Add a message (optional)"
