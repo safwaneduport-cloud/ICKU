@@ -25,19 +25,26 @@ const shortWhen = (iso) => {
     ? d.toLocaleTimeString(undefined, { hour: 'numeric', minute: '2-digit' })
     : d.toLocaleDateString(undefined, { month: 'short', day: 'numeric' });
 };
-// A snippet windowed around the match, with the matched term highlighted.
+// Highlight the matched term inside a (server-windowed) snippet.
 function highlightMatch(text = '', q = '') {
+  const clean = stripFmt(text);
   const term = q.trim();
-  const idx = term ? text.toLowerCase().indexOf(term.toLowerCase()) : -1;
-  if (idx < 0) return stripFmt(text).slice(0, 140);
-  const start = Math.max(0, idx - 24);
+  const idx = term ? clean.toLowerCase().indexOf(term.toLowerCase()) : -1;
+  if (idx < 0) return clean;
   return (
     <>
-      {(start > 0 ? '…' : '') + stripFmt(text.slice(start, idx))}
-      <mark className="rounded bg-ochre/30 px-0.5 text-ink">{stripFmt(text.slice(idx, idx + term.length))}</mark>
-      {stripFmt(text.slice(idx + term.length, idx + term.length + 100))}
+      {clean.slice(0, idx)}
+      <mark className="rounded bg-ochre/30 px-0.5 text-ink">{clean.slice(idx, idx + term.length)}</mark>
+      {clean.slice(idx + term.length)}
     </>
   );
+}
+
+// Debounce a value so fast typing doesn't fire a request per keystroke.
+function useDebounced(value, ms = 300) {
+  const [v, setV] = useState(value);
+  useEffect(() => { const t = setTimeout(() => setV(value), ms); return () => clearTimeout(t); }, [value, ms]);
+  return v;
 }
 // "in 20 min" / "in 2 hr" / "in 3 days" for a reminder's due time.
 function dueLabel(at) {
@@ -120,6 +127,7 @@ export default function Messages() {
   const [searchOpen, setSearchOpen] = useState(false);
   const [search, setSearch] = useState('');
   const [fabOpen, setFabOpen] = useState(false);
+  const [focusMsg, setFocusMsg] = useState(null); // a search hit to scroll to when its conversation opens
 
   const conversations = useQuery({ queryKey: ['conversations'], queryFn: getConversations, retry: false, refetchInterval: 5000 });
   const users = useQuery({ queryKey: ['users'], queryFn: getUsers, retry: false });
@@ -148,7 +156,7 @@ export default function Messages() {
   const drafts = listDrafts(); // localStorage; bumpDraft re-renders on change
   const totalUnread = (conversations.data || []).reduce((n, c) => n + (c.unread || 0), 0);
 
-  const openConversation = (id) => { setActiveCard(null); setSelectedId(id); };
+  const openConversation = (id, msgId = null) => { setActiveCard(null); setFocusMsg(msgId); setSelectedId(id); };
   const openThreadFrom = (convId, parent) => { setActiveCard(null); setPendingThread(parent); setSelectedId(convId); };
   const pickCard = (key) => { setSelectedId(null); setThread(null); setActiveCard((k) => (k === key ? null : key)); };
 
@@ -286,6 +294,7 @@ export default function Messages() {
             key={selectedId}
             conversationId={selectedId}
             users={userOpts}
+            focusMessageId={focusMsg}
             onOpenThread={setThread}
             onOpenProfile={openProfile}
             onBack={() => setSelectedId(null)}
@@ -397,23 +406,25 @@ function FilesView({ onOpen }) {
 
 // Message-content search results (shown in the rail while searching).
 function MessageSearchResults({ q, onOpen }) {
-  const term = q.trim();
+  const term = useDebounced(q.trim(), 300);
   const res = useQuery({ queryKey: ['msg-search', term], queryFn: () => searchMessages(term), enabled: term.length >= 2, retry: false });
   const hits = res.data || [];
+  const ready = term.length >= 2;
   return (
     <div className="py-1.5">
       <div className="px-3 pb-1 pt-1 text-[15px] font-bold text-ink">Messages</div>
-      {res.isLoading && <p className="px-3 py-1 text-xs text-ink-soft">Searching…</p>}
-      {!res.isLoading && hits.length === 0 && <p className="px-3 py-1 text-xs text-ink-soft">No message matches.</p>}
+      {ready && res.isLoading && <p className="px-3 py-1 text-xs text-ink-soft">Searching…</p>}
+      {res.isError && <p className="px-3 py-1 text-xs text-brick">Search failed — try again.</p>}
+      {ready && !res.isLoading && !res.isError && hits.length === 0 && <p className="px-3 py-1 text-xs text-ink-soft">No message matches.</p>}
       <div className="space-y-0.5 px-2">
         {hits.map((h) => (
-          <button key={h.id} onClick={() => onOpen(h.conversationId)} className="block w-full rounded-lg px-2 py-1.5 text-left hover:bg-paper">
+          <button key={h.id} onClick={() => onOpen(h.conversationId, h.id)} className="block w-full rounded-lg px-2 py-1.5 text-left hover:bg-paper">
             <span className="flex items-center gap-1 truncate text-[11px] text-ink-soft">
               <span className="text-ink-soft">{h.conversationType === 'group' ? '#' : h.conversationType === 'event' ? '🗓' : ''}</span>
               <span className="font-semibold text-ink">{h.author}</span>
               <span className="truncate">· {h.conversationName} · {shortWhen(h.at)}</span>
             </span>
-            <span className="mt-0.5 block break-words text-[13px] leading-snug text-ink">{highlightMatch(h.snippet, q)}</span>
+            <span className="mt-0.5 block break-words text-[13px] leading-snug text-ink">{highlightMatch(h.snippet, term)}</span>
           </button>
         ))}
       </div>
@@ -652,7 +663,7 @@ function ChannelRow({ c, selected, onSelect, sections, onMove }) {
   );
 }
 
-function ChatPane({ conversationId, users, onOpenThread, onOpenProfile, onBack }) {
+function ChatPane({ conversationId, users, focusMessageId, onOpenThread, onOpenProfile, onBack }) {
   const qc = useQueryClient();
   const { user } = useAuth();
   const me = user?.id;
@@ -683,6 +694,17 @@ function ChatPane({ conversationId, users, onOpenThread, onOpenProfile, onBack }
     if (didInit.current || !conv.data || !messages.data) return;
     didInit.current = true;
     requestAnimationFrame(() => {
+      // A search hit → jump to and briefly highlight that message.
+      if (focusMessageId) {
+        const el = document.getElementById(`msg-${focusMessageId}`);
+        if (el) {
+          el.scrollIntoView({ block: 'center' });
+          el.style.transition = 'background-color .4s';
+          el.style.backgroundColor = 'rgba(184,134,47,0.16)';
+          setTimeout(() => { el.style.backgroundColor = ''; }, 1800);
+          return;
+        }
+      }
       if (firstUnreadId && dividerRef.current) dividerRef.current.scrollIntoView({ block: 'center' });
       else bottomRef.current?.scrollIntoView();
     });

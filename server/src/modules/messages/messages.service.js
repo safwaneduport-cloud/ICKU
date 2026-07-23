@@ -319,15 +319,27 @@ export async function filesFor(userId) {
   return files.slice(0, 120);
 }
 
+// A short snippet windowed around the first occurrence of `term`, with ellipses.
+function snippetAround(body = '', term = '') {
+  const i = body.toLowerCase().indexOf(term.toLowerCase());
+  if (i < 0) return body.slice(0, 160) + (body.length > 160 ? '…' : '');
+  const start = Math.max(0, i - 30);
+  const end = Math.min(body.length, i + term.length + 120);
+  return (start > 0 ? '…' : '') + body.slice(start, end) + (end < body.length ? '…' : '');
+}
+
 // Substring search over message bodies in the conversations I'm a member of.
 export async function searchMessages(userId, q) {
-  const term = (q || '').trim();
+  const raw = Array.isArray(q) ? q[0] : q; // a duplicate ?q= param arrives as an array
+  const term = (typeof raw === 'string' ? raw : '').trim();
   if (term.length < 2) return [];
   const memberships = await prisma.conversationMember.findMany({ where: { userId }, select: { conversationId: true } });
   const convIds = memberships.map((m) => m.conversationId);
   if (!convIds.length) return [];
+  // Escape LIKE metacharacters so '%' / '_' match literally instead of as wildcards.
+  const esc = term.replace(/[\\%_]/g, (c) => `\\${c}`);
   const msgs = await prisma.message.findMany({
-    where: { conversationId: { in: convIds }, deletedAt: null, body: { contains: term, mode: 'insensitive' } },
+    where: { conversationId: { in: convIds }, deletedAt: null, body: { contains: esc, mode: 'insensitive' } },
     include: {
       author: { select: { name: true } },
       conversation: { select: { type: true, name: true, members: { select: { userId: true, user: { select: { name: true } } } } } },
@@ -344,7 +356,7 @@ export async function searchMessages(userId, q) {
       conversationName: c.type === 'dm' ? other?.name || 'Direct message' : c.name || '',
       conversationType: c.type,
       author: m.author?.name || '—',
-      snippet: m.body,
+      snippet: snippetAround(m.body, term),
       at: m.createdAt,
     };
   });
