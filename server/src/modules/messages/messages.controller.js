@@ -87,6 +87,10 @@ export async function setDescription(req, res, next) {
   try { ok(res, await service.setDescription(req.user.id, req.params.id, req.body?.description)); } catch (e) { next(e); }
 }
 
+export async function renameConversation(req, res, next) {
+  try { ok(res, await service.renameConversation(req.user.id, req.params.id, req.body?.name)); } catch (e) { next(e); }
+}
+
 export async function editMessage(req, res, next) {
   try { ok(res, await service.editMessage(req.user.id, req.params.messageId, req.body?.body)); } catch (e) { next(e); }
 }

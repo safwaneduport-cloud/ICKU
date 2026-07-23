@@ -15,6 +15,9 @@ export const setMute = (id, muted) =>
 export const setDescription = (id, description) =>
   api.patch(`/messages/conversations/${id}/description`, { description }).then((r) => r.data.data);
 
+export const renameConversation = (id, name) =>
+  api.patch(`/messages/conversations/${id}/name`, { name }).then((r) => r.data.data);
+
 // Paginated: returns { messages, hasMore }. No params → most recent page;
 // { before } → older page before that message id; { focus } → window around one.
 export const getMessages = (id, { before, focus, limit } = {}) =>

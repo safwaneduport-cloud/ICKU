@@ -23,6 +23,7 @@ router.post('/conversations/:id/unread', ctrl.markUnread); // mark unread from a
 router.patch('/conversations/:id/section', ctrl.setSection);
 router.patch('/conversations/:id/mute', ctrl.setMute);
 router.patch('/conversations/:id/description', ctrl.setDescription);
+router.patch('/conversations/:id/name', ctrl.renameConversation); // edit group name
 
 // Threads I'm part of (Threads card) — before the '/thread/:messageId' param route
 router.get('/threads/mine', ctrl.myThreads);

@@ -5,7 +5,7 @@ import {
   getConversations, getConversation, getMessages, postMessage,
   getThread, getMyThreads, markThreadRead, createGroup, addMembers, openDm, markRead,
   getReminders, completeReminder, setSection, getFiles, searchMessages,
-  removeMember, leaveConversation, getPinned, unpinMessage, setMute, setDescription,
+  removeMember, leaveConversation, getPinned, unpinMessage, setMute, setDescription, renameConversation,
 } from '../api/messages.api.js';
 import { useProfile } from '../store/ProfileContext.jsx';
 import { useAuth } from '../store/AuthContext.jsx';
@@ -687,7 +687,7 @@ function DraftsView({ drafts, conversations, onBack, onOpen }) {
             <div className="truncate text-sm font-semibold text-ink">{nameOf(d.conversationId)}</div>
             <div className="truncate text-xs text-ink-soft">{stripFmt(d.text)}</div>
           </button>
-          <button onClick={() => { clearDraft(d.conversationId); bump((n) => n + 1); }} title="Discard draft" className="shrink-0 text-[11px] text-ink-soft opacity-0 hover:text-brick group-hover:opacity-100">discard</button>
+          <button onClick={() => { clearDraft(d.conversationId); bump((n) => n + 1); }} title="Discard draft" className="shrink-0 text-[11px] text-ink-soft opacity-0 hover:text-brick group-hover:opacity-100 [@media(hover:none)]:opacity-100">discard</button>
         </div>
       ))}
     </PaneShell>
@@ -800,7 +800,7 @@ function ChannelRow({ c, selected, onSelect, sections, onMove }) {
         )}
       </button>
       <button onClick={() => setMenu((v) => !v)} title="Move to section"
-        className="shrink-0 px-1 text-ink-soft opacity-0 hover:text-pine group-hover/row:opacity-100">⋯</button>
+        className="shrink-0 px-1 text-ink-soft opacity-0 hover:text-pine group-hover/row:opacity-100 [@media(hover:none)]:opacity-100">⋯</button>
       {menu && (
         <div className="absolute right-1 top-9 z-30 w-48 rounded-lg border border-line bg-white py-1 text-sm text-ink shadow-lg">
           <div className="px-3 pb-1 text-[10px] font-semibold uppercase tracking-wide text-ink-soft">Move to section</div>
@@ -1068,11 +1068,31 @@ function ChatPane({ conversationId, users, focusMessageId, onOpenThread, onOpenP
   );
   return (
     <>
-      {/* header */}
-      <div className="flex items-center gap-2 border-b border-line px-4 py-3">
+      {/* ── Header ── */}
+      {/* Mobile: floating pills over the messages (Slack-style) — back on the left,
+          pinned + conversation-info on the right; they stay put as messages scroll. */}
+      <div className="pointer-events-none absolute inset-x-0 top-0 z-20 flex items-start justify-between gap-2 px-2 pt-2 lg:hidden">
         {onBack && (
-          <button onClick={onBack} className="-ml-1 shrink-0 rounded-lg p-1 text-ink-soft hover:bg-paper lg:hidden" aria-label="Back to conversations">←</button>
+          <button onClick={onBack} aria-label="Back to conversations"
+            className="pointer-events-auto flex h-10 w-10 shrink-0 items-center justify-center rounded-full border border-line bg-white text-lg text-ink shadow-md active:scale-95">←</button>
         )}
+        <div className="pointer-events-auto flex min-w-0 items-center gap-1.5">
+          {c && (
+            <button onClick={() => setPinnedOpen(true)} aria-label="Pinned messages" title="Pinned"
+              className="flex h-10 w-10 shrink-0 items-center justify-center rounded-full border border-line bg-white shadow-md">📌</button>
+          )}
+          <button onClick={() => c && setDetailsOpen(true)} disabled={!c}
+            className="flex min-w-0 items-center rounded-full border border-line bg-white px-3.5 py-1.5 shadow-md">
+            <span className="min-w-0 text-left">
+              <span className="block truncate text-sm font-semibold text-pine">{c?.type === 'group' ? '# ' : c?.type === 'event' ? '🗓 ' : ''}{c?.name || '…'}</span>
+              {c && <span className="block truncate text-[10px] leading-tight text-ink-soft">{c.type === 'dm' ? 'Direct message' : c.type === 'event' ? `${c.members.length} people` : `${c.members.length} member${c.members.length === 1 ? '' : 's'}`}</span>}
+            </span>
+          </button>
+        </div>
+      </div>
+
+      {/* Desktop: the standard header bar. */}
+      <div className="hidden items-center gap-2 border-b border-line px-4 py-3 lg:flex">
         <button onClick={() => c && setDetailsOpen(true)} disabled={!c} className="group min-w-0 flex-1 text-left">
           <div className="truncate font-serif text-lg font-semibold text-pine group-hover:underline">
             {c?.type === 'group' ? '# ' : c?.type === 'event' ? '🗓 ' : ''}{c?.name || '…'}
@@ -1100,8 +1120,8 @@ function ChatPane({ conversationId, users, focusMessageId, onOpenThread, onOpenP
         )}
       </div>
 
-      {/* messages */}
-      <div ref={scrollRef} onScroll={onScroll} className="flex-1 overflow-y-auto py-2">
+      {/* messages — extra top padding on mobile so content clears the floating pills */}
+      <div ref={scrollRef} onScroll={onScroll} className="flex-1 overflow-y-auto py-2 pt-16 lg:pt-2">
         {messages.isLoading && <p className="px-4 py-6 text-sm text-ink-soft">Loading…</p>}
         {canLoadOlder && (
           <div className="flex justify-center py-2">
@@ -1245,7 +1265,9 @@ function ThreadPanel({ conversationId, parent, convLabel, users, onClose, onOpen
         )}
       </div>
       <div className="border-t border-line p-3">
-        <MessageComposer onSend={(p) => reply.mutateAsync(p)} users={users} placeholder="Add a reply" autoFocus />
+        {/* No autoFocus: opening a thread should land on the conversation (root +
+            replies), not pop the keyboard into the reply box (Slack-style flow). */}
+        <MessageComposer onSend={(p) => reply.mutateAsync(p)} users={users} placeholder="Add a reply" />
       </div>
     </aside>
   );
@@ -1480,7 +1502,7 @@ function PinnedPanel({ conversationId, onOpenProfile, onClose, onJump }) {
             <div key={m.id} className="group mb-1.5 rounded-lg border border-line p-2.5 hover:border-pine">
               <div className="flex items-baseline justify-between gap-2">
                 <button onClick={() => onOpenProfile?.(m.authorId)} className="text-sm font-semibold text-ink hover:underline">{m.author}</button>
-                <button onClick={() => unpin.mutate(m.id)} disabled={unpin.isPending} className="text-[11px] text-ink-soft opacity-0 transition group-hover:opacity-100 hover:text-brick disabled:opacity-50">Unpin</button>
+                <button onClick={() => unpin.mutate(m.id)} disabled={unpin.isPending} className="text-[11px] text-ink-soft opacity-0 transition group-hover:opacity-100 [@media(hover:none)]:opacity-100 hover:text-brick disabled:opacity-50">Unpin</button>
               </div>
               <button onClick={() => jump(m.id)} className="mt-0.5 block w-full text-left">
                 <p className="max-h-16 overflow-hidden whitespace-pre-wrap break-words text-sm text-ink-soft">{m.body || (m.attachments?.length ? '📎 attachment' : '')}</p>
@@ -1501,6 +1523,9 @@ function DetailsDrawer({ conv, me, onOpenProfile, onClose, onAddPeople, onChange
   const [leaveErr, setLeaveErr] = useState(''); // leave errors — shown in the footer, by the button
   const [editingDesc, setEditingDesc] = useState(false);
   const [descDraft, setDescDraft] = useState(conv.description || '');
+  const [editingName, setEditingName] = useState(false);
+  const [nameDraft, setNameDraft] = useState(conv.name || '');
+  const [nameErr, setNameErr] = useState('');
   const isGroup = conv.type === 'group';
   const isDm = conv.type === 'dm';
   const canLeave = isGroup;
@@ -1518,6 +1543,11 @@ function DetailsDrawer({ conv, me, onOpenProfile, onClose, onAddPeople, onChange
   });
   const mute = useMutation({ mutationFn: () => setMute(conv.id, !conv.muted), onSuccess: onChanged });
   const saveDesc = useMutation({ mutationFn: () => setDescription(conv.id, descDraft), onSuccess: () => { setEditingDesc(false); onChanged(); } });
+  const saveName = useMutation({
+    mutationFn: () => renameConversation(conv.id, nameDraft),
+    onSuccess: () => { setEditingName(false); setNameErr(''); onChanged(); },
+    onError: (e) => setNameErr(e.response?.data?.error?.message || 'Could not rename'),
+  });
   const busy = remove.isPending || leave.isPending;
 
   return (
@@ -1530,9 +1560,28 @@ function DetailsDrawer({ conv, me, onOpenProfile, onClose, onAddPeople, onChange
 
         <div className="min-h-0 flex-1 overflow-y-auto">
           <div className="border-b border-line px-4 py-4">
-            <div className="font-serif text-base font-semibold text-ink">
-              {isGroup ? '# ' : conv.type === 'event' ? '🗓 ' : ''}{isDm ? 'Direct message' : conv.name}
-            </div>
+            {isGroup && editingName ? (
+              <div>
+                <input value={nameDraft} onChange={(e) => setNameDraft(e.target.value)} maxLength={80} placeholder="Group name" autoFocus
+                  onKeyDown={(e) => { if (e.key === 'Enter' && nameDraft.trim()) saveName.mutate(); if (e.key === 'Escape') { setEditingName(false); setNameDraft(conv.name || ''); setNameErr(''); } }}
+                  className="w-full rounded-lg border border-line px-2 py-1.5 font-serif text-base font-semibold text-ink outline-none focus:border-pine" />
+                {nameErr && <p className="mt-1 text-xs text-brick">{nameErr}</p>}
+                <div className="mt-1.5 flex gap-2">
+                  <button onClick={() => saveName.mutate()} disabled={saveName.isPending || !nameDraft.trim()} className="rounded-lg bg-pine px-3 py-1 text-xs font-medium text-white disabled:opacity-50">Save</button>
+                  <button onClick={() => { setEditingName(false); setNameDraft(conv.name || ''); setNameErr(''); }} className="rounded-lg border border-line px-3 py-1 text-xs">Cancel</button>
+                </div>
+              </div>
+            ) : (
+              <div className="flex items-center gap-2">
+                <div className="min-w-0 flex-1 truncate font-serif text-base font-semibold text-ink">
+                  {isGroup ? '# ' : conv.type === 'event' ? '🗓 ' : ''}{isDm ? 'Direct message' : conv.name}
+                </div>
+                {isGroup && (
+                  <button onClick={() => { setNameDraft(conv.name || ''); setEditingName(true); }} title="Edit group name"
+                    className="shrink-0 rounded-lg border border-line px-2 py-1 text-[11px] text-ink-soft hover:border-pine hover:text-pine">✏️ Edit</button>
+                )}
+              </div>
+            )}
             <div className="mt-0.5 text-xs text-ink-soft">
               {isDm ? 'Direct message' : conv.type === 'event' ? `Project chat · ${members.length} people` : `${members.length} member${members.length === 1 ? '' : 's'}`}
             </div>

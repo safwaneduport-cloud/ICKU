@@ -1,4 +1,5 @@
 import { useState, useRef, useEffect } from 'react';
+import { createPortal } from 'react-dom';
 import { useMutation, useQueryClient } from '@tanstack/react-query';
 import { useAuth } from '../../store/AuthContext.jsx';
 import { reactMessage, editMessage, deleteMessage, createReminder, markUnread, pinMessage, unpinMessage } from '../../api/messages.api.js';
@@ -135,12 +136,13 @@ export default function ChatMessage({ m, conversationId, compact, reminderAt, on
   const pressTimer = useRef(null);
   const didLong = useRef(false);
   const pressPos = useRef({ x: 0, y: 0 });
+  const openedAt = useRef(0); // when the sheet opened — guards its backdrop from the long-press ghost click
   const startPress = (e) => {
     if (m.deleted || editing || sheetOpen || confirmDel) return; // don't arm while an overlay is up
     const t = e.touches?.[0];
     pressPos.current = { x: t?.clientX ?? 0, y: t?.clientY ?? 0 };
     didLong.current = false;
-    pressTimer.current = setTimeout(() => { didLong.current = true; setSheetOpen(true); navigator.vibrate?.(8); }, 480);
+    pressTimer.current = setTimeout(() => { didLong.current = true; openedAt.current = Date.now(); setSheetOpen(true); navigator.vibrate?.(8); }, 480);
   };
   // Cancel only past a ~10px slop threshold (real fingers jitter during a hold);
   // a bare touchcancel (no active touch) always cancels.
@@ -150,11 +152,12 @@ export default function ChatMessage({ m, conversationId, compact, reminderAt, on
     clearTimeout(pressTimer.current);
   };
   const endPress = (e) => { clearTimeout(pressTimer.current); if (didLong.current) e.preventDefault(); };
-  // touchend preventDefault does NOT cancel the emulated click on Android Chrome,
-  // so swallow that one ghost click in the capture phase before it reaches the
-  // backdrop / a sheet button. didLong stays true until the next touch starts.
-  const swallowClick = (e) => { if (didLong.current) { e.stopPropagation(); e.preventDefault(); didLong.current = false; } };
-  const closeSheet = () => { setSheetOpen(false); setSheetRemind(false); setSheetPicker(false); };
+  // The Android ghost click (touchend preventDefault doesn't cancel it there) now
+  // lands on the sheet's full-screen backdrop, which ignores clicks within 500ms of
+  // opening (openedAt). We deliberately do NOT swallow it via an onClickCapture on
+  // the row: React portal events still bubble through the row's fiber ancestors, so
+  // such a capture handler would eat the FIRST tap on every sheet button.
+  const closeSheet = () => { setSheetOpen(false); setSheetRemind(false); setSheetPicker(false); didLong.current = false; };
   useEffect(() => () => clearTimeout(pressTimer.current), []);
 
   const copyText = () => { navigator.clipboard?.writeText(m.body); setMenuOpen(false); };
@@ -162,7 +165,7 @@ export default function ChatMessage({ m, conversationId, compact, reminderAt, on
 
   return (
     <div id={`msg-${m.id}`}
-      onTouchStart={startPress} onTouchEnd={endPress} onTouchMove={movePress} onTouchCancel={movePress} onClickCapture={swallowClick}
+      onTouchStart={startPress} onTouchEnd={endPress} onTouchMove={movePress} onTouchCancel={movePress}
       className="group relative flex gap-2 px-4 py-0.5 hover:bg-paper/60 [-webkit-touch-callout:none]">
       {/* gutter: avatar (first of run) or hover-time (grouped) */}
       <div className="w-9 shrink-0">
@@ -327,9 +330,11 @@ export default function ChatMessage({ m, conversationId, compact, reminderAt, on
         </div>
       )}
 
-      {/* mobile long-press action sheet */}
-      {sheetOpen && !m.deleted && (
-        <div className="fixed inset-0 z-50 flex flex-col justify-end bg-ink/40" onClick={closeSheet}>
+      {/* mobile long-press action sheet — portaled to <body> so the message row's
+          ghost-click swallower (onClickCapture) can't intercept sheet-button taps.
+          The backdrop ignores clicks in the first 500ms (the long-press ghost click). */}
+      {sheetOpen && !m.deleted && createPortal(
+        <div className="fixed inset-0 z-50 flex flex-col justify-end bg-ink/40" onClick={(e) => { if (Date.now() - openedAt.current < 500) return; closeSheet(); }}>
           <div className="max-h-[80vh] overflow-y-auto rounded-t-2xl bg-white p-2 pb-[max(0.75rem,env(safe-area-inset-bottom))]" onClick={(e) => e.stopPropagation()}>
             {sheetPicker ? (
               <div>
@@ -365,11 +370,12 @@ export default function ChatMessage({ m, conversationId, compact, reminderAt, on
               </>
             )}
           </div>
-        </div>
+        </div>,
+        document.body,
       )}
 
-      {/* styled delete confirmation (replaces the browser confirm) */}
-      {confirmDel && (
+      {/* styled delete confirmation (replaces the browser confirm) — also portaled */}
+      {confirmDel && createPortal(
         <div className="fixed inset-0 z-[60] flex items-center justify-center bg-ink/40 p-4" onClick={() => setConfirmDel(false)}>
           <div className="w-full max-w-xs rounded-2xl bg-white p-5 text-center shadow-xl" onClick={(e) => e.stopPropagation()}>
             <div className="font-serif text-lg font-semibold text-pine">Delete message?</div>
@@ -379,7 +385,8 @@ export default function ChatMessage({ m, conversationId, compact, reminderAt, on
               <button onClick={() => { del.mutate(); setConfirmDel(false); }} className="flex-1 rounded-lg bg-brick py-2 text-sm font-medium text-white">Delete</button>
             </div>
           </div>
-        </div>
+        </div>,
+        document.body,
       )}
     </div>
   );

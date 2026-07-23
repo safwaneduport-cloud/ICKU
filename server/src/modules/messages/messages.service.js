@@ -174,6 +174,17 @@ export async function setDescription(userId, conversationId, description) {
   return { ok: true, description: clean };
 }
 
+// Rename a group (members only). DMs derive their name from the other person and
+// events from the linked event, so only "group" conversations can be renamed.
+export async function renameConversation(userId, conversationId, name) {
+  const conv = await loadForRead(userId, conversationId); // members only
+  if (conv.type !== 'group') throw new ApiError(400, 'Only group names can be edited');
+  const clean = (name || '').trim().slice(0, 80);
+  if (!clean) throw new ApiError(400, 'Group name cannot be empty');
+  await prisma.conversation.update({ where: { id: conversationId }, data: { name: clean } });
+  return { ok: true, name: clean };
+}
+
 export async function getConversation(userId, conversationId) {
   const conv = await prisma.conversation.findUnique({
     where: { id: conversationId },

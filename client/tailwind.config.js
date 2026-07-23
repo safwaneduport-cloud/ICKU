@@ -1,6 +1,10 @@
 /** @type {import('tailwindcss').Config} */
 export default {
   content: ['./index.html', './src/**/*.{js,jsx}'],
+  // hover: utilities apply only on devices that actually support hover (real
+  // pointers). On touch this stops the iOS "first tap hovers, second tap clicks"
+  // behavior, so tapping a conversation opens it in a single tap.
+  future: { hoverOnlyWhenSupported: true },
   theme: {
     extend: {
       // Brand palette carried over from the prototype (ICKU.html CSS variables)

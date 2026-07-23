@@ -436,8 +436,9 @@ function ChecklistRow({ it, isSelf, toggle, edit, onDelete }) {
       {it.overdue && !done && <span className="shrink-0 text-[10px] font-medium text-brick">overdue</span>}
       {!editing && (
         <>
-          <button onClick={() => { setVal(it.text); setEditing(true); }} className="shrink-0 text-xs text-ink-soft opacity-0 hover:text-pine group-hover:opacity-100">edit</button>
-          <button onClick={onDelete} className="shrink-0 text-xs text-ink-soft opacity-0 hover:text-brick group-hover:opacity-100">✕</button>
+          {/* reveal on hover (desktop); always visible on touch, where there's no hover ([@media(hover:none)]) */}
+          <button onClick={() => { setVal(it.text); setEditing(true); }} className="shrink-0 text-xs text-ink-soft opacity-0 hover:text-pine group-hover:opacity-100 [@media(hover:none)]:opacity-100">edit</button>
+          <button onClick={onDelete} className="shrink-0 text-xs text-ink-soft opacity-0 hover:text-brick group-hover:opacity-100 [@media(hover:none)]:opacity-100">✕</button>
         </>
       )}
     </div>

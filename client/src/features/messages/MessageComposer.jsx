@@ -43,6 +43,7 @@ export default function MessageComposer({ onSend, users = [], placeholder = 'Wri
   const [mq, setMq] = useState(null);          // { query, start } or null
   const [hi, setHi] = useState(0);
   const [emojiOpen, setEmojiOpen] = useState(false);
+  const [fmtOpen, setFmtOpen] = useState(false); // "Aa" reveals the formatting toolbar (Slack-style)
 
   // Persist the unsent text as a per-conversation draft (localStorage). Deps are
   // [text] only — on a draftKey switch the reload effect below updates text
@@ -101,6 +102,22 @@ export default function MessageComposer({ onSend, users = [], placeholder = 'Wri
     setText(text.slice(0, s) + emo + text.slice(end));
     setEmojiOpen(false);
     requestAnimationFrame(() => { el?.focus(); const p = s + emo.length; el?.setSelectionRange(p, p); });
+  }
+
+  // The "@" button: insert an @ at the caret and open the mention autocomplete.
+  // The @ must sit at line-start or after whitespace, or onChange's detector kills
+  // the dropdown on the first filter keystroke — so prepend a space mid-word.
+  function insertAtMention() {
+    const el = taRef.current;
+    const s = el?.selectionStart ?? text.length;
+    const end = el?.selectionEnd ?? s;
+    const needSpace = s > 0 && !/\s/.test(text[s - 1]);
+    const ins = (needSpace ? ' ' : '') + '@';
+    const at = s + (needSpace ? 1 : 0); // index of the '@'
+    setText(text.slice(0, s) + ins + text.slice(end));
+    setMq({ query: '', start: at });
+    setHi(0);
+    requestAnimationFrame(() => { el?.focus(); const p = s + ins.length; el?.setSelectionRange(p, p); });
   }
 
   // @channel / @all notify everyone in the conversation. They surface at the top
@@ -236,7 +253,7 @@ export default function MessageComposer({ onSend, users = [], placeholder = 'Wri
       onDragOver={(e) => e.preventDefault()}
       onDragLeave={onDragLeave}
       onDrop={onDrop}
-      className={`relative rounded-xl border bg-white p-2 ${dragOver ? 'border-pine ring-2 ring-pine/30' : 'border-line'}`}
+      className={`relative rounded-xl border bg-white p-2 ${dragOver ? 'border-pine ring-2 ring-pine/30' : 'border-line focus-within:border-pine'}`}
     >
       {dragOver && (
         <div className="pointer-events-none absolute inset-0 z-30 flex items-center justify-center rounded-xl bg-pine-tint/80 text-sm font-medium text-pine">
@@ -279,72 +296,88 @@ export default function MessageComposer({ onSend, users = [], placeholder = 'Wri
         </div>
       )}
 
-      {/* format toolbar */}
-      <div className="mb-1 flex items-center gap-0.5">
-        <FmtBtn onClick={() => wrapSelection('*')} title="Bold (⌘/Ctrl+B)"><span className="font-bold">B</span></FmtBtn>
-        <FmtBtn onClick={() => wrapSelection('_')} title="Italic (⌘/Ctrl+I)"><span className="italic">I</span></FmtBtn>
-        <FmtBtn onClick={() => wrapSelection('~')} title="Strikethrough"><span className="line-through">S</span></FmtBtn>
-        <FmtBtn onClick={() => wrapSelection('`')} title="Code"><span className="font-mono text-[11px]">{'</>'}</span></FmtBtn>
-        <span className="mx-0.5 h-4 w-px bg-line" />
-        <FmtBtn onClick={insertLink} title="Link"><span className="text-[13px]">🔗</span></FmtBtn>
-        <FmtBtn onClick={() => prefixLines('- ')} title="Bulleted list"><span className="text-base leading-none">•</span></FmtBtn>
-        <FmtBtn onClick={() => prefixLines('1. ')} title="Numbered list"><span className="text-[11px] font-semibold">1.</span></FmtBtn>
-        <FmtBtn onClick={() => prefixLines('> ')} title="Quote"><span className="text-[13px] font-semibold">❝</span></FmtBtn>
+      {/* formatting toolbar — revealed by the "Aa" button (Slack-style) */}
+      {fmtOpen && (
+        <div className="mb-1 flex items-center gap-0.5 border-b border-line pb-1">
+          <FmtBtn onClick={() => wrapSelection('*')} title="Bold (⌘/Ctrl+B)"><span className="font-bold">B</span></FmtBtn>
+          <FmtBtn onClick={() => wrapSelection('_')} title="Italic (⌘/Ctrl+I)"><span className="italic">I</span></FmtBtn>
+          <FmtBtn onClick={() => wrapSelection('~')} title="Strikethrough"><span className="line-through">S</span></FmtBtn>
+          <FmtBtn onClick={() => wrapSelection('`')} title="Code"><span className="font-mono text-[11px]">{'</>'}</span></FmtBtn>
+          <span className="mx-0.5 h-4 w-px bg-line" />
+          <FmtBtn onClick={insertLink} title="Link"><span className="text-[13px]">🔗</span></FmtBtn>
+          <FmtBtn onClick={() => prefixLines('- ')} title="Bulleted list"><span className="text-base leading-none">•</span></FmtBtn>
+          <FmtBtn onClick={() => prefixLines('1. ')} title="Numbered list"><span className="text-[11px] font-semibold">1.</span></FmtBtn>
+          <FmtBtn onClick={() => prefixLines('> ')} title="Quote"><span className="text-[13px] font-semibold">❝</span></FmtBtn>
+        </div>
+      )}
+
+      {/* text input (auto-grow via the CSS grid "replicated content" trick: an
+          invisible twin sizes the shared grid cell, the textarea fills it, and
+          max-h-40 caps growth then scrolls — no JS measurement). */}
+      <div className="grid max-h-40">
+        <div aria-hidden className="invisible col-start-1 row-start-1 whitespace-pre-wrap break-words px-1.5 py-1.5 text-sm leading-5">
+          {text + ' '}
+        </div>
+        <textarea
+          ref={taRef}
+          rows={1}
+          value={text}
+          onChange={onChange}
+          onKeyDown={onKeyDown}
+          onPaste={onPaste}
+          autoFocus={autoFocus}
+          placeholder={placeholder}
+          className="col-start-1 row-start-1 resize-none overflow-y-auto bg-transparent px-1.5 py-1.5 text-sm leading-5 outline-none"
+        />
+      </div>
+
+      {/* action row (Slack-style): + Aa 😊 @ … send arrow */}
+      <div className="mt-1 flex items-center gap-0.5">
+        <IconBtn onClick={() => fileRef.current?.click()} title="Attach a file or image"><PlusIcon /></IconBtn>
+        <input ref={fileRef} type="file" multiple onChange={onFiles} className="hidden" />
+        <IconBtn onClick={() => setFmtOpen((v) => !v)} title="Formatting" active={fmtOpen}><span className="text-[15px] font-semibold leading-none">Aa</span></IconBtn>
         <div className="relative">
-          <FmtBtn onClick={() => setEmojiOpen((v) => !v)} title="Emoji">😊</FmtBtn>
+          <IconBtn onClick={() => setEmojiOpen((v) => !v)} title="Emoji"><span className="text-[15px] leading-none">😊</span></IconBtn>
           {emojiOpen && (
-            <div className="absolute bottom-9 left-0 z-30">
+            <div className="absolute bottom-10 left-0 z-30">
               <EmojiPicker onPick={insertEmoji} />
             </div>
           )}
         </div>
-      </div>
-
-      <div className="flex items-end gap-2">
-        <button
-          type="button"
-          onClick={() => fileRef.current?.click()}
-          title="Attach a file or image"
-          className="flex h-9 w-9 shrink-0 items-center justify-center rounded-lg border border-line text-ink-soft hover:border-pine hover:text-pine"
-        >
-          📎
-        </button>
-        <input ref={fileRef} type="file" multiple onChange={onFiles} className="hidden" />
-        {/* Auto-grow via the CSS grid "replicated content" trick: an invisible
-            twin sizes the shared grid cell to the text height (wrapping exactly
-            like the textarea), the textarea fills it, and max-h-40 caps growth
-            then scrolls. No JS measurement — immune to the flex width/timing
-            that made a scrollHeight approach stick tall. */}
-        <div className="grid max-h-40 flex-1">
-          <div aria-hidden className="invisible col-start-1 row-start-1 whitespace-pre-wrap break-words rounded-lg border border-transparent px-3 py-2 text-sm leading-5">
-            {text + ' '}
-          </div>
-          <textarea
-            ref={taRef}
-            rows={1}
-            value={text}
-            onChange={onChange}
-            onKeyDown={onKeyDown}
-            onPaste={onPaste}
-            autoFocus={autoFocus}
-            placeholder={placeholder}
-            className="col-start-1 row-start-1 resize-none overflow-y-auto rounded-lg border border-line px-3 py-2 text-sm leading-5 outline-none focus:border-pine"
-          />
-        </div>
+        <IconBtn onClick={insertAtMention} title="Mention someone"><span className="text-[15px] leading-none">@</span></IconBtn>
+        <div className="flex-1" />
         <button
           type="button"
           onClick={send}
           disabled={sending || uploading > 0 || (!text.trim() && atts.length === 0)}
-          className="h-9 shrink-0 rounded-lg bg-pine px-4 text-sm font-medium text-white disabled:opacity-50"
+          title="Send"
+          aria-label="Send"
+          className="flex h-9 w-9 shrink-0 items-center justify-center rounded-lg text-pine hover:bg-pine-tint disabled:text-ink-soft/40 disabled:hover:bg-transparent"
         >
-          Send
+          <SendIcon />
         </button>
-      </div>
-      <div className="px-1 pt-1 text-[10px] text-ink-soft">
-        <span className="font-mono">*bold*</span> · <span className="font-mono">_italic_</span> · <span className="font-mono">@</span> to mention · Enter to send · Shift+Enter for a new line
       </div>
     </div>
   );
+}
+
+// Composer action-row icon button (attach / Aa / emoji / mention).
+function IconBtn({ onClick, title, active, children }) {
+  return (
+    <button type="button" title={title}
+      onMouseDown={(e) => e.preventDefault()}
+      onClick={onClick}
+      className={`flex h-8 w-8 items-center justify-center rounded-lg text-ink-soft hover:bg-paper hover:text-pine ${active ? 'bg-pine-tint text-pine' : ''}`}>
+      {children}
+    </button>
+  );
+}
+
+function PlusIcon() {
+  return (<svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round"><path d="M12 5v14M5 12h14" /></svg>);
+}
+function SendIcon() {
+  return (<svg width="18" height="18" viewBox="0 0 24 24" fill="currentColor"><path d="M3.4 20.4l17.45-7.48a1 1 0 000-1.84L3.4 3.6a.993.993 0 00-1.39.91L2 9.12c0 .5.37.93.87.99L17 12 2.87 13.88c-.5.07-.87.5-.87 1l.01 4.61c0 .71.73 1.2 1.39.91z" /></svg>);
 }
 
 // A compact formatting-toolbar button. onMouseDown+preventDefault keeps the
