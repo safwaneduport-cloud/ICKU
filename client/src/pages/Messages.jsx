@@ -5,7 +5,7 @@ import {
   getConversations, getConversation, getMessages, postMessage,
   getThread, getMyThreads, createGroup, addMembers, openDm, markRead,
   getReminders, completeReminder, setSection, getFiles, searchMessages,
-  removeMember, leaveConversation, getPinned, unpinMessage,
+  removeMember, leaveConversation, getPinned, unpinMessage, setMute, setDescription,
 } from '../api/messages.api.js';
 import { useProfile } from '../store/ProfileContext.jsx';
 import { useAuth } from '../store/AuthContext.jsx';
@@ -147,9 +147,12 @@ export default function Messages() {
 
   const q = search.trim().toLowerCase();
   const match = (c) => !q || (c.name || '').toLowerCase().includes(q);
-  const groups = (conversations.data || []).filter((c) => c.type === 'group' && match(c));
-  const dms = (conversations.data || []).filter((c) => c.type === 'dm' && match(c));
-  const events = (conversations.data || []).filter((c) => c.type === 'event' && match(c));
+  // A muted conversation contributes no unread anywhere (no badge, not bold, not in
+  // Catch Up, not in the total) — force its unread to 0 for all sidebar rendering.
+  const convFeed = (conversations.data || []).map((c) => (c.muted ? { ...c, unread: 0 } : c));
+  const groups = convFeed.filter((c) => c.type === 'group' && match(c));
+  const dms = convFeed.filter((c) => c.type === 'dm' && match(c));
+  const events = convFeed.filter((c) => c.type === 'event' && match(c));
 
   // ── Top cards (Slack-style): Catch Up · Threads · Later · Drafts ──
   const [activeCard, setActiveCard] = useState(null); // 'catchup'|'threads'|'later'|'drafts'|null
@@ -158,7 +161,7 @@ export default function Messages() {
   const threadsQ = useQuery({ queryKey: ['my-threads'], queryFn: getMyThreads, retry: false, refetchInterval: 15000 });
   const remindersQ = useQuery({ queryKey: ['reminders'], queryFn: getReminders, retry: false, refetchInterval: 15000 });
   const drafts = listDrafts(); // localStorage; bumpDraft re-renders on change
-  const totalUnread = (conversations.data || []).reduce((n, c) => n + (c.unread || 0), 0);
+  const totalUnread = convFeed.reduce((n, c) => n + (c.unread || 0), 0);
 
   // The parent conversation shown as the Thread view's subtitle (Slack-style).
   const threadConv = (conversations.data || []).find((c) => c.id === selectedId);
@@ -240,7 +243,7 @@ export default function Messages() {
           ) : (
             <>
               <UnreadsSection
-                items={(conversations.data || []).filter((c) => c.unread > 0 && match(c))}
+                items={convFeed.filter((c) => c.unread > 0 && match(c))}
                 selectedId={selectedId}
                 onSelect={openConversation}
               />
@@ -305,7 +308,7 @@ export default function Messages() {
         {activeCard ? (
           <CardView
             card={activeCard}
-            conversations={conversations.data || []}
+            conversations={convFeed}
             threads={threadsQ.data || []}
             reminders={remindersQ.data || []}
             drafts={drafts}
@@ -719,7 +722,7 @@ function RailSection({ title, onAdd, items, selectedId, onSelect, renderIcon, em
               onClick={() => onSelect(c.id)}
               className={`flex w-full items-center gap-2 rounded-lg px-2 py-2 text-left ${
                 selectedId === c.id ? 'bg-pine-tint' : 'hover:bg-paper'
-              }`}
+              } ${c.muted ? 'opacity-55' : ''}`}
             >
               {renderIcon(c)}
               <span className={`min-w-0 flex-1 truncate text-[15px] ${c.unread > 0 ? 'font-bold text-ink' : selectedId === c.id ? 'font-semibold text-pine' : 'font-medium text-ink'}`}>{c.name}</span>
@@ -774,7 +777,7 @@ function GroupRail({ items, selectedId, onSelect, onAddGroup }) {
 function ChannelRow({ c, selected, onSelect, sections, onMove }) {
   const [menu, setMenu] = useState(false);
   return (
-    <div className={`group/row relative flex items-center rounded-lg pr-1 ${selected ? 'bg-pine-tint' : 'hover:bg-paper'}`}>
+    <div className={`group/row relative flex items-center rounded-lg pr-1 ${selected ? 'bg-pine-tint' : 'hover:bg-paper'} ${c.muted ? 'opacity-55' : ''}`}>
       <button onClick={() => onSelect(c.id)}
         className="flex min-w-0 flex-1 items-center gap-2 px-2 py-2 text-left">
         <span className="text-ink-soft">#</span>
@@ -1383,6 +1386,8 @@ function DetailsDrawer({ conv, me, onOpenProfile, onClose, onAddPeople, onChange
   const [confirmLeave, setConfirmLeave] = useState(false);
   const [err, setErr] = useState('');        // remove errors — shown in the members list
   const [leaveErr, setLeaveErr] = useState(''); // leave errors — shown in the footer, by the button
+  const [editingDesc, setEditingDesc] = useState(false);
+  const [descDraft, setDescDraft] = useState(conv.description || '');
   const isGroup = conv.type === 'group';
   const isDm = conv.type === 'dm';
   const canLeave = isGroup;
@@ -1398,6 +1403,8 @@ function DetailsDrawer({ conv, me, onOpenProfile, onClose, onAddPeople, onChange
     onSuccess: () => onLeft(),
     onError: (e) => { setLeaveErr(e.response?.data?.error?.message || 'Could not leave — please try again.'); setConfirmLeave(false); },
   });
+  const mute = useMutation({ mutationFn: () => setMute(conv.id, !conv.muted), onSuccess: onChanged });
+  const saveDesc = useMutation({ mutationFn: () => setDescription(conv.id, descDraft), onSuccess: () => { setEditingDesc(false); onChanged(); } });
   const busy = remove.isPending || leave.isPending;
 
   return (
@@ -1416,7 +1423,37 @@ function DetailsDrawer({ conv, me, onOpenProfile, onClose, onAddPeople, onChange
             <div className="mt-0.5 text-xs text-ink-soft">
               {isDm ? 'Direct message' : conv.type === 'event' ? `Project chat · ${members.length} people` : `${members.length} member${members.length === 1 ? '' : 's'}`}
             </div>
+
+            {/* description (groups/events) */}
+            {!isDm && (
+              <div className="mt-2">
+                {editingDesc ? (
+                  <div>
+                    <textarea value={descDraft} onChange={(e) => setDescDraft(e.target.value)} rows={2} placeholder="What’s this channel about?"
+                      className="w-full resize-none rounded-lg border border-line px-2 py-1.5 text-sm outline-none focus:border-pine" autoFocus />
+                    <div className="mt-1 flex gap-2">
+                      <button onClick={() => saveDesc.mutate()} disabled={saveDesc.isPending} className="rounded-lg bg-pine px-3 py-1 text-xs font-medium text-white disabled:opacity-50">Save</button>
+                      <button onClick={() => { setEditingDesc(false); setDescDraft(conv.description || ''); }} className="rounded-lg border border-line px-3 py-1 text-xs">Cancel</button>
+                    </div>
+                  </div>
+                ) : conv.description ? (
+                  <button onClick={() => { setDescDraft(conv.description); setEditingDesc(true); }} className="group/desc block w-full text-left">
+                    <span className="text-sm text-ink-soft">{conv.description}</span>
+                    <span className="ml-1 text-[11px] text-pine opacity-0 group-hover/desc:opacity-100">Edit</span>
+                  </button>
+                ) : (
+                  <button onClick={() => { setDescDraft(''); setEditingDesc(true); }} className="text-sm text-pine hover:underline">+ Add a description</button>
+                )}
+              </div>
+            )}
           </div>
+
+          {/* mute toggle */}
+          <button onClick={() => mute.mutate()} disabled={mute.isPending} className="flex w-full items-center gap-2 border-b border-line px-4 py-2.5 text-left text-sm hover:bg-paper disabled:opacity-60">
+            <span>{conv.muted ? '🔔' : '🔕'}</span>
+            <span className="text-ink">{conv.muted ? 'Unmute conversation' : 'Mute conversation'}</span>
+            {conv.muted && <span className="ml-auto rounded-full bg-paper px-2 py-0.5 text-[10px] font-medium text-ink-soft">Muted</span>}
+          </button>
 
           <div className="px-2 py-2">
             <div className="flex items-center justify-between px-2 py-1">

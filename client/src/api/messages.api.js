@@ -9,6 +9,12 @@ export const getConversation = (id) =>
 export const setSection = (id, section) =>
   api.patch(`/messages/conversations/${id}/section`, { section }).then((r) => r.data.data);
 
+export const setMute = (id, muted) =>
+  api.patch(`/messages/conversations/${id}/mute`, { muted }).then((r) => r.data.data);
+
+export const setDescription = (id, description) =>
+  api.patch(`/messages/conversations/${id}/description`, { description }).then((r) => r.data.data);
+
 export const getMessages = (id) =>
   api.get(`/messages/conversations/${id}/messages`).then((r) => r.data.data);
 

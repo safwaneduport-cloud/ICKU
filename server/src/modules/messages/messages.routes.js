@@ -21,6 +21,8 @@ router.post('/conversations/:id/messages', ctrl.postMessage);
 router.post('/conversations/:id/read', ctrl.markRead);
 router.post('/conversations/:id/unread', ctrl.markUnread); // mark unread from a message
 router.patch('/conversations/:id/section', ctrl.setSection);
+router.patch('/conversations/:id/mute', ctrl.setMute);
+router.patch('/conversations/:id/description', ctrl.setDescription);
 
 // Threads I'm part of (Threads card) — before the '/thread/:messageId' param route
 router.get('/threads/mine', ctrl.myThreads);

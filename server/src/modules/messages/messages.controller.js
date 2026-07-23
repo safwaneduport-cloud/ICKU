@@ -72,6 +72,14 @@ export async function setSection(req, res, next) {
   try { ok(res, await service.setSection(req.user.id, req.params.id, req.body?.section)); } catch (e) { next(e); }
 }
 
+export async function setMute(req, res, next) {
+  try { ok(res, await service.setMute(req.user.id, req.params.id, !!req.body?.muted)); } catch (e) { next(e); }
+}
+
+export async function setDescription(req, res, next) {
+  try { ok(res, await service.setDescription(req.user.id, req.params.id, req.body?.description)); } catch (e) { next(e); }
+}
+
 export async function editMessage(req, res, next) {
   try { ok(res, await service.editMessage(req.user.id, req.params.messageId, req.body?.body)); } catch (e) { next(e); }
 }

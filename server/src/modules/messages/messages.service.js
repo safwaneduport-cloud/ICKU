@@ -139,6 +139,7 @@ export async function listConversations(userId) {
           : null,
         lastAt: last?.createdAt || c.createdAt,
         unread,
+        muted: !!m.mutedAt,
         section: m.section || null,
       };
     })
@@ -154,6 +155,23 @@ export async function setSection(userId, conversationId, section) {
   if (!m) throw new ApiError(404, 'Not a member of this conversation');
   await prisma.conversationMember.update({ where: { conversationId_userId: { conversationId, userId } }, data: { section: clean } });
   return { ok: true, section: clean };
+}
+
+// Mute / unmute a conversation for this member (personal — no unread badge).
+export async function setMute(userId, conversationId, muted) {
+  const m = await prisma.conversationMember.findUnique({ where: { conversationId_userId: { conversationId, userId } } });
+  if (!m) throw new ApiError(404, 'Not a member of this conversation');
+  await prisma.conversationMember.update({ where: { conversationId_userId: { conversationId, userId } }, data: { mutedAt: muted ? new Date() : null } });
+  return { ok: true, muted: !!muted };
+}
+
+// Set a group/event conversation's description (shared; DMs have none).
+export async function setDescription(userId, conversationId, description) {
+  const conv = await loadForRead(userId, conversationId); // members only
+  if (conv.type === 'dm') throw new ApiError(400, 'Direct messages have no description');
+  const clean = (description || '').trim().slice(0, 500) || null;
+  await prisma.conversation.update({ where: { id: conversationId }, data: { description: clean } });
+  return { ok: true, description: clean };
 }
 
 export async function getConversation(userId, conversationId) {
@@ -173,6 +191,8 @@ export async function getConversation(userId, conversationId) {
     name: conv.type === 'dm' ? other?.name || 'Direct message' : conv.name,
     photoUrl: other?.photoUrl ?? null,
     createdById: conv.createdById,
+    description: conv.description ?? null,
+    muted: !!meMember?.mutedAt,
     lastReadAt: meMember?.lastReadAt ?? null, // where the "New messages" divider goes (frozen client-side on open)
     members: conv.members.map((m) => ({
       id: m.userId,
