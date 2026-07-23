@@ -607,7 +607,7 @@ function ChatPane({ conversationId, users, onOpenThread, onOpenProfile, onBack }
   const me = user?.id;
   const [addOpen, setAddOpen] = useState(false);
   const [toast, setToast] = useState('');
-  const conv = useQuery({ queryKey: ['conversation', conversationId], queryFn: () => getConversation(conversationId), retry: false });
+  const conv = useQuery({ queryKey: ['conversation', conversationId], queryFn: () => getConversation(conversationId), retry: 1 });
   const messages = useQuery({ queryKey: ['messages', conversationId], queryFn: () => getMessages(conversationId), retry: false, refetchInterval: 3000 });
   const reminders = useQuery({ queryKey: ['reminders'], queryFn: getReminders, retry: false });
   const remindByMsg = new Map((reminders.data || []).filter((r) => r.messageId).map((r) => [r.messageId, r.remindAt]));
@@ -620,7 +620,9 @@ function ChatPane({ conversationId, users, onOpenThread, onOpenProfile, onBack }
   if (markerRef.current === undefined && conv.data) markerRef.current = conv.data.lastReadAt ?? null;
   const marker = markerRef.current;
   const msgs = messages.data || [];
-  const firstUnreadId = marker ? msgs.find((m) => m.authorId !== me && new Date(m.at) > new Date(marker))?.id : null;
+  // A null marker means never-opened — the sidebar counts all of it unread, so
+  // put the divider before the first message from someone else (matches the badge).
+  const firstUnreadId = msgs.find((m) => m.authorId !== me && (!marker || new Date(m.at) > new Date(marker)))?.id;
 
   // Initial landing (runs once, once both marker + messages are ready): the
   // "New messages" divider if there's unread, else the bottom. Guarded so the
@@ -634,10 +636,18 @@ function ChatPane({ conversationId, users, onOpenThread, onOpenProfile, onBack }
       else bottomRef.current?.scrollIntoView();
     });
   }, [conv.data, messages.data]); // eslint-disable-line
-  // New messages while viewing → follow to the bottom.
+  // New messages while viewing → follow to the bottom, but only if the reader is
+  // already near the bottom (don't yank them off the divider/backlog they're
+  // reading). Always follow your own just-sent message.
+  const scrollRef = useRef(null);
   const prevLen = useRef(0);
   useEffect(() => {
-    if (didInit.current && msgs.length > prevLen.current) bottomRef.current?.scrollIntoView({ behavior: 'smooth' });
+    if (didInit.current && msgs.length > prevLen.current) {
+      const el = scrollRef.current;
+      const nearBottom = !el || el.scrollHeight - el.scrollTop - el.clientHeight < 120;
+      const mineJustSent = msgs[msgs.length - 1]?.authorId === me;
+      if (nearBottom || mineJustSent) bottomRef.current?.scrollIntoView({ behavior: 'smooth' });
+    }
     prevLen.current = msgs.length;
   }, [msgs.length]); // eslint-disable-line
 
@@ -645,13 +655,13 @@ function ChatPane({ conversationId, users, onOpenThread, onOpenProfile, onBack }
   // and set this conversation's cached read state so a re-open shows no divider.
   const markReadRef = useRef(false);
   useEffect(() => {
-    if (!conv.data || !messages.data || markReadRef.current) return;
+    if (!conv.data || markReadRef.current) return; // marker is already frozen from conv.data by now
     markReadRef.current = true;
     markRead(conversationId).then(() => {
       qc.invalidateQueries({ queryKey: ['conversations'] });
       qc.setQueryData(['conversation', conversationId], (old) => (old ? { ...old, lastReadAt: new Date().toISOString() } : old));
     }).catch(() => {});
-  }, [conv.data, messages.data]); // eslint-disable-line
+  }, [conv.data]); // eslint-disable-line
 
   useEffect(() => { if (!toast) return; const t = setTimeout(() => setToast(''), 2500); return () => clearTimeout(t); }, [toast]);
 
@@ -689,7 +699,7 @@ function ChatPane({ conversationId, users, onOpenThread, onOpenProfile, onBack }
       </div>
 
       {/* messages */}
-      <div className="flex-1 overflow-y-auto py-2">
+      <div ref={scrollRef} className="flex-1 overflow-y-auto py-2">
         {messages.isLoading && <p className="px-4 py-6 text-sm text-ink-soft">Loading…</p>}
         {messages.data?.length === 0 && <p className="px-4 py-8 text-center text-sm text-ink-soft">No messages yet. Say hello! 👋</p>}
         {messages.data?.map((m, i) => {
