@@ -82,7 +82,7 @@ export default function Messages() {
   const { openProfile } = useProfile();
   const [selectedId, setSelectedId] = useState(null);
   const [thread, setThread] = useState(null);   // the top-level message whose thread is open
-  const [modal, setModal] = useState(null);      // 'group' | 'dm' | null
+  const [modal, setModal] = useState(null);      // 'group' | 'compose' | null
   const [mobileTab, setMobileTab] = useState('home'); // phone footer: 'home' | 'dms' | 'files'
   const [searchOpen, setSearchOpen] = useState(false);
   const [search, setSearch] = useState('');
@@ -157,7 +157,7 @@ export default function Messages() {
             <FilesView onOpen={openConversation} />
           ) : mobileTab === 'dms' ? (
             <RailSection
-              title="Direct messages" onAdd={() => setModal('dm')} items={dms}
+              title="Direct messages" onAdd={() => setModal('compose')} items={dms}
               selectedId={selectedId} onSelect={openConversation}
               renderIcon={(c) => <Avatar id={c.id} name={c.name} photoUrl={c.photoUrl} size={20} rounded="rounded" />}
               empty={q ? 'No matches' : 'No direct messages yet'}
@@ -177,7 +177,7 @@ export default function Messages() {
               />
               <RailSection
                 title="Direct messages"
-                onAdd={() => setModal('dm')}
+                onAdd={() => setModal('compose')}
                 items={dms}
                 selectedId={selectedId}
                 onSelect={openConversation}
@@ -220,7 +220,7 @@ export default function Messages() {
           <NewSheet
             onClose={() => setFabOpen(false)}
             onGroup={() => { setFabOpen(false); setModal('group'); }}
-            onDm={() => { setFabOpen(false); setModal('dm'); }}
+            onCompose={() => { setFabOpen(false); setModal('compose'); }}
           />
         )}
       </aside>
@@ -273,11 +273,12 @@ export default function Messages() {
           onCreated={(id) => { setModal(null); qc.invalidateQueries({ queryKey: ['conversations'] }); setSelectedId(id); }}
         />
       )}
-      {modal === 'dm' && (
-        <NewDmModal
+      {modal === 'compose' && (
+        <NewMessageModal
           users={users.data || []}
+          groups={(conversations.data || []).filter((c) => c.type === 'group')}
           onClose={() => setModal(null)}
-          onOpened={(id) => { setModal(null); qc.invalidateQueries({ queryKey: ['conversations'] }); setSelectedId(id); }}
+          onSent={(id) => { setModal(null); qc.invalidateQueries({ queryKey: ['conversations'] }); setSelectedId(id); }}
         />
       )}
     </div>
@@ -307,17 +308,17 @@ function TopCards({ active, onPick, unread, threads, reminders, drafts }) {
 }
 
 // The FAB "+" action sheet — new group or new direct message.
-function NewSheet({ onClose, onGroup, onDm }) {
+function NewSheet({ onClose, onGroup, onCompose }) {
   return (
     <div className="absolute inset-0 z-20 flex flex-col justify-end bg-ink/30 lg:hidden" onClick={onClose}>
       <div className="rounded-t-2xl bg-white p-2 text-ink" onClick={(e) => e.stopPropagation()}>
+        <button onClick={onCompose} className="flex w-full items-center gap-3 rounded-xl px-4 py-3 text-left text-sm hover:bg-paper">
+          <span className="flex h-9 w-9 items-center justify-center rounded-lg bg-pine-tint text-pine"><DmIcon /></span>
+          <span><span className="block font-semibold">New message</span><span className="block text-xs text-ink-soft">Message a person or group</span></span>
+        </button>
         <button onClick={onGroup} className="flex w-full items-center gap-3 rounded-xl px-4 py-3 text-left text-sm hover:bg-paper">
           <span className="flex h-9 w-9 items-center justify-center rounded-lg bg-pine-tint text-pine">#</span>
-          <span><span className="block font-semibold">New group</span><span className="block text-xs text-ink-soft">Start a group channel</span></span>
-        </button>
-        <button onClick={onDm} className="flex w-full items-center gap-3 rounded-xl px-4 py-3 text-left text-sm hover:bg-paper">
-          <span className="flex h-9 w-9 items-center justify-center rounded-lg bg-pine-tint text-pine"><DmIcon /></span>
-          <span><span className="block font-semibold">New direct message</span><span className="block text-xs text-ink-soft">Message a colleague</span></span>
+          <span><span className="block font-semibold">New group</span><span className="block text-xs text-ink-soft">Start a named group channel</span></span>
         </button>
         <button onClick={onClose} className="mt-1 w-full rounded-xl px-4 py-2.5 text-sm font-medium text-ink-soft hover:bg-paper">Cancel</button>
       </div>
@@ -753,30 +754,84 @@ function NewGroupModal({ onClose, onCreated }) {
   );
 }
 
-function NewDmModal({ users, onClose, onOpened }) {
+// Slack-style "New message": pick a recipient (a person → their DM, or an
+// existing group), then type and send in one flow. Routes to the resolved
+// conversation and opens it.
+function NewMessageModal({ users, groups, onClose, onSent }) {
+  const qc = useQueryClient();
   const [q, setQ] = useState('');
-  const mut = useMutation({ mutationFn: (userId) => openDm(userId), onSuccess: (c) => onOpened(c.id) });
-  const groups = groupByDept(users, q);
+  const [target, setTarget] = useState(null); // {kind:'dm',userId,name,photoUrl} | {kind:'group',id,name}
+  const query = q.trim().toLowerCase();
+  const groupMatches = groups.filter((g) => !query || (g.name || '').toLowerCase().includes(query));
+  const peopleGroups = groupByDept(users, q); // [dept, members][]
+
+  const send = useMutation({
+    mutationFn: async (payload) => {
+      const convId = target.kind === 'group' ? target.id : (await openDm(target.userId)).id;
+      await postMessage(convId, payload);
+      return convId;
+    },
+    onSuccess: (convId) => { qc.invalidateQueries({ queryKey: ['conversations'] }); onSent(convId); },
+  });
+
   return (
-    <ModalShell title="New direct message" onClose={onClose}>
-      <input value={q} onChange={(e) => setQ(e.target.value)} autoFocus placeholder="Search name, role or department…"
-        className="mt-4 w-full rounded-lg border border-line px-3 py-2 text-sm outline-none focus:border-pine" />
-      <div className="mt-2 max-h-72 overflow-y-auto">
-        {groups.length === 0 && <p className="px-2 py-2 text-xs text-ink-soft">No matches.</p>}
-        {groups.map(([dept, members]) => (
-          <div key={dept} className="mb-1">
-            <div className="rounded bg-paper px-2 py-1 text-[11px] font-semibold uppercase tracking-wide text-ink-soft">{dept} · {members.length}</div>
-            {members.map((u) => (
-              <button key={u.id} onClick={() => mut.mutate(u.id)} disabled={mut.isPending}
-                className="flex w-full items-center gap-2 rounded-lg px-2 py-2 text-left text-sm hover:bg-pine-tint">
-                <Avatar id={u.id} name={u.name} photoUrl={u.photoUrl} size={28} />
-                <span className="flex-1 truncate">{u.name}</span>
-                <span className="truncate text-xs text-ink-soft">{u.role}</span>
-              </button>
+    <ModalShell title="New message" onClose={onClose}>
+      {!target ? (
+        <>
+          <input value={q} onChange={(e) => setQ(e.target.value)} autoFocus placeholder="To: name, role, department, or group…"
+            className="mt-4 w-full rounded-lg border border-line px-3 py-2 text-sm outline-none focus:border-pine" />
+          <div className="mt-2 max-h-80 overflow-y-auto">
+            {groupMatches.length > 0 && (
+              <div className="mb-1">
+                <div className="rounded bg-paper px-2 py-1 text-[11px] font-semibold uppercase tracking-wide text-ink-soft">Groups</div>
+                {groupMatches.map((g) => (
+                  <button key={g.id} onClick={() => setTarget({ kind: 'group', id: g.id, name: g.name })}
+                    className="flex w-full items-center gap-2 rounded-lg px-2 py-2 text-left text-sm hover:bg-pine-tint">
+                    <span className="flex h-7 w-7 shrink-0 items-center justify-center rounded-lg bg-pine-tint text-pine">#</span>
+                    <span className="flex-1 truncate">{g.name}</span>
+                  </button>
+                ))}
+              </div>
+            )}
+            {peopleGroups.map(([dept, members]) => (
+              <div key={dept} className="mb-1">
+                <div className="rounded bg-paper px-2 py-1 text-[11px] font-semibold uppercase tracking-wide text-ink-soft">{dept} · {members.length}</div>
+                {members.map((u) => (
+                  <button key={u.id} onClick={() => setTarget({ kind: 'dm', userId: u.id, name: u.name, photoUrl: u.photoUrl })}
+                    className="flex w-full items-center gap-2 rounded-lg px-2 py-2 text-left text-sm hover:bg-pine-tint">
+                    <Avatar id={u.id} name={u.name} photoUrl={u.photoUrl} size={28} />
+                    <span className="flex-1 truncate">{u.name}</span>
+                    <span className="truncate text-xs text-ink-soft">{u.role}</span>
+                  </button>
+                ))}
+              </div>
             ))}
+            {groupMatches.length === 0 && peopleGroups.length === 0 && <p className="px-2 py-2 text-xs text-ink-soft">No matches.</p>}
           </div>
-        ))}
-      </div>
+        </>
+      ) : (
+        <>
+          <div className="mt-4 flex items-center gap-2 text-sm">
+            <span className="text-ink-soft">To:</span>
+            <span className="flex items-center gap-1.5 rounded-full border border-line bg-paper py-1 pl-2 pr-1.5">
+              {target.kind === 'group'
+                ? <span className="font-semibold text-pine">#</span>
+                : <Avatar id={target.userId} name={target.name} photoUrl={target.photoUrl} size={18} rounded="rounded" />}
+              <span className="font-medium">{target.name}</span>
+              <button onClick={() => setTarget(null)} title="Change recipient" className="text-ink-soft hover:text-brick">✕</button>
+            </span>
+          </div>
+          <div className="mt-3">
+            <MessageComposer
+              onSend={(p) => send.mutateAsync(p)}
+              users={users.map((u) => ({ id: u.id, name: u.name, role: u.role }))}
+              placeholder={`Message ${target.name}`}
+              autoFocus
+            />
+          </div>
+          {send.error && <p className="mt-2 text-sm text-brick">{send.error.response?.data?.error?.message || 'Failed to send'}</p>}
+        </>
+      )}
     </ModalShell>
   );
 }
