@@ -735,11 +735,11 @@ function MeetingModal({ recurrences, rooms = [], meeting, initialDate, initialTi
           {f.mode !== 'offline' && (
             <label className="mt-3 block text-sm"><span className="text-ink-soft">Meeting link</span>
               <input value={f.meetingLink} onChange={(e) => set('meetingLink', e.target.value)} className="inp mt-1"
-                placeholder={ms.data?.connected ? 'Leave blank to auto-create a Teams meeting' : 'Paste the Zoom / Teams / Meet link'} />
+                placeholder={ms.data?.connected ? 'Leave blank to auto-create a Teams meeting' : 'Paste the meeting link here'} />
               {willAutoTeams
                 ? <p className="mt-1 text-[11px] text-sage">✓ A Teams meeting will be created on your Outlook and attendees invited.</p>
                 : !ms.data?.connected
-                  ? <p className="mt-1 text-[11px] text-ink-soft">Connect Microsoft in <a href="/profile" className="text-pine hover:underline">Profile</a> to auto-create a Teams link.</p>
+                  ? <p className="mt-1 text-[11px] text-ink-soft">Create a Google Meet (or Zoom) meeting and paste its link here so attendees can join.</p>
                   : null}
             </label>
           )}

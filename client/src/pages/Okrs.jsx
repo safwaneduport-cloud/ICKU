@@ -42,7 +42,7 @@ function TargetPicker({ reports, currentTarget, targets, setTargets }) {
         ⋯{targets.length > 1 ? ` ${targets.length}` : ''}
       </button>
       {open && (
-        <div className="absolute bottom-full right-0 z-30 mb-1 w-60 rounded-lg border border-line bg-white p-1.5 shadow-lg">
+        <div className="absolute bottom-full left-0 right-auto z-30 mb-1 w-60 max-w-[calc(100vw-1.5rem)] rounded-lg border border-line bg-white p-1.5 shadow-lg sm:left-auto sm:right-0">
           <div className="px-1 pb-1 text-[11px] font-semibold uppercase tracking-wide text-ink-soft">Add for…</div>
           <label className="flex items-center gap-2 rounded px-2 py-1 text-sm hover:bg-paper">
             <input type="checkbox" checked={allOn} onChange={() => setTargets(allOn ? [] : allIds)} />
@@ -249,7 +249,7 @@ function ChecklistTab({ userId, isSelf, reports = [] }) {
   return (
     <div className="space-y-4">
       <div className="flex flex-wrap items-center justify-between gap-2">
-        <p className="text-sm text-ink-soft">{isSelf ? 'Tick items as you complete them. Only you can check your own list.' : "You can add, edit or clear items — but only they can tick them off."}</p>
+        {!isSelf && <p className="text-sm text-ink-soft">You can add, edit or clear items — but only they can tick them off.</p>}
         <div className="flex items-center gap-2">
           {reports.length > 0 && (
             <div className="flex items-center gap-1 text-[11px] text-ink-soft">New items for:<TargetPicker reports={reports} currentTarget={userId} targets={targets} setTargets={setTargets} /></div>
