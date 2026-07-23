@@ -7,6 +7,7 @@ import {
   getReminders, completeReminder, setSection, getFiles,
 } from '../api/messages.api.js';
 import { useProfile } from '../store/ProfileContext.jsx';
+import { useAuth } from '../store/AuthContext.jsx';
 import MessageComposer, { readDraft, listDrafts, clearDraft } from '../features/messages/MessageComposer.jsx';
 import ChatMessage from '../features/messages/ChatMessage.jsx';
 import Avatar from '../features/messages/Avatar.jsx';
@@ -57,6 +58,17 @@ function SectionHeader({ title, open, onToggle, onAdd }) {
         {onAdd && <button onClick={onAdd} title={`New ${title}`} className="rounded p-1 hover:bg-paper hover:text-pine"><PlusIcon /></button>}
         <button onClick={onToggle} aria-label={open ? 'Collapse' : 'Expand'} className="rounded p-1 hover:bg-paper hover:text-pine"><CollapseChevron open={open} /></button>
       </div>
+    </div>
+  );
+}
+
+// Slack-style "New messages" line, marking where you last left off.
+function UnreadDivider() {
+  return (
+    <div className="my-1.5 flex items-center gap-2 px-4">
+      <span className="h-px flex-1 bg-brick/40" />
+      <span className="shrink-0 rounded-full bg-brick/10 px-2 py-0.5 text-[11px] font-semibold text-brick">New messages</span>
+      <span className="h-px flex-1 bg-brick/40" />
     </div>
   );
 }
@@ -119,13 +131,13 @@ export default function Messages() {
   const openThreadFrom = (convId, parent) => { setActiveCard(null); setPendingThread(parent); setSelectedId(convId); };
   const pickCard = (key) => { setSelectedId(null); setThread(null); setActiveCard((k) => (k === key ? null : key)); };
 
-  // Mark a conversation read when it's opened (clears the unread badge). If we
-  // arrived by deep-linking into a thread, open that thread too.
+  // If we arrived by deep-linking into a thread, open that thread too.
+  // (Marking read is done inside ChatPane, AFTER it captures the last-read marker
+  // for the "New messages" divider — doing it here would race that capture.)
   useEffect(() => {
     if (!selectedId) return;
     setThread(pendingThread);
     setPendingThread(null);
-    markRead(selectedId).then(() => qc.invalidateQueries({ queryKey: ['conversations'] })).catch(() => {});
   }, [selectedId]); // eslint-disable-line
 
   return (
@@ -591,6 +603,8 @@ function ChannelRow({ c, selected, onSelect, sections, onMove }) {
 
 function ChatPane({ conversationId, users, onOpenThread, onOpenProfile, onBack }) {
   const qc = useQueryClient();
+  const { user } = useAuth();
+  const me = user?.id;
   const [addOpen, setAddOpen] = useState(false);
   const [toast, setToast] = useState('');
   const conv = useQuery({ queryKey: ['conversation', conversationId], queryFn: () => getConversation(conversationId), retry: false });
@@ -598,8 +612,47 @@ function ChatPane({ conversationId, users, onOpenThread, onOpenProfile, onBack }
   const reminders = useQuery({ queryKey: ['reminders'], queryFn: getReminders, retry: false });
   const remindByMsg = new Map((reminders.data || []).filter((r) => r.messageId).map((r) => [r.messageId, r.remindAt]));
   const bottomRef = useRef(null);
+  const dividerRef = useRef(null);
 
-  useEffect(() => { bottomRef.current?.scrollIntoView({ behavior: 'smooth' }); }, [messages.data?.length]);
+  // Freeze the last-read marker at open time (before we mark read) so the
+  // "New messages" divider stays put for the whole visit.
+  const markerRef = useRef(undefined);
+  if (markerRef.current === undefined && conv.data) markerRef.current = conv.data.lastReadAt ?? null;
+  const marker = markerRef.current;
+  const msgs = messages.data || [];
+  const firstUnreadId = marker ? msgs.find((m) => m.authorId !== me && new Date(m.at) > new Date(marker))?.id : null;
+
+  // Initial landing (runs once, once both marker + messages are ready): the
+  // "New messages" divider if there's unread, else the bottom. Guarded so the
+  // conv refetch after markRead doesn't yank the view.
+  const didInit = useRef(false);
+  useEffect(() => {
+    if (didInit.current || !conv.data || !messages.data) return;
+    didInit.current = true;
+    requestAnimationFrame(() => {
+      if (firstUnreadId && dividerRef.current) dividerRef.current.scrollIntoView({ block: 'center' });
+      else bottomRef.current?.scrollIntoView();
+    });
+  }, [conv.data, messages.data]); // eslint-disable-line
+  // New messages while viewing → follow to the bottom.
+  const prevLen = useRef(0);
+  useEffect(() => {
+    if (didInit.current && msgs.length > prevLen.current) bottomRef.current?.scrollIntoView({ behavior: 'smooth' });
+    prevLen.current = msgs.length;
+  }, [msgs.length]); // eslint-disable-line
+
+  // Mark read once, only after the marker is captured; refresh the sidebar badge
+  // and set this conversation's cached read state so a re-open shows no divider.
+  const markReadRef = useRef(false);
+  useEffect(() => {
+    if (!conv.data || !messages.data || markReadRef.current) return;
+    markReadRef.current = true;
+    markRead(conversationId).then(() => {
+      qc.invalidateQueries({ queryKey: ['conversations'] });
+      qc.setQueryData(['conversation', conversationId], (old) => (old ? { ...old, lastReadAt: new Date().toISOString() } : old));
+    }).catch(() => {});
+  }, [conv.data, messages.data]); // eslint-disable-line
+
   useEffect(() => { if (!toast) return; const t = setTimeout(() => setToast(''), 2500); return () => clearTimeout(t); }, [toast]);
 
   const send = useMutation({
@@ -646,6 +699,7 @@ function ChatPane({ conversationId, users, onOpenThread, onOpenProfile, onBack }
           return (
             <div key={m.id}>
               {newDay && <DateDivider at={m.at} />}
+              {m.id === firstUnreadId && <div ref={dividerRef}><UnreadDivider /></div>}
               <ChatMessage
                 m={m} compact={compact} conversationId={conversationId} reminderAt={remindByMsg.get(m.id)}
                 onOpenThread={onOpenThread} onOpenProfile={onOpenProfile}

@@ -145,6 +145,7 @@ export async function getConversation(userId, conversationId) {
   const isMember = conv.members.some((m) => m.userId === userId);
   if (!isMember && conv.type !== 'event') throw new ApiError(403, 'Not a member');
   const other = conv.type === 'dm' ? conv.members.find((m) => m.userId !== userId)?.user : null;
+  const meMember = conv.members.find((m) => m.userId === userId);
   return {
     id: conv.id,
     type: conv.type,
@@ -152,6 +153,7 @@ export async function getConversation(userId, conversationId) {
     name: conv.type === 'dm' ? other?.name || 'Direct message' : conv.name,
     photoUrl: other?.photoUrl ?? null,
     createdById: conv.createdById,
+    lastReadAt: meMember?.lastReadAt ?? null, // where the "New messages" divider goes (frozen client-side on open)
     members: conv.members.map((m) => ({
       id: m.userId,
       name: m.user.name,
