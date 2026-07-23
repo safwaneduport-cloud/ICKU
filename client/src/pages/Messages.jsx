@@ -743,7 +743,9 @@ function ChatPane({ conversationId, users, focusMessageId, onOpenThread, onOpenP
   const [toast, setToast] = useState('');
   const [atBottom, setAtBottom] = useState(true); // controls the "jump to latest" button
   const conv = useQuery({ queryKey: ['conversation', conversationId], queryFn: () => getConversation(conversationId), retry: 1 });
-  const messages = useQuery({ queryKey: ['messages', conversationId], queryFn: () => getMessages(conversationId), retry: false, refetchInterval: 3000 });
+  // Stop polling once it errors (e.g. a 403 after another member removes us from
+  // the group) — otherwise it hammers the API every 3s from a pane we can't read.
+  const messages = useQuery({ queryKey: ['messages', conversationId], queryFn: () => getMessages(conversationId), retry: false, refetchInterval: (query) => (query.state.error ? false : 3000) });
   const reminders = useQuery({ queryKey: ['reminders'], queryFn: getReminders, retry: false });
   const remindByMsg = new Map((reminders.data || []).filter((r) => r.messageId).map((r) => [r.messageId, r.remindAt]));
   const bottomRef = useRef(null);
@@ -816,12 +818,22 @@ function ChatPane({ conversationId, users, focusMessageId, onOpenThread, onOpenP
 
   useEffect(() => { if (!toast) return; const t = setTimeout(() => setToast(''), 2500); return () => clearTimeout(t); }, [toast]);
 
+  // If we lose access mid-view (e.g. another member removes us from the group),
+  // the messages poll starts 403ing. Re-check the conversation so the "not
+  // available" screen replaces the stale pane, instead of leaving a working-
+  // looking composer that silently drops sends.
+  useEffect(() => {
+    const status = messages.error?.response?.status;
+    if (status === 403 || status === 404) qc.invalidateQueries({ queryKey: ['conversation', conversationId] });
+  }, [messages.error]); // eslint-disable-line
+
   const send = useMutation({
     mutationFn: (payload) => postMessage(conversationId, payload),
     onSuccess: () => {
       qc.invalidateQueries({ queryKey: ['messages', conversationId] });
       qc.invalidateQueries({ queryKey: ['conversations'] });
     },
+    onError: (e) => setToast(e?.response?.status === 403 ? '🔒 You’re no longer in this conversation.' : '⚠️ Couldn’t send — please try again.'),
   });
 
   const c = conv.data;
@@ -1107,7 +1119,8 @@ function AddPeopleModal({ conversationId, existing, onClose, onDone }) {
 function DetailsDrawer({ conv, me, onOpenProfile, onClose, onAddPeople, onChanged, onLeft }) {
   const [confirmRemove, setConfirmRemove] = useState(null); // member id awaiting confirm
   const [confirmLeave, setConfirmLeave] = useState(false);
-  const [err, setErr] = useState('');
+  const [err, setErr] = useState('');        // remove errors — shown in the members list
+  const [leaveErr, setLeaveErr] = useState(''); // leave errors — shown in the footer, by the button
   const isGroup = conv.type === 'group';
   const isDm = conv.type === 'dm';
   const canLeave = isGroup;
@@ -1121,7 +1134,7 @@ function DetailsDrawer({ conv, me, onOpenProfile, onClose, onAddPeople, onChange
   const leave = useMutation({
     mutationFn: () => leaveConversation(conv.id),
     onSuccess: () => onLeft(),
-    onError: (e) => { setErr(e.response?.data?.error?.message || 'Could not leave'); setConfirmLeave(false); },
+    onError: (e) => { setLeaveErr(e.response?.data?.error?.message || 'Could not leave — please try again.'); setConfirmLeave(false); },
   });
   const busy = remove.isPending || leave.isPending;
 
@@ -1177,6 +1190,7 @@ function DetailsDrawer({ conv, me, onOpenProfile, onClose, onAddPeople, onChange
 
         {canLeave && (
           <div className="border-t border-line px-4 py-3">
+            {leaveErr && <p className="mb-2 text-xs text-brick">{leaveErr}</p>}
             {confirmLeave ? (
               <div className="flex items-center justify-between gap-2">
                 <span className="text-sm text-ink">Leave this group?</span>
@@ -1186,7 +1200,7 @@ function DetailsDrawer({ conv, me, onOpenProfile, onClose, onAddPeople, onChange
                 </span>
               </div>
             ) : (
-              <button onClick={() => { setErr(''); setConfirmLeave(true); }} className="w-full rounded-lg border border-brick/40 px-3 py-2 text-sm font-medium text-brick hover:bg-brick/5">
+              <button onClick={() => { setLeaveErr(''); setConfirmLeave(true); }} className="w-full rounded-lg border border-brick/40 px-3 py-2 text-sm font-medium text-brick hover:bg-brick/5">
                 Leave group
               </button>
             )}
