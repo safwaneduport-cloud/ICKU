@@ -771,7 +771,11 @@ function NewMessageModal({ users, groups, onClose, onSent }) {
       await postMessage(convId, payload);
       return convId;
     },
-    onSuccess: (convId) => { qc.invalidateQueries({ queryKey: ['conversations'] }); onSent(convId); },
+    onSuccess: (convId) => {
+      qc.invalidateQueries({ queryKey: ['conversations'] });
+      qc.invalidateQueries({ queryKey: ['messages', convId] }); // show it now if that conversation is already open
+      onSent(convId);
+    },
   });
 
   return (
@@ -818,7 +822,7 @@ function NewMessageModal({ users, groups, onClose, onSent }) {
                 ? <span className="font-semibold text-pine">#</span>
                 : <Avatar id={target.userId} name={target.name} photoUrl={target.photoUrl} size={18} rounded="rounded" />}
               <span className="font-medium">{target.name}</span>
-              <button onClick={() => setTarget(null)} title="Change recipient" className="text-ink-soft hover:text-brick">✕</button>
+              <button onClick={() => { send.reset(); setTarget(null); }} title="Change recipient" className="text-ink-soft hover:text-brick">✕</button>
             </span>
           </div>
           <div className="mt-3">

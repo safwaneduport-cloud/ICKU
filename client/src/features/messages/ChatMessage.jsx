@@ -86,21 +86,35 @@ export default function ChatMessage({ m, conversationId, compact, reminderAt, on
   const [sheetPicker, setSheetPicker] = useState(false);
   const pressTimer = useRef(null);
   const didLong = useRef(false);
-  const startPress = () => {
+  const pressPos = useRef({ x: 0, y: 0 });
+  const startPress = (e) => {
     if (m.deleted || editing) return;
+    const t = e.touches?.[0];
+    pressPos.current = { x: t?.clientX ?? 0, y: t?.clientY ?? 0 };
     didLong.current = false;
     pressTimer.current = setTimeout(() => { didLong.current = true; setSheetOpen(true); navigator.vibrate?.(8); }, 480);
   };
+  // Cancel only past a ~10px slop threshold (real fingers jitter during a hold);
+  // a bare touchcancel (no active touch) always cancels.
+  const movePress = (e) => {
+    const t = e.touches?.[0];
+    if (t && Math.abs(t.clientX - pressPos.current.x) <= 10 && Math.abs(t.clientY - pressPos.current.y) <= 10) return;
+    clearTimeout(pressTimer.current);
+  };
   const endPress = (e) => { clearTimeout(pressTimer.current); if (didLong.current) e.preventDefault(); };
-  const movePress = () => clearTimeout(pressTimer.current);
+  // touchend preventDefault does NOT cancel the emulated click on Android Chrome,
+  // so swallow that one ghost click in the capture phase before it reaches the
+  // backdrop / a sheet button. didLong stays true until the next touch starts.
+  const swallowClick = (e) => { if (didLong.current) { e.stopPropagation(); e.preventDefault(); didLong.current = false; } };
   const closeSheet = () => { setSheetOpen(false); setSheetRemind(false); setSheetPicker(false); };
+  useEffect(() => () => clearTimeout(pressTimer.current), []);
 
   const copyText = () => { navigator.clipboard?.writeText(m.body); setMenuOpen(false); };
   const copyLink = () => { navigator.clipboard?.writeText(`${window.location.origin}/messages#msg-${m.id}`); setMenuOpen(false); };
 
   return (
     <div id={`msg-${m.id}`}
-      onTouchStart={startPress} onTouchEnd={endPress} onTouchMove={movePress} onTouchCancel={movePress}
+      onTouchStart={startPress} onTouchEnd={endPress} onTouchMove={movePress} onTouchCancel={movePress} onClickCapture={swallowClick}
       className="group relative flex gap-2 px-4 py-0.5 hover:bg-paper/60 [-webkit-touch-callout:none]">
       {/* gutter: avatar (first of run) or hover-time (grouped) */}
       <div className="w-9 shrink-0">
@@ -230,10 +244,13 @@ export default function ChatMessage({ m, conversationId, compact, reminderAt, on
 
       {/* mobile long-press action sheet */}
       {sheetOpen && !m.deleted && (
-        <div className="fixed inset-0 z-50 flex flex-col justify-end bg-ink/40 lg:hidden" onClick={closeSheet}>
+        <div className="fixed inset-0 z-50 flex flex-col justify-end bg-ink/40" onClick={closeSheet}>
           <div className="max-h-[80vh] overflow-y-auto rounded-t-2xl bg-white p-2 pb-[max(0.75rem,env(safe-area-inset-bottom))]" onClick={(e) => e.stopPropagation()}>
             {sheetPicker ? (
-              <div className="p-1"><EmojiPicker onPick={(e) => { react.mutate(e); closeSheet(); }} /></div>
+              <div>
+                <button onClick={() => setSheetPicker(false)} className="mb-1 flex items-center gap-1 px-2 py-1.5 text-sm font-medium text-ink-soft hover:text-pine">‹ Back</button>
+                <EmojiPicker onPick={(e) => { react.mutate(e); closeSheet(); }} />
+              </div>
             ) : (
               <>
                 <div className="flex items-center justify-around px-1 py-2">

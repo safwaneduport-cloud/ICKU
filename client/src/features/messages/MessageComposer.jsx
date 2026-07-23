@@ -166,6 +166,7 @@ export default function MessageComposer({ onSend, users = [], placeholder = 'Wri
   }
 
   async function send() {
+    if (sending) return; // a fast double-Enter bypasses the disabled Send button
     const body = text.trim();
     if (!body && atts.length === 0) return;
     setSending(true);
