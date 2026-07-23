@@ -236,11 +236,19 @@ export default function ChatMessage({ m, conversationId, compact, reminderAt, on
           </div>
         )}
 
-        {/* thread affordance */}
+        {/* thread affordance — Slack-style: a stack of replier avatars, the reply
+            count as a link, then the last-reply time */}
         {onOpenThread && m.replyCount > 0 && (
-          <button onClick={() => onOpenThread(m)} className="mt-1 flex items-center gap-1 text-xs font-medium text-steel hover:underline">
-            💬 {m.replyCount} {m.replyCount === 1 ? 'reply' : 'replies'}
-            {m.lastReplyAt && <span className="text-ink-soft">· last reply {timeOf(m.lastReplyAt)}</span>}
+          <button onClick={() => onOpenThread(m)} className="group/th mt-1 flex items-center gap-2 rounded-lg border border-transparent px-1.5 py-1 text-xs hover:border-line hover:bg-paper">
+            {(m.replyAuthors?.length > 0) && (
+              <span className="flex -space-x-1.5">
+                {m.replyAuthors.map((a) => (
+                  <Avatar key={a.id} id={a.id} name={a.name} photoUrl={a.photoUrl} size={20} rounded="rounded-md" className="ring-2 ring-white" />
+                ))}
+              </span>
+            )}
+            <span className="font-semibold text-steel group-hover/th:underline">{m.replyCount} {m.replyCount === 1 ? 'reply' : 'replies'}</span>
+            {m.lastReplyAt && <span className="font-normal text-ink-soft">Last reply {timeOf(m.lastReplyAt)}</span>}
           </button>
         )}
       </div>

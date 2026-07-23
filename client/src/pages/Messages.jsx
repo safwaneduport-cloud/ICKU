@@ -159,6 +159,12 @@ export default function Messages() {
   const drafts = listDrafts(); // localStorage; bumpDraft re-renders on change
   const totalUnread = (conversations.data || []).reduce((n, c) => n + (c.unread || 0), 0);
 
+  // The parent conversation shown as the Thread view's subtitle (Slack-style).
+  const threadConv = (conversations.data || []).find((c) => c.id === selectedId);
+  const threadConvLabel = threadConv
+    ? (threadConv.type === 'group' ? `# ${threadConv.name}` : threadConv.type === 'event' ? `🗓 ${threadConv.name}` : threadConv.name)
+    : '';
+
   const openConversation = (id, msgId = null) => { setActiveCard(null); setFocusMsg(msgId); setSelectedId(id); };
   const openThreadFrom = (convId, parent) => { setActiveCard(null); setPendingThread(parent); setSelectedId(convId); };
   const pickCard = (key) => { setSelectedId(null); setThread(null); setActiveCard((k) => (k === key ? null : key)); };
@@ -330,6 +336,7 @@ export default function Messages() {
         <ThreadPanel
           conversationId={selectedId}
           parent={thread}
+          convLabel={threadConvLabel}
           users={userOpts}
           onClose={() => setThread(null)}
           onOpenProfile={openProfile}
@@ -931,7 +938,7 @@ function ChatPane({ conversationId, users, focusMessageId, onOpenThread, onOpenP
   );
 }
 
-function ThreadPanel({ conversationId, parent, users, onClose, onOpenProfile }) {
+function ThreadPanel({ conversationId, parent, convLabel, users, onClose, onOpenProfile }) {
   const qc = useQueryClient();
   const thread = useQuery({ queryKey: ['thread', parent.id], queryFn: () => getThread(parent.id), retry: false, refetchInterval: 3000 });
   const reply = useMutation({
@@ -945,9 +952,14 @@ function ThreadPanel({ conversationId, parent, users, onClose, onOpenProfile }) 
   return (
     // Full-screen over the chat on phones; a side panel from lg up.
     <aside className="fixed inset-0 z-40 flex flex-col bg-white lg:static lg:z-auto lg:w-80 lg:shrink-0 lg:rounded-2xl lg:border lg:border-line">
-      <div className="flex items-center justify-between border-b border-line px-4 py-3">
-        <span className="font-serif text-sm font-bold text-pine">Thread</span>
-        <button onClick={onClose} className="text-ink-soft hover:text-brick" aria-label="Close">✕</button>
+      <div className="flex items-center gap-2 border-b border-line px-3 py-2.5">
+        {/* Mobile: back chevron on the left (Slack-style). Desktop keeps the ✕. */}
+        <button onClick={onClose} className="-ml-1 shrink-0 rounded-lg p-1 text-ink-soft hover:bg-paper lg:hidden" aria-label="Back">←</button>
+        <div className="min-w-0 flex-1">
+          <div className="font-serif text-sm font-bold leading-tight text-pine">Thread</div>
+          {convLabel && <div className="truncate text-[11px] text-ink-soft">{convLabel}</div>}
+        </div>
+        <button onClick={onClose} className="hidden shrink-0 text-ink-soft hover:text-brick lg:block" aria-label="Close">✕</button>
       </div>
       <div className="flex-1 overflow-y-auto py-2">
         {thread.data && (
@@ -966,7 +978,7 @@ function ThreadPanel({ conversationId, parent, users, onClose, onOpenProfile }) 
         )}
       </div>
       <div className="border-t border-line p-3">
-        <MessageComposer onSend={(p) => reply.mutateAsync(p)} users={users} placeholder="Reply…" autoFocus />
+        <MessageComposer onSend={(p) => reply.mutateAsync(p)} users={users} placeholder="Add a reply" autoFocus />
       </div>
     </aside>
   );

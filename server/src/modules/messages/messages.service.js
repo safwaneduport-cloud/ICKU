@@ -34,7 +34,9 @@ async function loadForRead(userId, conversationId) {
 const MSG_INCLUDE = {
   author: { select: { id: true, name: true, photoUrl: true } },
   _count: { select: { replies: true } },
-  replies: { orderBy: { createdAt: 'desc' }, take: 1, select: { createdAt: true } },
+  // Recent replies: last one drives lastReplyAt; the set drives the Slack-style
+  // stack of replier avatars on the thread indicator (deduped, capped at 3).
+  replies: { orderBy: { createdAt: 'desc' }, take: 8, select: { createdAt: true, authorId: true, author: { select: { id: true, name: true, photoUrl: true } } } },
   reactions: { select: { userId: true, emoji: true, user: { select: { name: true } } } },
 };
 
@@ -48,6 +50,20 @@ function groupReactions(list = [], meId) {
     map.set(r.emoji, e);
   }
   return [...map.values()];
+}
+
+// Up to 3 distinct authors from the recent replies, most-recent first — the
+// avatars shown on the "N replies" thread indicator (Slack-style).
+function distinctReplyAuthors(replies) {
+  const out = [];
+  const seen = new Set();
+  for (const r of replies || []) {
+    if (!r.author || seen.has(r.authorId)) continue;
+    seen.add(r.authorId);
+    out.push({ id: r.author.id, name: r.author.name, photoUrl: r.author.photoUrl ?? null });
+    if (out.length >= 3) break;
+  }
+  return out;
 }
 
 function shapeMessage(m, meId) {
@@ -64,6 +80,7 @@ function shapeMessage(m, meId) {
     parentId: m.parentId ?? null,
     replyCount: m._count?.replies,
     lastReplyAt: m.replies?.[0]?.createdAt ?? null,
+    replyAuthors: distinctReplyAuthors(m.replies),
     editedAt: m.editedAt ?? null,
     deleted,
     reactions: deleted ? [] : groupReactions(m.reactions, meId),
