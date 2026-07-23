@@ -36,13 +36,17 @@ export default function EventChat({ eventId }) {
     },
   });
 
+  // getMessages is paginated → resolves to { messages, hasMore }. Event chat is
+  // short and doesn't page older history, so we just take the recent page.
+  const list = messages.data?.messages || [];
+
   return (
     <section className="mt-4 rounded-2xl border border-line bg-white p-4">
       <div className="text-xs font-semibold uppercase tracking-wide text-ink-soft">Discussion</div>
       <div className="mt-3 max-h-80 overflow-y-auto rounded-lg border border-line">
         {(!cid || messages.isLoading) && <p className="px-3 py-4 text-sm text-ink-soft">Loading…</p>}
-        {messages.data?.length === 0 && <p className="px-3 py-6 text-center text-sm text-ink-soft">No messages yet. Start the conversation 👋</p>}
-        {messages.data?.map((m) => (
+        {messages.data && list.length === 0 && <p className="px-3 py-6 text-center text-sm text-ink-soft">No messages yet. Start the conversation 👋</p>}
+        {list.map((m) => (
           <div key={m.id}>
             <ChatMessage m={m} conversationId={cid}
               onOpenThread={() => setExpanded(expanded === m.id ? null : m.id)}

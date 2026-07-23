@@ -1,4 +1,4 @@
-import { useEffect, useRef, useState } from 'react';
+import { useEffect, useLayoutEffect, useRef, useState } from 'react';
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query';
 import { getUsers } from '../api/users.api.js';
 import {
@@ -827,6 +827,18 @@ function useOutbox(cid) {
   return readOutbox(cid);
 }
 
+// Merge an incoming page of messages into the loaded set: add new ones, override
+// edited/reacted ones by id, keep chronological order. Used for both the polled
+// recent page and loaded-older pages — a growing set, never a shifting window,
+// so a new arrival can't orphan a message into a gap.
+function mergeMessages(existing, incoming) {
+  if (!existing.length) return incoming;
+  if (!incoming.length) return existing;
+  const map = new Map(existing.map((m) => [m.id, m]));
+  for (const m of incoming) map.set(m.id, m);
+  return [...map.values()].sort((a, b) => (new Date(a.at) - new Date(b.at)) || (a.id < b.id ? -1 : a.id > b.id ? 1 : 0));
+}
+
 function ChatPane({ conversationId, users, focusMessageId, onOpenThread, onOpenProfile, onForward, onBack }) {
   const qc = useQueryClient();
   const { user } = useAuth();
@@ -850,53 +862,134 @@ function ChatPane({ conversationId, users, focusMessageId, onOpenThread, onOpenP
   const markerRef = useRef(undefined);
   if (markerRef.current === undefined && conv.data) markerRef.current = conv.data.lastReadAt ?? null;
   const marker = markerRef.current;
-  const msgs = messages.data || [];
+  // All loaded messages in one growing set. The polled query supplies the recent
+  // page which we merge in (adds new arrivals, applies edits/reactions); loading
+  // older prepends more. Merging (not a shifting window) means a new message
+  // never orphans one into a gap.
+  const [loaded, setLoaded] = useState([]);
+  const [hasMoreOlder, setHasMoreOlder] = useState(false);
+  const [loadingOlder, setLoadingOlder] = useState(false);
+  const initRef = useRef(false);
+  useEffect(() => {
+    const d = messages.data;
+    if (!d?.messages) return;
+    setLoaded((prev) => mergeMessages(prev, d.messages));
+    if (!initRef.current) { initRef.current = true; setHasMoreOlder(!!d.hasMore); }
+  }, [messages.data]); // eslint-disable-line
+  const msgs = loaded;
+  const canLoadOlder = hasMoreOlder;
   // A null marker means never-opened — the sidebar counts all of it unread, so
   // put the divider before the first message from someone else (matches the badge).
   const firstUnreadId = msgs.find((m) => m.authorId !== me && (!marker || new Date(m.at) > new Date(marker)))?.id;
 
-  // Initial landing (runs once, once both marker + messages are ready): the
-  // "New messages" divider if there's unread, else the bottom. Guarded so the
-  // conv refetch after markRead doesn't yank the view.
+  const scrollRef = useRef(null);
+  const onScroll = () => {
+    const el = scrollRef.current;
+    if (!el) return;
+    setAtBottom(el.scrollHeight - el.scrollTop - el.clientHeight < 120);
+    if (el.scrollTop < 200 && canLoadOlder && !loadingOlder) loadOlder(); // auto-load near top
+  };
+  const jumpToLatest = () => scrollRef.current?.scrollTo({ top: scrollRef.current.scrollHeight, behavior: 'smooth' });
+
+  // When older messages are prepended, restore scrollTop by the height delta AFTER
+  // the DOM commits (layout effect, pre-paint) so the reader's view never jumps.
+  const preserveRef = useRef(null);
+  useLayoutEffect(() => {
+    const p = preserveRef.current;
+    if (!p) return;
+    preserveRef.current = null;
+    const el = scrollRef.current;
+    if (el) el.scrollTop = p.prevTop + (el.scrollHeight - p.prevH);
+  }, [loaded]);
+
+  // Apply a message mutation's result to the loaded set by id. The recent-page
+  // poll can't refresh messages older than the last page, so edits/reactions/
+  // deletes on backlog messages patch straight into `loaded` here.
+  const patchLoaded = (partial) => {
+    if (!partial?.id) return;
+    setLoaded((prev) => prev.map((msg) => (msg.id === partial.id ? { ...msg, ...partial } : msg)));
+  };
+  const loadOlder = async () => {
+    const el = scrollRef.current;
+    const cursor = loaded[0]?.id;
+    if (loadingOlder || !el || !cursor || !canLoadOlder) return;
+    setLoadingOlder(true);
+    const snap = { prevH: el.scrollHeight, prevTop: el.scrollTop };
+    try {
+      const res = await getMessages(conversationId, { before: cursor });
+      if (res.messages.length) {
+        preserveRef.current = snap; // restored in the layout effect after DOM update
+        setLoaded((prev) => mergeMessages(prev, res.messages));
+      }
+      setHasMoreOlder(res.hasMore);
+    } catch { /* leave the button so the user can retry */ } finally {
+      setLoadingOlder(false);
+    }
+  };
+
+  const flash = (el) => {
+    el.scrollIntoView({ block: 'center' });
+    el.style.transition = 'background-color .4s';
+    el.style.backgroundColor = 'rgba(184,134,47,0.16)';
+    setTimeout(() => { el.style.backgroundColor = ''; }, 1800);
+  };
+  // Scroll to a message, loading older pages (bounded) until it's in view — so a
+  // jump from search or the pinned panel works even if it's not yet loaded.
+  const jumpToMessage = async (id) => {
+    const hit = () => document.getElementById(`msg-${id}`);
+    if (hit()) { flash(hit()); return; }
+    const el = scrollRef.current;
+    let cursor = loaded[0]?.id;
+    let more = canLoadOlder;
+    const acc = [];
+    let found = false;
+    for (let i = 0; i < 12 && cursor && more; i += 1) {
+      const res = await getMessages(conversationId, { before: cursor }); // eslint-disable-line no-await-in-loop
+      if (!res.messages.length) break;
+      acc.unshift(...res.messages);
+      more = res.hasMore;
+      if (res.messages.some((m) => m.id === id)) { found = true; break; }
+      cursor = res.messages[0].id;
+    }
+    if (acc.length) {
+      // If we couldn't land on the target — it's a thread reply (never in the main
+      // list), or it's older than our search bound — keep the reader where they are
+      // instead of lurching to old history with nothing highlighted.
+      if (!found && el) preserveRef.current = { prevH: el.scrollHeight, prevTop: el.scrollTop };
+      setLoaded((prev) => mergeMessages(prev, acc));
+      setHasMoreOlder(more);
+      if (found) requestAnimationFrame(() => { const t = hit(); if (t) flash(t); });
+    }
+  };
+
+  // Initial landing (runs once, once the marker + first page are loaded): a search
+  // hit jumps to that message, else the "New messages" divider, else the bottom.
   const didInit = useRef(false);
   useEffect(() => {
-    if (didInit.current || !conv.data || !messages.data) return;
+    if (didInit.current || !conv.data || loaded.length === 0) return;
     didInit.current = true;
     requestAnimationFrame(() => {
-      // A search hit → jump to and briefly highlight that message.
-      if (focusMessageId) {
-        const el = document.getElementById(`msg-${focusMessageId}`);
-        if (el) {
-          el.scrollIntoView({ block: 'center' });
-          el.style.transition = 'background-color .4s';
-          el.style.backgroundColor = 'rgba(184,134,47,0.16)';
-          setTimeout(() => { el.style.backgroundColor = ''; }, 1800);
-          return;
-        }
-      }
+      if (focusMessageId) { jumpToMessage(focusMessageId); return; }
       if (firstUnreadId && dividerRef.current) dividerRef.current.scrollIntoView({ block: 'center' });
       else bottomRef.current?.scrollIntoView();
     });
-  }, [conv.data, messages.data]); // eslint-disable-line
-  // New messages while viewing → follow to the bottom, but only if the reader is
-  // already near the bottom (don't yank them off the divider/backlog they're
-  // reading). Always follow your own just-sent message.
-  const scrollRef = useRef(null);
-  const prevLen = useRef(0);
-  const onScroll = () => { const el = scrollRef.current; if (el) setAtBottom(el.scrollHeight - el.scrollTop - el.clientHeight < 120); };
-  const jumpToLatest = () => scrollRef.current?.scrollTo({ top: scrollRef.current.scrollHeight, behavior: 'smooth' });
+  }, [conv.data, loaded]); // eslint-disable-line
+
+  // A newer message arriving (poll or my own send) → follow to the bottom if the
+  // reader is near it. Keyed on the NEWEST message id, so loading OLDER history
+  // (which changes the top, not the bottom) never yanks the view down.
+  const newestId = loaded.length ? loaded[loaded.length - 1].id : null;
+  const prevNewest = useRef(null);
   useEffect(() => {
-    if (didInit.current && msgs.length > prevLen.current) {
+    if (didInit.current && prevNewest.current && newestId && newestId !== prevNewest.current) {
       const el = scrollRef.current;
       const nearBottom = !el || el.scrollHeight - el.scrollTop - el.clientHeight < 120;
-      const mineJustSent = msgs[msgs.length - 1]?.authorId === me;
+      const mineJustSent = loaded[loaded.length - 1]?.authorId === me;
       if (nearBottom || mineJustSent) bottomRef.current?.scrollIntoView({ behavior: 'smooth' });
-      // New content landed below the fold without moving scrollTop, so no scroll
-      // event fires — recompute atBottom directly so the "jump to latest" button shows.
       else onScroll();
     }
-    prevLen.current = msgs.length;
-  }, [msgs.length]); // eslint-disable-line
+    prevNewest.current = newestId;
+  }, [newestId]); // eslint-disable-line
 
   // Mark read once, only after the marker is captured; refresh the sidebar badge
   // and set this conversation's cached read state so a re-open shows no divider.
@@ -998,9 +1091,17 @@ function ChatPane({ conversationId, users, focusMessageId, onOpenThread, onOpenP
       {/* messages */}
       <div ref={scrollRef} onScroll={onScroll} className="flex-1 overflow-y-auto py-2">
         {messages.isLoading && <p className="px-4 py-6 text-sm text-ink-soft">Loading…</p>}
-        {messages.data?.length === 0 && outbox.length === 0 && <p className="px-4 py-8 text-center text-sm text-ink-soft">No messages yet. Say hello! 👋</p>}
-        {messages.data?.map((m, i) => {
-          const prev = messages.data[i - 1];
+        {canLoadOlder && (
+          <div className="flex justify-center py-2">
+            <button onClick={loadOlder} disabled={loadingOlder}
+              className="rounded-full border border-line px-3 py-1 text-xs font-medium text-ink-soft hover:border-pine hover:text-pine disabled:opacity-60">
+              {loadingOlder ? 'Loading…' : 'Load older messages'}
+            </button>
+          </div>
+        )}
+        {!messages.isLoading && msgs.length === 0 && outbox.length === 0 && <p className="px-4 py-8 text-center text-sm text-ink-soft">No messages yet. Say hello! 👋</p>}
+        {msgs.map((m, i) => {
+          const prev = msgs[i - 1];
           const newDay = !prev || !sameDay(prev.at, m.at);
           const compact = !newDay && prev && prev.authorId === m.authorId && withinGap(prev.at, m.at) && !prev.deleted;
           return (
@@ -1011,6 +1112,7 @@ function ChatPane({ conversationId, users, focusMessageId, onOpenThread, onOpenP
                 m={m} compact={compact} conversationId={conversationId} reminderAt={remindByMsg.get(m.id)}
                 onOpenThread={onOpenThread} onOpenProfile={onOpenProfile} onForward={onForward}
                 onChanged={() => qc.invalidateQueries({ queryKey: ['messages', conversationId] })}
+                onPatch={patchLoaded}
                 onRemind={() => { qc.invalidateQueries({ queryKey: ['notifications'] }); qc.invalidateQueries({ queryKey: ['reminders'] }); setToast('🔖 Saved for later'); }}
               />
             </div>
@@ -1076,7 +1178,7 @@ function ChatPane({ conversationId, users, focusMessageId, onOpenThread, onOpenP
       )}
 
       {pinnedOpen && c && (
-        <PinnedPanel conversationId={conversationId} onOpenProfile={onOpenProfile} onClose={() => setPinnedOpen(false)} />
+        <PinnedPanel conversationId={conversationId} onOpenProfile={onOpenProfile} onClose={() => setPinnedOpen(false)} onJump={jumpToMessage} />
       )}
     </>
   );
@@ -1332,7 +1434,7 @@ function AddPeopleModal({ conversationId, existing, onClose, onDone }) {
 // event chats manage their own membership).
 // Pinned messages of a conversation — a right slide-over listing pins, each
 // jumps to the message in place; hover to unpin.
-function PinnedPanel({ conversationId, onOpenProfile, onClose }) {
+function PinnedPanel({ conversationId, onOpenProfile, onClose, onJump }) {
   const qc = useQueryClient();
   const pins = useQuery({ queryKey: ['pins', conversationId], queryFn: () => getPinned(conversationId), retry: false });
   const list = pins.data || [];
@@ -1340,17 +1442,7 @@ function PinnedPanel({ conversationId, onOpenProfile, onClose }) {
     mutationFn: (id) => unpinMessage(id),
     onSuccess: () => { qc.invalidateQueries({ queryKey: ['pins', conversationId] }); qc.invalidateQueries({ queryKey: ['messages', conversationId] }); },
   });
-  const jump = (id) => {
-    onClose();
-    requestAnimationFrame(() => {
-      const el = document.getElementById(`msg-${id}`);
-      if (!el) return;
-      el.scrollIntoView({ block: 'center' });
-      el.style.transition = 'background-color .4s';
-      el.style.backgroundColor = 'rgba(184,134,47,0.16)';
-      setTimeout(() => { el.style.backgroundColor = ''; }, 1800);
-    });
-  };
+  const jump = (id) => { onClose(); requestAnimationFrame(() => onJump?.(id)); };
   return (
     <div className="fixed inset-0 z-50 flex justify-end bg-black/30" onClick={onClose}>
       <div className="flex h-full w-full max-w-sm flex-col bg-white shadow-xl" onClick={(e) => e.stopPropagation()}>

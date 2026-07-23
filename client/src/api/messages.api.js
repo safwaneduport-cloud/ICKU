@@ -15,8 +15,10 @@ export const setMute = (id, muted) =>
 export const setDescription = (id, description) =>
   api.patch(`/messages/conversations/${id}/description`, { description }).then((r) => r.data.data);
 
-export const getMessages = (id) =>
-  api.get(`/messages/conversations/${id}/messages`).then((r) => r.data.data);
+// Paginated: returns { messages, hasMore }. No params → most recent page;
+// { before } → older page before that message id; { focus } → window around one.
+export const getMessages = (id, { before, focus, limit } = {}) =>
+  api.get(`/messages/conversations/${id}/messages`, { params: { before, focus, limit } }).then((r) => r.data.data);
 
 export const postMessage = (id, payload) =>
   api.post(`/messages/conversations/${id}/messages`, payload).then((r) => r.data.data);

@@ -282,14 +282,45 @@ export async function openDm(userId, otherId) {
 // ── messages ─────────────────────────────────────────────────────────
 
 // Top-level messages of a conversation (with reply counts for threads).
-export async function listMessages(userId, conversationId) {
+// Paginated top-level messages, always returned oldest→newest for display.
+//  - default: the most recent `limit`
+//  - before=<id>: the `limit` messages strictly older than that message
+//  - focus=<id>: a window centred on that message (for jump-to from search/pins)
+// Returns { messages, hasMore } where hasMore = older messages exist beyond the
+// oldest one returned (drives the "Load older" affordance).
+export async function listMessages(userId, conversationId, { before = null, focus = null, limit = 50 } = {}) {
   await loadForRead(userId, conversationId);
-  const msgs = await prisma.message.findMany({
-    where: { conversationId, parentId: null },
-    orderBy: { createdAt: 'asc' },
-    include: MSG_INCLUDE,
-  });
-  return msgs.map((m) => shapeMessage(m, userId));
+  const base = { conversationId, parentId: null };
+  const lim = Math.min(Math.max(Number(limit) || 50, 10), 100);
+  // keyset "older than message X": strictly-older createdAt, or same instant + lower id
+  const olderThan = (at, id) => ({ OR: [{ createdAt: { lt: at } }, { createdAt: at, id: { lt: id } }] });
+  let rows;
+
+  if (focus) {
+    const t = await prisma.message.findUnique({ where: { id: focus }, select: { createdAt: true, conversationId: true } });
+    if (!t || t.conversationId !== conversationId) {
+      rows = [];
+    } else {
+      const half = Math.floor(lim / 2);
+      const olderRows = await prisma.message.findMany({ where: { ...base, ...olderThan(t.createdAt, focus) }, orderBy: [{ createdAt: 'desc' }, { id: 'desc' }], take: half, include: MSG_INCLUDE });
+      const fromTarget = await prisma.message.findMany({ where: { ...base, OR: [{ createdAt: { gt: t.createdAt } }, { createdAt: t.createdAt, id: { gte: focus } }] }, orderBy: [{ createdAt: 'asc' }, { id: 'asc' }], take: half + 1, include: MSG_INCLUDE });
+      rows = [...olderRows.reverse(), ...fromTarget];
+    }
+  } else if (before) {
+    const c = await prisma.message.findUnique({ where: { id: before }, select: { createdAt: true } });
+    rows = c
+      ? (await prisma.message.findMany({ where: { ...base, ...olderThan(c.createdAt, before) }, orderBy: [{ createdAt: 'desc' }, { id: 'desc' }], take: lim, include: MSG_INCLUDE })).reverse()
+      : [];
+  } else {
+    rows = (await prisma.message.findMany({ where: base, orderBy: [{ createdAt: 'desc' }, { id: 'desc' }], take: lim, include: MSG_INCLUDE })).reverse();
+  }
+
+  let hasMore = false;
+  if (rows.length) {
+    const o = rows[0];
+    hasMore = (await prisma.message.count({ where: { ...base, ...olderThan(o.at ?? o.createdAt, o.id) } })) > 0;
+  }
+  return { messages: rows.map((m) => shapeMessage(m, userId)), hasMore };
 }
 
 // A single message's thread: the parent plus its replies.

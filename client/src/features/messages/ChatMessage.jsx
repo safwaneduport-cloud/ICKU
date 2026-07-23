@@ -84,7 +84,7 @@ function renderBlocks(body = '') {
 
 // Slack-style message row: avatar + name + time on the first of a run, hover
 // action toolbar (quick reactions / reply / more), reactions below, inline edit.
-export default function ChatMessage({ m, conversationId, compact, reminderAt, onOpenThread, onOpenProfile, onForward, onChanged, onRemind }) {
+export default function ChatMessage({ m, conversationId, compact, reminderAt, onOpenThread, onOpenProfile, onForward, onChanged, onPatch, onRemind }) {
   const { user } = useAuth();
   const mine = user?.id === m.authorId;
   const [menuOpen, setMenuOpen] = useState(false);
@@ -95,10 +95,16 @@ export default function ChatMessage({ m, conversationId, compact, reminderAt, on
   const menuRef = useRef(null);
 
   const changed = () => onChanged?.();
-  const react = useMutation({ mutationFn: (emoji) => reactMessage(m.id, emoji), onSuccess: changed });
-  const edit = useMutation({ mutationFn: (body) => editMessage(m.id, body), onSuccess: () => { setEditing(false); changed(); } });
-  const del = useMutation({ mutationFn: () => deleteMessage(m.id), onSuccess: changed });
-  const pin = useMutation({ mutationFn: () => (m.pinnedAt ? unpinMessage(m.id) : pinMessage(m.id)), onSuccess: changed });
+  // The recent-page poll only refreshes the most recent messages, so an edit /
+  // reaction / delete on a message the reader scrolled up to (outside that page)
+  // wouldn't otherwise reflect. onPatch applies the server's result to the loaded
+  // set by id, so backlog messages update in place (and a delete stops rendering
+  // its body/attachments immediately — important for a soft-deleted message).
+  const patch = (partial) => onPatch?.(partial);
+  const react = useMutation({ mutationFn: (emoji) => reactMessage(m.id, emoji), onSuccess: (reactions) => { patch({ id: m.id, reactions }); changed(); } });
+  const edit = useMutation({ mutationFn: (body) => editMessage(m.id, body), onSuccess: (updated) => { setEditing(false); patch(updated); changed(); } });
+  const del = useMutation({ mutationFn: () => deleteMessage(m.id), onSuccess: () => { patch({ id: m.id, deleted: true, body: '', attachments: [], reactions: [] }); changed(); } });
+  const pin = useMutation({ mutationFn: () => (m.pinnedAt ? unpinMessage(m.id) : pinMessage(m.id)), onSuccess: (updated) => { patch(updated); changed(); } });
   const remind = useMutation({
     mutationFn: (remindAt) => createReminder({ messageId: m.id, conversationId, remindAt: remindAt.toISOString() }),
     onSuccess: (r) => { setMenuOpen(false); setRemindOpen(false); onRemind?.(r); },

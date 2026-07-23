@@ -38,7 +38,10 @@ export async function openEventConversation(req, res, next) {
 }
 
 export async function listMessages(req, res, next) {
-  try { ok(res, await service.listMessages(req.user.id, req.params.id)); } catch (e) { next(e); }
+  try {
+    const { before, focus, limit } = req.query;
+    ok(res, await service.listMessages(req.user.id, req.params.id, { before, focus, limit }));
+  } catch (e) { next(e); }
 }
 
 export async function postMessage(req, res, next) {
