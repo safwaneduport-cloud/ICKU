@@ -10,4 +10,5 @@ export const decideDirectTask = (id, userId, decision) => api.post(`/direct-task
 export const rejectDirectAssignment = (id, body) => api.post(`/direct-tasks/${id}/reject-assignment`, body).then((r) => r.data.data);
 export const addDirectAssignees = (id, userIds) => api.post(`/direct-tasks/${id}/assignees`, { userIds }).then((r) => r.data.data);
 export const removeDirectAssignee = (id, userId) => api.delete(`/direct-tasks/${id}/assignees/${userId}`).then((r) => r.data.data);
+export const attachDirectTaskToProject = (id, payload) => api.post(`/direct-tasks/${id}/attach-to-project`, payload).then((r) => r.data.data);
 export const deleteDirectTask = (id) => api.delete(`/direct-tasks/${id}`).then((r) => r.data.data);

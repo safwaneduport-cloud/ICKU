@@ -106,7 +106,7 @@ function fmtDueText(event, offset, time) {
 
 // Append one line to a project's activity/edit history (best-effort). Keeps the
 // actor's name as a snapshot so the log reads correctly even if they leave.
-async function logActivity(eventId, actor, text) {
+export async function logActivity(eventId, actor, text) {
   let actorName = actor?.name;
   if (!actorName && actor?.id) actorName = (await prisma.user.findUnique({ where: { id: actor.id }, select: { name: true } }))?.name || '';
   await prisma.eventActivity.create({ data: { eventId, actorId: actor?.id || null, actorName: actorName || '', text } }).catch(() => {});
@@ -452,6 +452,9 @@ export async function addTask(actor, eventId, { name, description = '', dueOffse
       assignees: { create: links },
     },
   });
+  // A new (incomplete) task means the project isn't fully done — if it had been
+  // closed, reopen the Project Closure gate so its state reflects the open work.
+  await prisma.eventTask.updateMany({ where: { eventId, isClosure: true, completed: true }, data: { completed: false, completedAt: null } });
   notifyAssignments(links, { title: name.trim(), project: e.name, assignerId: actor.id });
   await logActivity(eventId, actor, `added task “${name.trim()}”`);
   return get(eventId);

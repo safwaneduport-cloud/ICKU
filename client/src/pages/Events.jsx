@@ -1,8 +1,9 @@
 import { useEffect, useMemo, useState } from 'react';
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query';
 import { getEvents, getTaskList, deleteEvent, toggleTask } from '../api/events.api.js';
-import { getMyTasks, getTasksIAssigned, toggleDirectTask, rejectDirectAssignment, deleteDirectTask, addDirectAssignees, removeDirectAssignee } from '../api/directTasks.api.js';
+import { getMyTasks, getTasksIAssigned, toggleDirectTask, rejectDirectAssignment, deleteDirectTask, addDirectAssignees, removeDirectAssignee, attachDirectTaskToProject } from '../api/directTasks.api.js';
 import ReassignControl from '../features/tasks/ReassignControl.jsx';
+import AttachToProjectControl from '../features/tasks/AttachToProjectControl.jsx';
 import { useAuth } from '../store/AuthContext.jsx';
 import { STATE, triggerLabel, deadlineLabel, dueLabel, taskDueDate, MONTHS, ymd } from '../features/events/meta.js';
 import EventDrawer from '../features/events/EventDrawer.jsx';
@@ -107,6 +108,12 @@ export default function Events() {
   const projTasksQ = useQuery({ queryKey: ['task-list', 'all', false], queryFn: () => getTaskList('all', false), retry: false, enabled: view === 'tasks' });
   const myDirectQ = useQuery({ queryKey: ['direct-tasks-mine'], queryFn: getMyTasks, retry: false, enabled: view === 'tasks' });
   const iAssignedQ = useQuery({ queryKey: ['direct-tasks-assigned'], queryFn: getTasksIAssigned, retry: false, enabled: view === 'tasks' });
+  // Projects the user can move a direct task into — ones they own (admins: any).
+  const projListQ = useQuery({ queryKey: ['events', 'all', 'all'], queryFn: () => getEvents('all', false), retry: false, enabled: view === 'tasks' });
+  const ownedProjects = useMemo(
+    () => (projListQ.data || []).filter((e) => (e.ownerId === user?.id || isCeoAdmin(user)) && e.approval !== 'pending'),
+    [projListQ.data, user?.id], // eslint-disable-line react-hooks/exhaustive-deps
+  );
 
   const invalidateTasks = () => {
     qc.invalidateQueries({ queryKey: ['task-list'] });
@@ -214,7 +221,7 @@ export default function Events() {
           onOpen={setOpenId} onChanged={() => qc.invalidateQueries({ queryKey: ['events'] })} />
       )}
       {view === 'tasks' && taskView === 'list' && (
-        <TasksView rows={shownRows} scope={scope} loading={loading} onOpenProject={setOpenId} onChanged={invalidateTasks} />
+        <TasksView rows={shownRows} scope={scope} loading={loading} onOpenProject={setOpenId} onChanged={invalidateTasks} ownedProjects={ownedProjects} projectsLoading={projListQ.isLoading} />
       )}
       {view === 'tasks' && taskView === 'calendar' && (
         <TaskCalendar rows={shownRows} loading={loading} onOpenProject={setOpenId} />
@@ -276,7 +283,7 @@ function BoardView({ projects, loading, userId, isAdmin, onOpen, onChanged }) {
 }
 
 // ── Tasks list: colour-coded status, prominent due + source, completion box ─
-function TasksView({ rows, scope, loading, onOpenProject, onChanged }) {
+function TasksView({ rows, scope, loading, onOpenProject, onChanged, ownedProjects = [], projectsLoading = false }) {
   const qc = useQueryClient();
   const invalidate = onChanged || (() => qc.invalidateQueries());
   const toggleDir = useMutation({ mutationFn: toggleDirectTask, onSuccess: invalidate });
@@ -285,7 +292,9 @@ function TasksView({ rows, scope, loading, onOpenProject, onChanged }) {
   const delDirect = useMutation({ mutationFn: deleteDirectTask, onSuccess: invalidate });
   const addAssignees = useMutation({ mutationFn: ({ id, userIds }) => addDirectAssignees(id, userIds), onSuccess: invalidate });
   const removeAssignee = useMutation({ mutationFn: ({ id, userId }) => removeDirectAssignee(id, userId), onSuccess: invalidate });
+  const attach = useMutation({ mutationFn: ({ id, ...payload }) => attachDirectTaskToProject(id, payload), onSuccess: invalidate });
   const [reassignId, setReassignId] = useState(null);
+  const [attachId, setAttachId] = useState(null);
 
   if (loading) return <div className="rounded-2xl border border-line bg-white px-4 py-6 text-ink-soft">Loading…</div>;
   if (!rows.length) return <div className="rounded-2xl border border-line bg-white px-4 py-10 text-center text-ink-soft">{scope === 'me' ? 'No tasks assigned to you match this filter.' : scope === 'by' ? "You haven't assigned any tasks in this filter." : 'No tasks match this filter.'}</div>;
@@ -339,7 +348,8 @@ function TasksView({ rows, scope, loading, onOpenProject, onChanged }) {
                     {r.kind === 'direct' && r.toMe && !r.completed && <button onClick={() => rejectDirect.mutate(r.id)} className="text-ink-soft hover:text-brick">reject</button>}
                     {r.byMe && r.kind === 'direct' && (
                       <>
-                        <button onClick={() => setReassignId(reassignId === r.key ? null : r.key)} className={`hover:text-pine ${reassignId === r.key ? 'text-pine' : 'text-ink-soft'}`}>reassign</button>
+                        <button onClick={() => { setReassignId(reassignId === r.key ? null : r.key); setAttachId(null); }} className={`hover:text-pine ${reassignId === r.key ? 'text-pine' : 'text-ink-soft'}`}>reassign</button>
+                        <button onClick={() => { setAttachId(attachId === r.key ? null : r.key); setReassignId(null); }} className={`hover:text-pine ${attachId === r.key ? 'text-pine' : 'text-ink-soft'}`}>add to project</button>
                         <button onClick={() => delDirect.mutate(r.id)} className="text-ink-soft hover:text-brick">delete</button>
                       </>
                     )}
@@ -353,6 +363,12 @@ function TasksView({ rows, scope, loading, onOpenProject, onChanged }) {
                       onAdd={(userIds) => addAssignees.mutate({ id: r.id, userIds })}
                       onRemove={(uid) => removeAssignee.mutate({ id: r.id, userId: uid })} />
                   </div>
+                )}
+
+                {attachId === r.key && r.raw && (
+                  <AttachToProjectControl task={r.raw} projects={ownedProjects} busy={attach.isPending} loadingProjects={projectsLoading}
+                    onAttach={(payload) => attach.mutate({ id: r.id, ...payload }, { onSuccess: () => setAttachId(null) })}
+                    onCancel={() => setAttachId(null)} />
                 )}
               </div>
             </div>

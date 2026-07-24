@@ -15,6 +15,7 @@ router.post('/:id/assignee/:userId/decision/:decision', ctrl.decide); // approve
 router.post('/:id/reject-assignment', ctrl.rejectAssignment);
 router.post('/:id/assignees', ctrl.addAssignees); // reassign: add recipients
 router.delete('/:id/assignees/:userId', ctrl.removeAssignee); // reassign: drop a recipient
+router.post('/:id/attach-to-project', ctrl.attachToProject); // move a direct task into a project
 router.delete('/:id', ctrl.remove);
 
 export default router;

@@ -3,6 +3,8 @@ import { ApiError } from '../../middleware/errorHandler.js';
 import { canAdmin } from '../../lib/access.js';
 import { gateFor } from '../../lib/taskGate.js';
 import { notifyAssignments, notifyTaskAssigned } from '../../lib/notify.js';
+import { effectiveDue, triggerDate } from '../events/events.lib.js';
+import { logActivity } from '../events/events.service.js';
 
 async function isManagerOf(managerId, userId) {
   const u = await prisma.user.findUnique({ where: { id: userId }, select: { reportsToId: true } });
@@ -57,6 +59,72 @@ export async function create(assigner, { title, description = '', assigneeIds = 
   const shaped = shape(t);
   notifyAssignments(links, { title: shaped.title, by: shaped.assignerName, dueText: dueDate || null, assignerId: assigner.id });
   return shaped;
+}
+
+// Convert an ad-hoc direct task into a project (Event) task: it moves under the
+// chosen project and thereafter behaves exactly like any task created there —
+// listed with the project, on the calendar, toggleable by its assignee or the
+// project owner. The same people keep it with their existing approval/acceptance,
+// so nobody is re-assigned or re-notified. Only the task's creator (or an admin)
+// may move it, and only into a project they own (or admin) — mirroring the rule
+// that only a project's owner may add tasks to it.
+export async function attachToProject(actor, id, { eventId, dueOffset = null, dueTime = null } = {}) {
+  const t = await prisma.directTask.findUnique({ where: { id }, include: { assignees: true } });
+  if (!t) throw new ApiError(404, 'Task not found');
+  if (t.assignerId !== actor.id && !canAdmin(actor)) throw new ApiError(403, 'Only the person who created this task can move it into a project');
+  if (!eventId) throw new ApiError(400, 'Pick a project to add this task to');
+
+  const e = await prisma.event.findUnique({
+    where: { id: eventId },
+    select: { id: true, name: true, ownerId: true, approval: true, status: true, triggerMonth: true, triggerDay: true, tasks: { select: { sort: true } } },
+  });
+  if (!e) throw new ApiError(404, 'Project not found');
+  // Only a live (approved) project may receive the task. A pending project can
+  // still be rejected, which hides its tasks everywhere — moving into one and
+  // deleting the source direct task would orphan the work permanently.
+  if (e.approval !== 'approved') throw new ApiError(400, 'That project is still awaiting approval');
+  if (e.ownerId !== actor.id && !canAdmin(actor)) throw new ApiError(403, 'You can only add tasks to a project you own');
+
+  // A dated project's tasks each carry a due date (offset from the trigger); an
+  // undated/TBD project has no anchor, so the task's absolute due is dropped.
+  const dated = e.status === 'confirmed' && !!e.triggerMonth;
+  let off = null;
+  let time = null;
+  if (dated) {
+    if (dueOffset == null || dueOffset < 0) throw new ApiError(400, 'A due date on or after the project date is required');
+    off = dueOffset;
+    time = dueTime || null;
+  }
+
+  // Carry the assignees over unchanged (same approval + acceptance state) so the
+  // people already on it keep it exactly as-is and get no fresh notification.
+  const links = t.assignees.map((a) => ({
+    userId: a.userId, approval: a.approval, approverId: a.approverId, status: a.status, rejectedReason: a.rejectedReason,
+  }));
+  const nextSort = e.tasks.reduce((m, x) => Math.max(m, x.sort), -1) + 1;
+
+  // Preserve the done state; recompute "late" against the new project due date.
+  let completedLate = false;
+  if (t.completed && t.completedAt && dated && off != null) {
+    const due = effectiveDue({ dueOffset: off, dueTime: time }, triggerDate({ status: 'confirmed', triggerMonth: e.triggerMonth, triggerDay: e.triggerDay }));
+    completedLate = !!due && t.completedAt > due;
+  }
+
+  await prisma.$transaction([
+    prisma.eventTask.create({
+      data: {
+        eventId, name: t.title, description: t.description || '', dueOffset: off, dueTime: time, sort: nextSort,
+        completed: t.completed, completedAt: t.completedAt, completedLate,
+        assignees: { create: links },
+      },
+    }),
+    prisma.directTask.delete({ where: { id } }),
+    // If the incoming task is still open, a closed project isn't done anymore —
+    // reopen its Project Closure gate. (No-op when the task is already completed.)
+    ...(t.completed ? [] : [prisma.eventTask.updateMany({ where: { eventId, isClosure: true, completed: true }, data: { completed: false, completedAt: null } })]),
+  ]);
+  await logActivity(eventId, actor, `added task “${t.title}” (moved from a direct task)`);
+  return { ok: true, eventId };
 }
 
 // Tasks assigned TO me — only ones my manager has approved (pending stay hidden).

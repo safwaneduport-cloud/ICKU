@@ -37,6 +37,9 @@ export async function addAssignees(req, res, next) {
 export async function removeAssignee(req, res, next) {
   try { res.json({ data: await service.removeAssignee(req.user, req.params.id, req.params.userId), error: null }); } catch (e) { next(e); }
 }
+export async function attachToProject(req, res, next) {
+  try { res.json({ data: await service.attachToProject(req.user, req.params.id, req.body || {}), error: null }); } catch (e) { next(e); }
+}
 export async function remove(req, res, next) {
   try { res.json({ data: await service.remove(req.user, req.params.id), error: null }); } catch (e) { next(e); }
 }
