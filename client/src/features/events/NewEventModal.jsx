@@ -1,7 +1,7 @@
-import { useRef, useState } from 'react';
+import { useEffect, useRef, useState } from 'react';
 import { useMutation, useQueryClient } from '@tanstack/react-query';
 import { createEvent } from '../../api/events.api.js';
-import { MONTHS, anchorDate } from './meta.js';
+import { MONTHS, anchorDate, ymd } from './meta.js';
 import AssignPicker from './AssignPicker.jsx';
 import SopFields from './SopFields.jsx';
 import DueDatePicker from './DueDatePicker.jsx';
@@ -28,6 +28,13 @@ export default function NewEventModal({ onClose, onCreated, initialMonth, initia
   const [dated, setDated] = useState(true);
   const [month, setMonth] = useState(defMonth);
   const [day, setDay] = useState(defDay);
+  // Project deadline (YYYY-MM-DD) — seeded to the default trigger date, then kept
+  // on/after the latest task due by the effect below. The user can push it later,
+  // but never before the latest task due.
+  const [deadline, setDeadline] = useState(() => {
+    const anchor = anchorDate(defMonth, defDay);
+    return ymd(new Date(anchor.getTime() + todayDue(defMonth, defDay).dueOffset * 86400000));
+  });
   const [writeup, setWriteup] = useState('');
   const [sop, setSop] = useState([]); // SOP PDFs + links -> event attachments
   const [tasks, setTasks] = useState([{ name: '', description: '', assignees: [], ...todayDue(defMonth, defDay) }]);
@@ -47,6 +54,7 @@ export default function NewEventModal({ onClose, onCreated, initialMonth, initia
       triggerMonth: dated ? month : null,
       // day may be '' while the field is being edited — settle it here too.
       triggerDay: dated ? Math.min(31, Math.max(1, parseInt(day, 10) || 1)) : null,
+      deadline: dated ? deadline : null,
       writeup: writeup.trim(),
       attachments: sop,
       // Due date is stored as an offset from the trigger date (+ optional time),
@@ -64,7 +72,25 @@ export default function NewEventModal({ onClose, onCreated, initialMonth, initia
   // A dated project's tasks must each carry a due date (on/after the trigger).
   const namedTasks = tasks.filter((t) => t.name.trim());
   const duesOk = !dated || namedTasks.every((t) => t.dueOffset != null && t.dueOffset !== '');
-  const canSave = !!name.trim() && duesOk && !mut.isPending;
+  // Latest task due date (YYYY-MM-DD) — the earliest the deadline may be.
+  const latestDueYmd = (() => {
+    if (!dated) return null;
+    const anchor = anchorDate(month, Math.min(31, Math.max(1, parseInt(day, 10) || 1)));
+    let maxOff = null;
+    for (const t of namedTasks) {
+      if (t.dueOffset != null && t.dueOffset !== '') maxOff = Math.max(maxOff ?? 0, Number(t.dueOffset));
+    }
+    return ymd(maxOff == null ? anchor : new Date(anchor.getTime() + maxOff * 86400000));
+  })();
+  const deadlineOk = !dated || (!!deadline && (!latestDueYmd || deadline >= latestDueYmd));
+  const canSave = !!name.trim() && duesOk && deadlineOk && !mut.isPending;
+
+  // Keep the deadline on/after the latest task due as the trigger or task dues
+  // move — raise it, never lower it, so an untouched deadline never blocks Create
+  // (the user can still push it out further by hand).
+  useEffect(() => {
+    if (dated && latestDueYmd && (!deadline || deadline < latestDueYmd)) setDeadline(latestDueYmd);
+  }, [dated, latestDueYmd, deadline]);
 
   return (
     <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/30 p-4" onClick={onClose}>
@@ -108,6 +134,16 @@ export default function NewEventModal({ onClose, onCreated, initialMonth, initia
             </>
           )}
         </div>
+
+        {dated && (
+          <label className="mt-3 block text-sm"><span className="text-ink-soft">Deadline</span>
+            <input type="date" value={deadline} min={latestDueYmd || undefined} onChange={(e) => setDeadline(e.target.value)}
+              className={`mt-1 w-full rounded-lg border px-3 py-2 text-sm ${deadlineOk ? 'border-line' : 'border-brick'}`} />
+            {deadlineOk
+              ? <span className="mt-0.5 block text-[11px] text-ink-soft">On or after the latest task due{latestDueYmd ? ` (${latestDueYmd})` : ''}.</span>
+              : <span className="mt-0.5 block text-[11px] text-brick">Deadline must be on or after {latestDueYmd || 'the latest task due'}.</span>}
+          </label>
+        )}
 
         <label className="mt-3 block text-sm"><span className="text-ink-soft">Description <span className="text-xs">(optional)</span></span>
           <textarea value={description} onChange={(e) => setDescription(e.target.value)} rows={2}

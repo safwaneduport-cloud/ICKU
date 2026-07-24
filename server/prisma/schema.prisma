@@ -407,6 +407,7 @@ model Event {
   status       String // confirmed (dated) | tbd | multiple (undated)
   triggerMonth Int? // 1-12 (academic year derives the year)
   triggerDay   Int?
+  deadline     String? // "YYYY-MM-DD" project deadline; must be on/after the latest task due
   writeup      String  @default("") // the SOP that persists each year
   approval     String  @default("approved") // pending | approved | rejected
   approverId   String?
@@ -452,6 +453,7 @@ model EventTask {
   event         Event          @relation(fields: [eventId], references: [id], onDelete: Cascade)
   name          String
   description   String         @default("") // optional task details, shown via "View details"
+  isClosure     Boolean        @default(false) // the auto "Project Closure" gate task (owner-only; done only when all others are; hidden from lists/calendar)
   dueOffset     Int? // days after the event trigger date
   dueTime       String? // "HH:MM" 24h time-of-day for the due date; null = legacy (midnight)
   completed     Boolean        @default(false)

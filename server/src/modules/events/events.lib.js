@@ -31,12 +31,19 @@ export const isTaskPastDue = (task, trig, today) => {
 };
 
 // Lifecycle state: undated | completed | overdue | current | upcoming.
+// A project is only "completed" once its Project Closure task is done (which the
+// owner can only tick when every other task is done). Legacy projects with no
+// closure task fall back to "all tasks done". The closure task itself carries no
+// due date, so it never contributes to "overdue".
 export function computeState(event, today = new Date()) {
   if (isUndated(event)) return 'undated';
   const trig = triggerDate(event);
-  const tasks = event.tasks || [];
-  if (tasks.length && tasks.every((t) => t.completed)) return 'completed';
-  if (tasks.some((t) => !t.completed && isTaskPastDue(t, trig, today))) return 'overdue';
+  const all = event.tasks || [];
+  const real = all.filter((t) => !t.isClosure);
+  const closure = all.find((t) => t.isClosure);
+  const done = closure ? closure.completed : (real.length && real.every((t) => t.completed));
+  if (done) return 'completed';
+  if (real.some((t) => !t.completed && isTaskPastDue(t, trig, today))) return 'overdue';
   if (trig && trig <= today) return 'current';
   return 'upcoming';
 }

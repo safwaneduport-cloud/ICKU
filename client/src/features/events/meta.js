@@ -19,6 +19,13 @@ export const MONTHS = ['Jan', 'Feb', 'Mar', 'Apr', 'May', 'Jun', 'Jul', 'Aug', '
 export const triggerLabel = (e) =>
   e.status === 'confirmed' && e.triggerMonth ? `${MONTHS[e.triggerMonth - 1]} ${e.triggerDay}` : '—';
 
+// "Aug 30, 2026" for a project deadline ("YYYY-MM-DD"); "" when none.
+export const deadlineLabel = (deadline) => {
+  if (!deadline || !/^\d{4}-\d{2}-\d{2}$/.test(deadline)) return '';
+  const [y, m, d] = deadline.split('-').map(Number);
+  return new Date(y, m - 1, d).toLocaleDateString([], { month: 'short', day: 'numeric', year: 'numeric' });
+};
+
 // Academic year 2026-27: Apr–Dec map to 2026, Jan–Mar to 2027.
 // Mirrors server/src/modules/events/events.lib.js — keep the two in step.
 export const CYCLE_START = 2026;

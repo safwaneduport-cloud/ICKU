@@ -6,6 +6,30 @@ import { notifyAssignments, notifyApprovalNeeded, notifyTaskAssigned, notifyExte
 import { istInstant, istMonthRange } from '../../lib/ist.js';
 import { computeState, triggerDate, isTaskPastDue, effectiveDue, isUndated } from './events.lib.js';
 
+// Validate + normalise a project deadline ("YYYY-MM-DD"). It must be on or after
+// the latest task due date. `trig` is the project trigger instant (or null when
+// undated); `tasks` carry dueOffset/dueTime. Returns the clean string or null.
+function checkDeadline(deadline, trig, tasks = []) {
+  const d = (deadline || '').trim();
+  if (!d) return null; // optional (esp. for undated projects)
+  if (!/^\d{4}-\d{2}-\d{2}$/.test(d)) throw new ApiError(400, 'Invalid deadline date');
+  if (trig) {
+    let latest = null;
+    for (const t of tasks) {
+      if (t.isClosure) continue;
+      const due = effectiveDue({ dueOffset: t.dueOffset, dueTime: t.dueTime }, trig);
+      if (due && (!latest || due > latest)) latest = due;
+    }
+    if (latest) {
+      const [y, m, dd] = d.split('-').map(Number);
+      if (istInstant(y, m - 1, dd, 23, 59) < latest) {
+        throw new ApiError(400, 'Deadline must be on or after the latest task due date');
+      }
+    }
+  }
+  return d;
+}
+
 // Due instant for an ad-hoc task (dueDate "YYYY-MM-DD" + dueTime "HH:MM", IST).
 function directTaskDue(t) {
   if (!t.dueDate) return null;
@@ -90,7 +114,12 @@ async function logActivity(eventId, actor, text) {
 
 // Shape a raw event row into an API payload (adds computed state + task summary).
 function shape(e) {
-  const tasks = (e.tasks || []).map((t) => ({
+  // The Project Closure task is hidden from the normal task list; it surfaces as a
+  // separate completion gate (owner-only, tickable once every other task is done).
+  const allTasks = e.tasks || [];
+  const realTasks = allTasks.filter((t) => !t.isClosure);
+  const closureTask = allTasks.find((t) => t.isClosure);
+  const tasks = realTasks.map((t) => ({
     id: t.id, name: t.name, description: t.description || '', dueOffset: t.dueOffset, dueTime: t.dueTime, completed: t.completed, completedLate: t.completedLate,
     assignees: t.assignees.map((a) => ({
       id: a.user.id, name: a.user.name, status: a.status,
@@ -102,10 +131,14 @@ function shape(e) {
   const done = tasks.filter((t) => t.completed).length;
   return {
     id: e.id, name: e.name, description: e.description || '', ownerId: e.ownerId, owner: e.owner,
-    status: e.status, triggerMonth: e.triggerMonth, triggerDay: e.triggerDay,
+    status: e.status, triggerMonth: e.triggerMonth, triggerDay: e.triggerDay, deadline: e.deadline || null,
     writeup: e.writeup, approval: e.approval, approverId: e.approverId, createdById: e.createdById,
     pendingOwnerId: e.pendingOwnerId, ownerApproverId: e.ownerApproverId,
     state: computeState(e), tasks, tasksDone: done, tasksTotal: tasks.length,
+    // canComplete = every real task done, so the owner may now tick closure.
+    closure: closureTask
+      ? { id: closureTask.id, completed: closureTask.completed, canComplete: realTasks.length > 0 && realTasks.every((t) => t.completed) }
+      : null,
   };
 }
 
@@ -143,6 +176,7 @@ export async function listTasks({ filter = 'all', mine = false, userId } = {}) {
     if (e.approval === 'pending' && userId && e.ownerId !== userId && e.approverId !== userId) continue;
     const trig = triggerDate(e);
     for (const t of e.tasks) {
+      if (t.isClosure) continue; // the Project Closure gate is never listed as a task
       const overdue = !t.completed && isTaskPastDue(t, trig, now);
       const state = t.completed ? 'completed'
         : overdue ? 'overdue'
@@ -191,7 +225,7 @@ export async function get(id) {
 }
 
 export async function create(creator, payload) {
-  const { name, description = '', status, triggerMonth, triggerDay, writeup, tasks = [], attachments = [] } = payload;
+  const { name, description = '', status, triggerMonth, triggerDay, deadline = null, writeup, tasks = [], attachments = [] } = payload;
   if (!name?.trim()) throw new ApiError(400, 'Project name is required');
 
   // A dated project's tasks each need a due date on or after the trigger day.
@@ -202,6 +236,9 @@ export async function create(creator, payload) {
       if (t.dueOffset == null || t.dueOffset < 0) throw new ApiError(400, `Task "${t.name.trim()}" needs a due date on or after the project date`);
     }
   }
+  // Project deadline: optional, but if set it must be on/after the latest task due.
+  const trig = isDated ? triggerDate({ status: 'confirmed', triggerMonth, triggerDay }) : null;
+  const cleanDeadline = checkDeadline(deadline, trig, tasks.filter((t) => t.name?.trim()));
 
   // Approval routing depends on the creator's mode (set by their manager): auto
   // → goes live immediately; manual → pending their manager's approval, and its
@@ -233,14 +270,20 @@ export async function create(creator, payload) {
       status: status || 'confirmed',
       triggerMonth: status === 'confirmed' ? triggerMonth : null,
       triggerDay: status === 'confirmed' ? triggerDay : null,
+      deadline: cleanDeadline,
       writeup: writeup || '',
       approval, approverId, createdById: creator.id,
       attachments: { create: sopAttachments(attachments) },
       tasks: {
-        create: perTask.map((pt) => ({
-          name: pt.name, description: pt.description, dueOffset: pt.dueOffset, dueTime: pt.dueTime, sort: pt.sort,
-          assignees: { create: pt.links },
-        })),
+        // The real tasks, plus the auto Project Closure gate task (owner-only,
+        // hidden from lists/calendar, tickable only once every real task is done).
+        create: [
+          ...perTask.map((pt) => ({
+            name: pt.name, description: pt.description, dueOffset: pt.dueOffset, dueTime: pt.dueTime, sort: pt.sort,
+            assignees: { create: pt.links },
+          })),
+          { name: 'Project Closure', isClosure: true, sort: 9999 },
+        ],
       },
     },
   });
@@ -299,6 +342,7 @@ export async function remove(actor, id) {
 export async function removeTask(actor, taskId) {
   const t = await prisma.eventTask.findUnique({ where: { id: taskId }, include: { event: { select: { id: true, ownerId: true } } } });
   if (!t) throw new ApiError(404, 'Task not found');
+  if (t.isClosure) throw new ApiError(400, 'The Project Closure task cannot be removed');
   if (t.event.ownerId !== actor.id && !canAdmin(actor)) throw new ApiError(403, 'Only the project owner can delete this task');
   await prisma.eventTask.delete({ where: { id: taskId } });
   await logActivity(t.event.id, actor, `removed task “${t.name}”`);
@@ -420,6 +464,22 @@ export async function toggleTask(taskId, userId) {
     include: { assignees: true, event: true },
   });
   if (!task) throw new ApiError(404, 'Task not found');
+
+  // Project Closure gate: only the owner may tick it, and only once every other
+  // task in the project is done. Un-ticking it is always allowed (owner).
+  if (task.isClosure) {
+    if (task.event.ownerId !== userId) throw new ApiError(403, 'Only the project owner can close the project');
+    const nowCompleted = !task.completed;
+    if (nowCompleted) {
+      const open = await prisma.eventTask.count({ where: { eventId: task.eventId, isClosure: false, completed: false } });
+      if (open > 0) throw new ApiError(400, 'Complete all tasks before closing the project');
+    }
+    return prisma.eventTask.update({
+      where: { id: taskId },
+      data: { completed: nowCompleted, completedAt: nowCompleted ? new Date() : null },
+    });
+  }
+
   const isAssignee = task.assignees.some((a) => a.userId === userId && a.approval === 'approved');
   const isOwner = task.event.ownerId === userId;
   if (!isAssignee && !isOwner) throw new ApiError(403, 'Only assignees or the project owner can update this task');
@@ -427,10 +487,15 @@ export async function toggleTask(taskId, userId) {
   const nowCompleted = !task.completed;
   const trig = triggerDate(task.event);
   const late = nowCompleted && isTaskPastDue(task, trig, new Date());
-  return prisma.eventTask.update({
+  const updated = await prisma.eventTask.update({
     where: { id: taskId },
     data: { completed: nowCompleted, completedLate: nowCompleted ? late : false, completedAt: nowCompleted ? new Date() : null },
   });
+  // Reopening a real task invalidates a closed project — reopen the closure gate.
+  if (!nowCompleted) {
+    await prisma.eventTask.updateMany({ where: { eventId: task.eventId, isClosure: true, completed: true }, data: { completed: false, completedAt: null } });
+  }
+  return updated;
 }
 
 // Is `managerId` the reporting manager of `userId`?
@@ -532,6 +597,22 @@ export async function update(actor, id, patch = {}) {
       logs.push(`changed the trigger date to ${MON[(m || 1) - 1]} ${d}`);
     }
   }
+  // Deadline (owner-only, already gated above) — validate against the current
+  // trigger + the project's real tasks (latest due). Skip entirely when the
+  // value is unchanged: a task may have been extended past a stored deadline
+  // (addTask/updateTask/decideExtension don't re-check it), and a re-sent
+  // stale deadline must not block an unrelated rename/description edit.
+  if (patch.deadline !== undefined && (patch.deadline || null) !== (e.deadline || null)) {
+    const evTasks = await prisma.eventTask.findMany({ where: { eventId: id, isClosure: false }, select: { dueOffset: true, dueTime: true } });
+    const tm = data.triggerMonth ?? e.triggerMonth;
+    const td = data.triggerDay ?? e.triggerDay;
+    const trig = (statusNow === 'confirmed' && tm) ? triggerDate({ status: 'confirmed', triggerMonth: tm, triggerDay: td }) : null;
+    const clean = checkDeadline(patch.deadline, trig, evTasks);
+    if ((clean || null) !== (e.deadline || null)) {
+      data.deadline = clean;
+      logs.push(clean ? `set the deadline to ${clean}` : 'cleared the deadline');
+    }
+  }
   if (Object.keys(data).length) {
     await prisma.event.update({ where: { id }, data });
     for (const t of logs) await logActivity(id, actor, t);
@@ -543,6 +624,7 @@ export async function update(actor, id, patch = {}) {
 export async function updateTask(actor, taskId, patch = {}) {
   const t = await prisma.eventTask.findUnique({ where: { id: taskId }, include: { event: { select: { id: true, ownerId: true, status: true, triggerMonth: true, triggerDay: true } } } });
   if (!t) throw new ApiError(404, 'Task not found');
+  if (t.isClosure) throw new ApiError(400, 'The Project Closure task cannot be edited');
   if (t.event.ownerId !== actor.id && !canAdmin(actor)) throw new ApiError(403, 'Only the project owner can edit tasks');
   const data = {};
   const logs = [];
@@ -576,6 +658,7 @@ export async function updateTask(actor, taskId, patch = {}) {
 export async function addTaskAssignees(actor, taskId, userIds = []) {
   const task = await prisma.eventTask.findUnique({ where: { id: taskId }, include: { assignees: true, event: { select: { id: true, name: true, ownerId: true } } } });
   if (!task) throw new ApiError(404, 'Task not found');
+  if (task.isClosure) throw new ApiError(400, 'The Project Closure task has no assignees');
   if (task.event.ownerId !== actor.id && !canAdmin(actor)) throw new ApiError(403, 'Only the project owner can reassign tasks');
   const existing = new Set(task.assignees.map((a) => a.userId));
   const ids = [...new Set(userIds)].filter((id) => id && !existing.has(id));

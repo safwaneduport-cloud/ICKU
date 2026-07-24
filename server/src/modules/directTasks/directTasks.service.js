@@ -98,10 +98,12 @@ export async function decideAssignee(actor, taskId, userId, decision) {
 export async function toggleComplete(actor, id) {
   const t = await prisma.directTask.findUnique({ where: { id }, include: { assignees: true } });
   if (!t) throw new ApiError(404, 'Task not found');
+  // A direct task is marked done/undone by the assignee ONLY (not the assigner,
+  // not an admin) — the person doing the work owns its status.
   const mine = t.assignees.find((a) => a.userId === actor.id);
-  const canByAssignee = mine && mine.approval === 'approved';
-  if (!canByAssignee && t.assignerId !== actor.id && !canAdmin(actor)) {
-    throw new ApiError(403, 'Only an approved assignee or the assigner can update this');
+  const canByAssignee = mine && mine.approval === 'approved' && mine.status !== 'rejected';
+  if (!canByAssignee) {
+    throw new ApiError(403, 'Only the assignee can mark this task done or undone');
   }
   const done = !t.completed;
   return shape(await prisma.directTask.update({ where: { id }, data: { completed: done, completedAt: done ? new Date() : null }, include }));

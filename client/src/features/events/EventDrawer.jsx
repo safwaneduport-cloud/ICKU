@@ -6,7 +6,7 @@ import { getUsers } from '../../api/users.api.js';
 import { groupByDept } from '../../lib/orgGroups.js';
 import ReassignControl from '../tasks/ReassignControl.jsx';
 import AssignPicker from './AssignPicker.jsx';
-import { STATE, MONTHS, triggerLabel, dueLabel, anchorDate } from './meta.js';
+import { STATE, MONTHS, triggerLabel, deadlineLabel, dueLabel, anchorDate, ymd } from './meta.js';
 
 // A new task's default due — today at 6 PM as an offset from the project trigger.
 const todayDueFor = (e) => {
@@ -63,6 +63,7 @@ export default function EventDrawer({ id, onClose }) {
                 <h2 className="mt-2 font-serif text-2xl font-bold">{e.name}</h2>
                 <p className="text-sm text-ink-soft">
                   Owner · {e.owner?.name || '—'} · {e.status === 'confirmed' ? triggerLabel(e) : e.status === 'multiple' ? 'Multiple dates' : 'Date TBD'}
+                  {e.deadline && <span className="font-medium text-steel"> · 🎯 Deadline {deadlineLabel(e.deadline)}</span>}
                 </p>
               </div>
               <button onClick={onClose} className="rounded-lg border border-line px-3 py-1 text-sm">Close</button>
@@ -125,6 +126,28 @@ export default function EventDrawer({ id, onClose }) {
                 ))}
               </div>
               {(e.ownerId === user?.id || isAdmin) && <AddTaskForm e={e} onAdded={() => qc.invalidateQueries()} />}
+
+              {/* Project Closure gate — the project isn't "completed" until the owner
+                  ticks this, which is only possible once every task is done. */}
+              {e.closure && (
+                <div className="mt-3 rounded-lg border border-pine/30 bg-pine-tint/20 p-2.5">
+                  <div className="flex items-start gap-3">
+                    <input type="checkbox" checked={e.closure.completed}
+                      disabled={e.ownerId !== user?.id || (!e.closure.completed && !e.closure.canComplete) || toggle.isPending}
+                      onChange={() => toggle.mutate(e.closure.id)} className="mt-1" />
+                    <div className="min-w-0 flex-1">
+                      <div className={`text-sm font-semibold ${e.closure.completed ? 'text-sage' : 'text-pine'}`}>🏁 Project Closure</div>
+                      <div className="text-xs text-ink-soft">
+                        {e.closure.completed
+                          ? 'The project is closed.'
+                          : e.closure.canComplete
+                            ? (e.ownerId === user?.id ? 'All tasks are done — tick to close the project.' : 'All tasks are done — awaiting the owner to close.')
+                            : 'Complete every task, then the owner can close the project.'}
+                      </div>
+                    </div>
+                  </div>
+                </div>
+              )}
             </section>
 
             {e.activity?.length > 0 && (
@@ -160,12 +183,30 @@ function EditProjectForm({ e, onClose, onSaved }) {
   const [dated, setDated] = useState(e.status === 'confirmed');
   const [month, setMonth] = useState(e.triggerMonth || 7);
   const [day, setDay] = useState(e.triggerDay || 1);
+  const [deadline, setDeadline] = useState(e.deadline || '');
+  // Earliest allowed deadline = the latest task due (recomputed as the date moves).
+  const latestDueYmd = (() => {
+    if (!dated) return null;
+    const anchor = anchorDate(month, Math.min(31, Math.max(1, parseInt(day, 10) || 1)));
+    let maxOff = null;
+    for (const t of (e.tasks || [])) if (t.dueOffset != null) maxOff = Math.max(maxOff ?? 0, Number(t.dueOffset));
+    return ymd(maxOff == null ? anchor : new Date(anchor.getTime() + maxOff * 86400000));
+  })();
+  const targetDeadline = dated ? (deadline || null) : null;
+  const deadlineChanged = targetDeadline !== (e.deadline || null);
+  // Only block Save (and only validate) for a deadline the user actually changed.
+  // A task can be extended past a stored deadline elsewhere, and that stale value
+  // must never hold an unrelated rename/description edit hostage.
+  const deadlineOk = !dated || !deadlineChanged || !deadline || !latestDueYmd || deadline >= latestDueYmd;
   const save = useMutation({
     mutationFn: () => updateEvent(e.id, {
       name: name.trim(), description,
       status: dated ? 'confirmed' : 'tbd',
       triggerMonth: dated ? month : null,
       triggerDay: dated ? Math.min(31, Math.max(1, parseInt(day, 10) || 1)) : null,
+      // Omit the deadline unless it changed, so the server skips re-validating a
+      // stale-but-untouched value that a later task extension may have invalidated.
+      ...(deadlineChanged ? { deadline: targetDeadline } : {}),
     }),
     onSuccess: () => { qc.invalidateQueries(); onSaved?.(); onClose(); },
   });
@@ -193,10 +234,17 @@ function EditProjectForm({ e, onClose, onSaved }) {
           </>
         )}
       </div>
+      {dated && (
+        <label className="mt-2 block text-sm"><span className="text-ink-soft">Deadline <span className="text-xs">(optional)</span></span>
+          <input type="date" value={deadline} min={latestDueYmd || undefined} onChange={(ev) => setDeadline(ev.target.value)}
+            className={`mt-1 w-full rounded-lg border px-3 py-2 text-sm ${deadlineOk ? 'border-line' : 'border-brick'}`} />
+          {!deadlineOk && <span className="text-[11px] text-brick">Deadline must be on or after {latestDueYmd}.</span>}
+        </label>
+      )}
       {save.error && <p className="mt-1 text-xs text-brick">{save.error.response?.data?.error?.message || 'Could not save'}</p>}
       <div className="mt-3 flex justify-end gap-2">
         <button onClick={onClose} className="rounded-lg border border-line px-3 py-1.5 text-sm">Cancel</button>
-        <button onClick={() => save.mutate()} disabled={!name.trim() || save.isPending} className="rounded-lg bg-pine px-4 py-1.5 text-sm font-medium text-white disabled:opacity-50">{save.isPending ? 'Saving…' : 'Save changes'}</button>
+        <button onClick={() => save.mutate()} disabled={!name.trim() || !deadlineOk || save.isPending} className="rounded-lg bg-pine px-4 py-1.5 text-sm font-medium text-white disabled:opacity-50">{save.isPending ? 'Saving…' : 'Save changes'}</button>
       </div>
     </div>
   );

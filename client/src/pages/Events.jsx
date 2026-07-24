@@ -4,7 +4,7 @@ import { getEvents, getTaskList, deleteEvent, toggleTask } from '../api/events.a
 import { getMyTasks, getTasksIAssigned, toggleDirectTask, rejectDirectAssignment, deleteDirectTask, addDirectAssignees, removeDirectAssignee } from '../api/directTasks.api.js';
 import ReassignControl from '../features/tasks/ReassignControl.jsx';
 import { useAuth } from '../store/AuthContext.jsx';
-import { STATE, triggerLabel, dueLabel, taskDueDate, MONTHS, ymd } from '../features/events/meta.js';
+import { STATE, triggerLabel, deadlineLabel, dueLabel, taskDueDate, MONTHS, ymd } from '../features/events/meta.js';
 import EventDrawer from '../features/events/EventDrawer.jsx';
 import NewEventModal from '../features/events/NewEventModal.jsx';
 import AssignTaskModal from '../features/tasks/AssignTaskModal.jsx';
@@ -250,6 +250,7 @@ function BoardView({ projects, loading, userId, isAdmin, onOpen, onChanged }) {
                   <span className="max-w-full truncate">Owner · <span className="font-medium text-ink">{e.owner?.name || '—'}</span></span>
                   <span className="shrink-0">· {e.tasksTotal ? <><span className="font-medium text-ink">{e.tasksDone}/{e.tasksTotal}</span> tasks done</> : 'no tasks yet'}</span>
                   <span className="shrink-0 font-mono text-ink-soft/80">· {triggerLabel(e)}</span>
+                  {e.deadline && <span className="shrink-0 font-medium text-steel">· 🎯 Deadline {deadlineLabel(e.deadline)}</span>}
                 </div>
               </div>
               <StatusBadge state={e.state} />
@@ -292,7 +293,9 @@ function TasksView({ rows, scope, loading, onOpenProject, onChanged }) {
   return (
     <div className="overflow-hidden rounded-2xl border border-line bg-white">
       {rows.map((r) => {
-        const canToggle = r.toMe || r.byMe;
+        // Direct tasks: only the assignee may mark done/undone (not the assigner).
+        // Project tasks: assignee or the project owner.
+        const canToggle = r.kind === 'direct' ? r.toMe : (r.toMe || r.byMe);
         const showTo = (scope === 'by' || (scope === 'all' && r.byMe)) && r.assignees?.length;
         const meta = [];
         if (r.kind === 'project' && r.ownerName) meta.push(`Owner · ${r.ownerName}`);
@@ -303,7 +306,7 @@ function TasksView({ rows, scope, loading, onOpenProject, onChanged }) {
             <div className="flex items-start gap-3">
               <button disabled={!canToggle}
                 onClick={() => canToggle && (r.kind === 'direct' ? toggleDir.mutate(r.id) : toggleProj.mutate(r.id))}
-                title={canToggle ? (r.completed ? 'Mark not done' : 'Mark done') : 'Only the assignee or owner can update this'}
+                title={canToggle ? (r.completed ? 'Mark not done' : 'Mark done') : (r.kind === 'direct' ? 'Only the assignee can mark this done' : 'Only the assignee or owner can update this')}
                 className={`mt-0.5 flex h-5 w-5 shrink-0 items-center justify-center rounded-full border-2 text-[11px] ${r.completed ? 'border-sage bg-sage text-white' : r.overdue ? 'border-brick text-brick' : 'border-line'} ${canToggle ? 'hover:border-sage' : 'cursor-default opacity-60'}`}>
                 {r.completed ? '✓' : ''}
               </button>
