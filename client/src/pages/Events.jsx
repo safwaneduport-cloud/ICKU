@@ -56,11 +56,23 @@ function CompletionBar({ done = 0, total = 0 }) {
 function projectRow(t, userId) {
   const dueAt = projTaskDue(t);
   return {
-    key: `p${t.taskId}`, kind: 'project', id: t.taskId, projectId: t.projectId, title: t.name,
+    key: `p${t.taskId}`, kind: 'project', id: t.taskId, projectId: t.projectId, title: t.name, description: t.description || '',
     projectName: t.projectName, ownerName: t.ownerName, assignees: t.assignees || [],
     completed: t.completed, overdue: t.overdue, state: t.state, dueAt, dueText: projTaskDueText(t),
     toMe: !!t.mine, byMe: t.ownerId === userId,
   };
+}
+// "View details" for a task card — reveals the (optional) description on demand.
+function TaskDetailsToggle({ text }) {
+  const [open, setOpen] = useState(false);
+  return (
+    <div className="mt-1">
+      <button onClick={() => setOpen((v) => !v)} className="text-[11px] font-medium text-pine hover:underline">
+        {open ? 'Hide details' : 'View details'}
+      </button>
+      {open && <p className="mt-1 whitespace-pre-wrap break-words rounded-lg border border-line bg-paper/40 px-2.5 py-1.5 text-xs text-ink-soft">{text}</p>}
+    </div>
+  );
 }
 function directRow(t, { toMe, byMe }) {
   const now = new Date();
@@ -68,7 +80,7 @@ function directRow(t, { toMe, byMe }) {
   const overdue = !t.completed && !!dueAt && dueAt < now;
   const state = t.completed ? 'completed' : overdue ? 'overdue' : !dueAt ? 'current' : dueAt <= now ? 'current' : 'upcoming';
   return {
-    key: `d${t.id}`, kind: 'direct', id: t.id, title: t.title,
+    key: `d${t.id}`, kind: 'direct', id: t.id, title: t.title, description: t.description || '',
     projectName: 'Direct task', by: t.assignerName, assignees: t.assignees || [],
     completed: t.completed, overdue, state, dueAt, dueText: directDueText(t),
     toMe, byMe, raw: t,
@@ -314,6 +326,9 @@ function TasksView({ rows, scope, loading, onOpenProject, onChanged }) {
                 </div>
 
                 {meta.length > 0 && <div className="mt-0.5 truncate text-[11px] text-ink-soft">{meta.join(' · ')}</div>}
+
+                {/* view details — only when the task has a description */}
+                {r.description?.trim() && <TaskDetailsToggle text={r.description} />}
 
                 {/* row actions */}
                 {(r.toMe || r.byMe) && (

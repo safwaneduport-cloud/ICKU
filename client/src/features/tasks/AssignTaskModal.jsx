@@ -10,12 +10,13 @@ export default function AssignTaskModal({ onClose, onCreated }) {
   const today = new Date();
   const todayYmd = `${today.getFullYear()}-${String(today.getMonth() + 1).padStart(2, '0')}-${String(today.getDate()).padStart(2, '0')}`;
   const [title, setTitle] = useState('');
+  const [description, setDescription] = useState('');
   const [assignees, setAssignees] = useState([]);
   const [dueDate, setDueDate] = useState(todayYmd); // default: today
   const [dueTime, setDueTime] = useState('18:00');   // default: 6:00 PM
 
   const mut = useMutation({
-    mutationFn: () => createDirectTask({ title: title.trim(), assigneeIds: assignees, dueDate: dueDate || null, dueTime: dueTime || null }),
+    mutationFn: () => createDirectTask({ title: title.trim(), description: description.trim(), assigneeIds: assignees, dueDate: dueDate || null, dueTime: dueTime || null }),
     onSuccess: () => { qc.invalidateQueries(); onCreated?.(); onClose(); },
   });
   const canSave = title.trim() && assignees.length && !mut.isPending;
@@ -29,6 +30,11 @@ export default function AssignTaskModal({ onClose, onCreated }) {
         <label className="mt-3 block text-sm"><span className="text-ink-soft">Task</span>
           <input value={title} autoFocus onChange={(e) => setTitle(e.target.value)}
             placeholder="e.g. Send the vendor list" className="mt-1 w-full rounded-lg border border-line px-3 py-2" />
+        </label>
+
+        <label className="mt-3 block text-sm"><span className="text-ink-soft">Description <span className="text-ink-soft/70">(optional)</span></span>
+          <textarea value={description} onChange={(e) => setDescription(e.target.value)} rows={2}
+            placeholder="Any details or context…" className="mt-1 w-full resize-none rounded-lg border border-line px-3 py-2 text-sm" />
         </label>
 
         <div className="mt-3 grid grid-cols-2 gap-3">

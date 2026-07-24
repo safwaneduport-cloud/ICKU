@@ -217,7 +217,9 @@ function TaskItem({ e, t, user, toggle, reject, extend, decideExt }) {
   const editT = useMutation({ mutationFn: (patch) => updateProjectTask(t.id, patch), onSuccess: () => qc.invalidateQueries() });
   const [editing, setEditing] = useState(false);
   const [ename, setEname] = useState(t.name);
+  const [edesc, setEdesc] = useState(t.description || '');
   const [edue, setEdue] = useState({ dueOffset: t.dueOffset, dueTime: t.dueTime });
+  const [showDetails, setShowDetails] = useState(false);
 
   const mine = t.assignees.find((a) => a.id === user?.id);
   // "Live for me" needs both: my manager approved the assignment AND I haven't declined it.
@@ -245,6 +247,16 @@ function TaskItem({ e, t, user, toggle, reject, extend, decideExt }) {
             {dueLabel(e, t) ? ` · due ${dueLabel(e, t)}` : ''}
             {t.completedLate ? ' · completed late' : ''}
           </div>
+
+          {/* view details — only when the task has a description */}
+          {t.description?.trim() && (
+            <div className="mt-1">
+              <button onClick={() => setShowDetails((v) => !v)} className="text-[11px] font-medium text-pine hover:underline">
+                {showDetails ? 'Hide details' : 'View details'}
+              </button>
+              {showDetails && <p className="mt-1 whitespace-pre-wrap break-words rounded-lg border border-line bg-paper/40 px-2.5 py-1.5 text-xs text-ink-soft">{t.description}</p>}
+            </div>
+          )}
 
           {/* rejection reasons (visible to everyone on the task) */}
           {rejected.map((a) => (
@@ -277,7 +289,7 @@ function TaskItem({ e, t, user, toggle, reject, extend, decideExt }) {
           {/* owner controls — edit, reassign (each new recipient re-gated), delete */}
           {isOwner && (
             <div className="mt-1.5 flex items-center gap-3 text-[11px]">
-              <button onClick={() => { setEditing((v) => !v); setEname(t.name); setEdue({ dueOffset: t.dueOffset, dueTime: t.dueTime }); }} className={`hover:text-pine ${editing ? 'text-pine' : 'text-ink-soft'}`}>Edit</button>
+              <button onClick={() => { setEditing((v) => !v); setEname(t.name); setEdesc(t.description || ''); setEdue({ dueOffset: t.dueOffset, dueTime: t.dueTime }); }} className={`hover:text-pine ${editing ? 'text-pine' : 'text-ink-soft'}`}>Edit</button>
               <button onClick={() => setReassigning((v) => !v)} className={`hover:text-pine ${reassigning ? 'text-pine' : 'text-ink-soft'}`}>Reassign</button>
               {confirmDel ? (
                 <span className="flex items-center gap-1.5">
@@ -293,9 +305,11 @@ function TaskItem({ e, t, user, toggle, reject, extend, decideExt }) {
             <div className="mt-1.5 space-y-2 rounded-lg border border-pine/30 bg-white p-2">
               <input value={ename} onChange={(ev) => setEname(ev.target.value)} placeholder="Task name"
                 className="w-full rounded border border-line px-2 py-1 text-xs outline-none focus:border-pine" />
+              <textarea value={edesc} onChange={(ev) => setEdesc(ev.target.value)} rows={2} placeholder="Description (optional)"
+                className="w-full resize-none rounded border border-line px-2 py-1 text-xs outline-none focus:border-pine" />
               {dated && <DueDatePicker anchor={anchorDate(e.triggerMonth, e.triggerDay)} value={edue} onChange={setEdue} required />}
               <div className="flex gap-2 text-[11px]">
-                <button disabled={editT.isPending || !ename.trim()} onClick={() => editT.mutate({ name: ename.trim(), dueOffset: edue.dueOffset, dueTime: edue.dueTime }, { onSuccess: () => setEditing(false) })}
+                <button disabled={editT.isPending || !ename.trim()} onClick={() => editT.mutate({ name: ename.trim(), description: edesc.trim(), dueOffset: edue.dueOffset, dueTime: edue.dueTime }, { onSuccess: () => setEditing(false) })}
                   className="rounded bg-pine px-2 py-0.5 font-medium text-white disabled:opacity-50">Save</button>
                 <button onClick={() => setEditing(false)} className="text-ink-soft">Cancel</button>
               </div>
@@ -340,12 +354,13 @@ function TaskItem({ e, t, user, toggle, reject, extend, decideExt }) {
 function AddTaskForm({ e, onAdded }) {
   const [open, setOpen] = useState(false);
   const [name, setName] = useState('');
+  const [description, setDescription] = useState('');
   const [due, setDue] = useState(() => todayDueFor(e)); // default: today at 6 PM
   const [assignees, setAssignees] = useState([]);
   const dated = e.status === 'confirmed' && !!e.triggerMonth;
   const add = useMutation({
-    mutationFn: () => addProjectTask(e.id, { name: name.trim(), dueOffset: due.dueOffset, dueTime: due.dueTime, assigneeIds: assignees }),
-    onSuccess: () => { setName(''); setDue({ dueOffset: null, dueTime: null }); setAssignees([]); setOpen(false); onAdded(); },
+    mutationFn: () => addProjectTask(e.id, { name: name.trim(), description: description.trim(), dueOffset: due.dueOffset, dueTime: due.dueTime, assigneeIds: assignees }),
+    onSuccess: () => { setName(''); setDescription(''); setDue({ dueOffset: null, dueTime: null }); setAssignees([]); setOpen(false); onAdded(); },
   });
   const canAdd = name.trim() && (!dated || (due.dueOffset != null && due.dueOffset !== '')) && !add.isPending;
 
@@ -356,6 +371,8 @@ function AddTaskForm({ e, onAdded }) {
     <div className="mt-3 rounded-lg border border-line bg-paper/40 p-3">
       <input value={name} autoFocus onChange={(ev) => setName(ev.target.value)} placeholder="What needs doing?"
         className="w-full rounded-lg border border-line bg-white px-3 py-2 text-sm" />
+      <textarea value={description} onChange={(ev) => setDescription(ev.target.value)} rows={2} placeholder="Description (optional)"
+        className="mt-2 w-full resize-none rounded-lg border border-line bg-white px-3 py-2 text-sm" />
       {dated && (
         <div className="mt-2 flex items-center gap-2">
           <DueDatePicker anchor={anchorDate(e.triggerMonth, e.triggerDay)} value={due} onChange={setDue} required />

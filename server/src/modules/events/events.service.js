@@ -91,7 +91,7 @@ async function logActivity(eventId, actor, text) {
 // Shape a raw event row into an API payload (adds computed state + task summary).
 function shape(e) {
   const tasks = (e.tasks || []).map((t) => ({
-    id: t.id, name: t.name, dueOffset: t.dueOffset, dueTime: t.dueTime, completed: t.completed, completedLate: t.completedLate,
+    id: t.id, name: t.name, description: t.description || '', dueOffset: t.dueOffset, dueTime: t.dueTime, completed: t.completed, completedLate: t.completedLate,
     assignees: t.assignees.map((a) => ({
       id: a.user.id, name: a.user.name, status: a.status,
       approval: a.approval, approverId: a.approverId, rejectedReason: a.rejectedReason,
@@ -150,7 +150,7 @@ export async function listTasks({ filter = 'all', mine = false, userId } = {}) {
         : trig && trig <= now ? 'current' : 'upcoming';
       const mineTask = t.assignees.some((a) => a.userId === userId && a.approval === 'approved' && a.status !== 'rejected');
       rows.push({
-        taskId: t.id, name: t.name, projectId: e.id, projectName: e.name,
+        taskId: t.id, name: t.name, description: t.description || '', projectId: e.id, projectName: e.name,
         ownerId: e.ownerId, ownerName: e.owner?.name,
         completed: t.completed, overdue, state,
         dueOffset: t.dueOffset, dueTime: t.dueTime, triggerMonth: e.triggerMonth, triggerDay: e.triggerDay, eventStatus: e.status,
@@ -221,7 +221,7 @@ export async function create(creator, payload) {
     : [];
   const rmap = new Map(recips.map((r) => [r.id, r]));
   const perTask = tasks.map((t, i) => ({
-    name: t.name, dueOffset: t.dueOffset ?? null, dueTime: t.dueTime ?? null, sort: i,
+    name: t.name, description: (t.description || '').trim(), dueOffset: t.dueOffset ?? null, dueTime: t.dueTime ?? null, sort: i,
     links: (t.assignees || []).map((uid) => ({ userId: uid, ...gateFor(creator.id, rmap.get(uid)) })),
   }));
 
@@ -238,7 +238,7 @@ export async function create(creator, payload) {
       attachments: { create: sopAttachments(attachments) },
       tasks: {
         create: perTask.map((pt) => ({
-          name: pt.name, dueOffset: pt.dueOffset, dueTime: pt.dueTime, sort: pt.sort,
+          name: pt.name, description: pt.description, dueOffset: pt.dueOffset, dueTime: pt.dueTime, sort: pt.sort,
           assignees: { create: pt.links },
         })),
       },
@@ -386,7 +386,7 @@ export function approvalHistory(approverId) {
 
 // Add a task to an existing project (owner/admin). Same due rule as creation;
 // the new assignees are gated per recipient like everywhere else.
-export async function addTask(actor, eventId, { name, dueOffset = null, dueTime = null, assigneeIds = [] } = {}) {
+export async function addTask(actor, eventId, { name, description = '', dueOffset = null, dueTime = null, assigneeIds = [] } = {}) {
   const e = await prisma.event.findUnique({
     where: { id: eventId },
     select: { id: true, name: true, ownerId: true, status: true, triggerMonth: true, tasks: { select: { sort: true } } },
@@ -404,7 +404,7 @@ export async function addTask(actor, eventId, { name, dueOffset = null, dueTime 
   const nextSort = e.tasks.reduce((m, t) => Math.max(m, t.sort), -1) + 1;
   await prisma.eventTask.create({
     data: {
-      eventId, name: name.trim(), dueOffset: dated ? dueOffset : null, dueTime: dated ? dueTime : null, sort: nextSort,
+      eventId, name: name.trim(), description: (description || '').trim(), dueOffset: dated ? dueOffset : null, dueTime: dated ? dueTime : null, sort: nextSort,
       assignees: { create: links },
     },
   });
@@ -550,6 +550,9 @@ export async function updateTask(actor, taskId, patch = {}) {
   if (patch.name !== undefined && newName && newName !== t.name) {
     data.name = newName;
     logs.push(`renamed task “${t.name}” to “${newName}”`);
+  }
+  if (patch.description !== undefined && (patch.description || '').trim() !== (t.description || '')) {
+    data.description = (patch.description || '').trim();
   }
   const dated = t.event.status === 'confirmed' && !!t.event.triggerMonth;
   if (dated && (patch.dueOffset !== undefined || patch.dueTime !== undefined)) {

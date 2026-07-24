@@ -451,6 +451,7 @@ model EventTask {
   eventId       String
   event         Event          @relation(fields: [eventId], references: [id], onDelete: Cascade)
   name          String
+  description   String         @default("") // optional task details, shown via "View details"
   dueOffset     Int? // days after the event trigger date
   dueTime       String? // "HH:MM" 24h time-of-day for the due date; null = legacy (midnight)
   completed     Boolean        @default(false)
@@ -476,6 +477,7 @@ model EventTask {
 model DirectTask {
   id          String               @id @default(uuid())
   title       String
+  description String               @default("") // optional task details, shown via "View details"
   assignerId  String
   assigner    User                 @relation("DirectTaskAssigner", fields: [assignerId], references: [id])
   dueDate     String? // "YYYY-MM-DD" (absolute — no project trigger to offset from)

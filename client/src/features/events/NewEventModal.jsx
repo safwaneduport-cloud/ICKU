@@ -30,12 +30,12 @@ export default function NewEventModal({ onClose, onCreated, initialMonth, initia
   const [day, setDay] = useState(defDay);
   const [writeup, setWriteup] = useState('');
   const [sop, setSop] = useState([]); // SOP PDFs + links -> event attachments
-  const [tasks, setTasks] = useState([{ name: '', assignees: [], ...todayDue(defMonth, defDay) }]);
+  const [tasks, setTasks] = useState([{ name: '', description: '', assignees: [], ...todayDue(defMonth, defDay) }]);
   const taskRefs = useRef([]);
 
   const setTask = (i, patch) => setTasks((ts) => ts.map((t, idx) => (idx === i ? { ...t, ...patch } : t)));
   const addTask = (focusIt = true) => {
-    setTasks((ts) => [...ts, { name: '', assignees: [], ...todayDue(month, day) }]);
+    setTasks((ts) => [...ts, { name: '', description: '', assignees: [], ...todayDue(month, day) }]);
     if (focusIt) setTimeout(() => taskRefs.current[tasks.length]?.focus(), 0);
   };
 
@@ -53,7 +53,7 @@ export default function NewEventModal({ onClose, onCreated, initialMonth, initia
       // so a yearly event's tasks still land correctly next cycle. TBD events
       // have no anchor, so their tasks carry no due date.
       tasks: tasks.filter((t) => t.name.trim()).map((t) => ({
-        name: t.name.trim(), assignees: t.assignees,
+        name: t.name.trim(), description: (t.description || '').trim(), assignees: t.assignees,
         dueOffset: dated ? (t.dueOffset ?? null) : null,
         dueTime: dated ? (t.dueTime ?? null) : null,
       })),
@@ -140,6 +140,8 @@ export default function NewEventModal({ onClose, onCreated, initialMonth, initia
                   onChange={(e) => setTask(i, { name: e.target.value })}
                   onKeyDown={(e) => { if (e.key === 'Enter') { e.preventDefault(); if (t.name.trim() && i === tasks.length - 1) addTask(); } }}
                   placeholder="What needs doing?" className="w-full rounded-lg border border-line bg-white px-3 py-2" />
+                <textarea value={t.description} onChange={(e) => setTask(i, { description: e.target.value })} rows={2}
+                  placeholder="Description (optional)" className="mt-2 w-full resize-none rounded-lg border border-line bg-white px-3 py-2 text-sm" />
                 {dated && (
                   <div className="mt-2 flex items-center gap-2">
                     <DueDatePicker

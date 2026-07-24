@@ -27,13 +27,13 @@ function shape(t) {
   // on their manager, else approved (each recipient is gated independently).
   const approval = assignees.some((a) => a.approval === 'pending') ? 'pending' : 'approved';
   return {
-    id: t.id, title: t.title, assignerId: t.assignerId, assignerName: t.assigner?.name,
+    id: t.id, title: t.title, description: t.description || '', assignerId: t.assignerId, assignerName: t.assigner?.name,
     dueDate: t.dueDate, dueTime: t.dueTime, approval,
     completed: t.completed, overdue: isOverdue(t), assignees,
   };
 }
 
-export async function create(assigner, { title, assigneeIds = [], dueDate, dueTime } = {}) {
+export async function create(assigner, { title, description = '', assigneeIds = [], dueDate, dueTime } = {}) {
   if (!title?.trim()) throw new ApiError(400, 'Task title is required');
   const ids = [...new Set(assigneeIds)];
   if (!ids.length) throw new ApiError(400, 'Assign the task to at least one person');
@@ -48,7 +48,7 @@ export async function create(assigner, { title, assigneeIds = [], dueDate, dueTi
 
   const t = await prisma.directTask.create({
     data: {
-      title: title.trim(), assignerId: assigner.id, dueDate: dueDate || null, dueTime: dueTime || null,
+      title: title.trim(), description: (description || '').trim(), assignerId: assigner.id, dueDate: dueDate || null, dueTime: dueTime || null,
       approval: links.some((l) => l.approval === 'pending') ? 'pending' : 'approved',
       assignees: { create: links },
     },
