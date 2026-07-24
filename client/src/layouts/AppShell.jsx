@@ -62,6 +62,7 @@ function Shell() {
   const { user, logout } = useAuth();
   const { openProfile } = useProfile();
   const location = useLocation();
+  const onMessages = location.pathname.startsWith('/messages');
   // Off-canvas nav on phones; a static sidebar from lg up.
   const [navOpen, setNavOpen] = useState(false);
   useEffect(() => { setNavOpen(false); }, [location.pathname]); // close after navigating
@@ -157,21 +158,26 @@ function Shell() {
       {/* Main — min-w-0 so wide children (tables, calendars) can scroll instead
           of stretching the page sideways on a phone. */}
       <div className="flex min-w-0 flex-1 flex-col">
-        <header className="sticky top-0 z-20 flex items-center gap-3 border-b border-line bg-paper/90 px-4 py-3 backdrop-blur sm:px-8 sm:py-4">
-          <button onClick={() => setNavOpen(true)} className="-ml-1 rounded-lg p-1.5 text-pine hover:bg-pine-tint lg:hidden" aria-label="Open menu">
-            <svg width="20" height="20" viewBox="0 0 20 20" fill="none" stroke="currentColor" strokeWidth="1.75" strokeLinecap="round">
-              <path d="M3 5h14M3 10h14M3 15h14" />
-            </svg>
-          </button>
-          <div className="min-w-0 truncate text-[11px] font-mono uppercase tracking-widest text-ochre">
-            <span className="hidden sm:inline">Signed in as </span>{user?.name}<span className="hidden sm:inline"> · {user?.role}</span>
-          </div>
-          <div className="ml-auto shrink-0"><NotificationBell /></div>
-        </header>
+        {/* Messages is its own full-height chat surface (Slack-like) and carries
+            its own header (menu + notifications live in its rail), so the app
+            top bar is omitted there; every other page keeps it. */}
+        {!onMessages && (
+          <header className="sticky top-0 z-20 flex items-center gap-3 border-b border-line bg-paper/90 px-4 py-3 backdrop-blur sm:px-8 sm:py-4">
+            <button onClick={() => setNavOpen(true)} className="-ml-1 rounded-lg p-1.5 text-pine hover:bg-pine-tint lg:hidden" aria-label="Open menu">
+              <svg width="20" height="20" viewBox="0 0 20 20" fill="none" stroke="currentColor" strokeWidth="1.75" strokeLinecap="round">
+                <path d="M3 5h14M3 10h14M3 15h14" />
+              </svg>
+            </button>
+            <div className="min-w-0 truncate text-[11px] font-mono uppercase tracking-widest text-ochre">
+              <span className="hidden sm:inline">Signed in as </span>{user?.name}<span className="hidden sm:inline"> · {user?.role}</span>
+            </div>
+            <div className="ml-auto shrink-0"><NotificationBell /></div>
+          </header>
+        )}
         {/* Messages is a full-bleed chat surface on phones (edge-to-edge like
             Slack); every other page keeps the comfortable page padding. */}
-        <main className={`min-w-0 ${location.pathname.startsWith('/messages') ? 'sm:px-8 sm:py-8' : 'px-4 py-5 sm:px-8 sm:py-8'}`}>
-          <Outlet />
+        <main className={`min-w-0 ${onMessages ? 'sm:px-8 sm:py-8' : 'px-4 py-5 sm:px-8 sm:py-8'}`}>
+          <Outlet context={{ openNav: () => setNavOpen(true) }} />
         </main>
       </div>
     </div>

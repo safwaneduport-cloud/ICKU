@@ -7,6 +7,7 @@ import {
   getReminders, completeReminder, setSection, getFiles, searchMessages,
   removeMember, leaveConversation, getPinned, unpinMessage, setMute, setDescription, renameConversation,
 } from '../api/messages.api.js';
+import { useOutletContext } from 'react-router-dom';
 import { useProfile } from '../store/ProfileContext.jsx';
 import { useAuth } from '../store/AuthContext.jsx';
 import MessageComposer, { readDraft, listDrafts, clearDraft } from '../features/messages/MessageComposer.jsx';
@@ -122,6 +123,7 @@ function DateDivider({ at }) {
 export default function Messages() {
   const qc = useQueryClient();
   const { openProfile } = useProfile();
+  const { openNav } = useOutletContext() || {};
   const [selectedId, setSelectedId] = useState(null);
   const [thread, setThread] = useState(null);   // the top-level message whose thread is open
   const [modal, setModal] = useState(null);      // 'group' | 'compose' | null
@@ -132,6 +134,16 @@ export default function Messages() {
   const [focusMsg, setFocusMsg] = useState(null); // a search hit to scroll to when its conversation opens
   const [switcherOpen, setSwitcherOpen] = useState(false); // ⌘K quick switcher
   const [forwarding, setForwarding] = useState(null);       // the message being forwarded
+
+  // Lock pinch/double-tap zoom while in Messages (Slack does the same in a chat):
+  // zooming otherwise pans the floating back/pin pills off-screen. Restored on exit.
+  useEffect(() => {
+    const vp = document.querySelector('meta[name="viewport"]');
+    if (!vp) return undefined;
+    const prev = vp.getAttribute('content');
+    vp.setAttribute('content', 'width=device-width, initial-scale=1, maximum-scale=1, user-scalable=no');
+    return () => vp.setAttribute('content', prev);
+  }, []);
 
   const conversations = useQuery({ queryKey: ['conversations'], queryFn: getConversations, retry: false, refetchInterval: 5000 });
   const users = useQuery({ queryKey: ['users'], queryFn: getUsers, retry: false });
@@ -205,14 +217,22 @@ export default function Messages() {
   return (
     // On phones this is one pane at a time: the rail, or the open conversation.
     // From lg up it's the classic rail + chat + thread layout.
-    <div className="flex h-[calc(100dvh-3.25rem)] gap-0 sm:h-[calc(100dvh-10rem)] sm:gap-4">
+    <div className="flex h-[100dvh] gap-0 sm:h-[calc(100dvh-4rem)] sm:gap-4">
       {/* ── Left rail (Slack-style, light; ICKU green accent) ── */}
       <aside className={`relative w-full shrink-0 flex-col overflow-hidden rounded-none bg-white text-ink sm:rounded-2xl sm:border sm:border-line lg:flex lg:w-64 ${paneOpen ? 'hidden lg:flex' : 'flex'}`}>
-        <div className="flex items-center justify-between border-b border-line px-4 py-3">
+        <div className="flex items-center gap-2 border-b border-line px-4 py-3">
+          {/* Messages has no app top bar, so its rail carries the menu button on
+              phones (desktop keeps the always-visible sidebar). */}
+          <button onClick={() => openNav?.()} aria-label="Open menu"
+            className="-ml-1 shrink-0 rounded-lg p-1.5 text-pine hover:bg-pine-tint lg:hidden">
+            <svg width="20" height="20" viewBox="0 0 20 20" fill="none" stroke="currentColor" strokeWidth="1.75" strokeLinecap="round">
+              <path d="M3 5h14M3 10h14M3 15h14" />
+            </svg>
+          </button>
           <h1 className="font-serif text-lg font-bold text-pine">Messages</h1>
           {/* Desktop search toggle (phones use the footer search button). */}
           <button onClick={() => setSearchOpen((o) => !o)} aria-label="Search messages"
-            className={`hidden rounded-lg p-1.5 lg:inline-flex ${searchOpen ? 'bg-pine-tint text-pine' : 'text-ink-soft hover:bg-paper hover:text-pine'}`}><SearchIcon /></button>
+            className={`ml-auto hidden shrink-0 rounded-lg p-1.5 lg:inline-flex ${searchOpen ? 'bg-pine-tint text-pine' : 'text-ink-soft hover:bg-paper hover:text-pine'}`}><SearchIcon /></button>
         </div>
 
         {searchOpen && (
@@ -1121,7 +1141,11 @@ function ChatPane({ conversationId, users, focusMessageId, onOpenThread, onOpenP
       </div>
 
       {/* messages — extra top padding on mobile so content clears the floating pills */}
-      <div ref={scrollRef} onScroll={onScroll} className="flex-1 overflow-y-auto py-2 pt-16 lg:pt-2">
+      <div ref={scrollRef} onScroll={onScroll} className="flex flex-1 flex-col overflow-y-auto py-2 pt-16 lg:pt-2">
+        {/* mt-auto pins a short conversation to the bottom (Slack-style) so there's
+            no dead scroll space below the last message; it collapses to 0 once the
+            content is tall enough to scroll. */}
+        <div className="mt-auto">
         {messages.isLoading && <p className="px-4 py-6 text-sm text-ink-soft">Loading…</p>}
         {canLoadOlder && (
           <div className="flex justify-center py-2">
@@ -1175,7 +1199,11 @@ function ChatPane({ conversationId, users, focusMessageId, onOpenThread, onOpenP
             </div>
           </div>
         ))}
+        {msgs.length > 0 && outbox.length === 0 && (
+          <p className="px-4 pb-1 pt-4 text-center text-[11px] font-medium text-ink-soft/60">You’re all caught up</p>
+        )}
         <div ref={bottomRef} />
+        </div>
       </div>
       {!atBottom && (
         <button onClick={jumpToLatest} title="Jump to latest" aria-label="Jump to latest"
